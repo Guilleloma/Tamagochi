@@ -1,90 +1,18 @@
 #include "DisplayRenderer.h"
 #include <Arduino.h>
 #include "config.h"
+#include "sprites_generated.h"
 
 // =============================================================================
-// Sprites dummy 32×32 — movidos de main.cpp en hito 5 (Fase 0 usaba kSpriteFrame0/1).
-// Formato XBM: 1 bit por pixel, byte-packed, LSB first. bit=0 → pixel activo.
-// En Fase 2 estos sprites serán sustituidos por los assets BABY del designer
-// generados con tools/png_to_xbm.py → include/sprites_generated.h
+// Sprites BABY — generados desde assets/sprites/baby_idle_*.png con
+// tools/slice_sheet.py. Definidos en include/sprites_generated.h como arrays
+// PROGMEM. Aquí solo agrupamos los frames de cada animación en tablas
+// para indexar por animFrame_.
 // =============================================================================
 
-// Frame 0: blob redondo con ojos abiertos y sonrisa
-static const unsigned char PROGMEM kSpriteFrame0[128] = {
-    0x00, 0xFF, 0xFF, 0x00,  // fila 0
-    0x80, 0xFF, 0xFF, 0x01,  // fila 1
-    0xC0, 0xFF, 0xFF, 0x03,  // fila 2
-    0xE0, 0xFF, 0xFF, 0x07,  // fila 3
-    0xF0, 0xFF, 0xFF, 0x0F,  // fila 4
-    0xF8, 0xFF, 0xFF, 0x1F,  // fila 5
-    0xFC, 0xFF, 0xFF, 0x3F,  // fila 6
-    0xFC, 0xFF, 0xFF, 0x3F,  // fila 7
-    0xFE, 0x99, 0x99, 0x7F,  // fila 8  — ojos (huecos en 0x99)
-    0xFE, 0x99, 0x99, 0x7F,  // fila 9
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 10
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 11
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 12
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 13
-    0xFF, 0xC3, 0xC3, 0xFF,  // fila 14 — sonrisa (huecos en 0xC3)
-    0xFF, 0xE7, 0xE7, 0xFF,  // fila 15
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 16
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 17
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 18
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 19
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 20
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 21
-    0xFE, 0xFF, 0xFF, 0x7F,  // fila 22
-    0xFE, 0xFF, 0xFF, 0x7F,  // fila 23
-    0xFC, 0xFF, 0xFF, 0x3F,  // fila 24
-    0xFC, 0xFF, 0xFF, 0x3F,  // fila 25
-    0xF8, 0xFF, 0xFF, 0x1F,  // fila 26
-    0xF0, 0xFF, 0xFF, 0x0F,  // fila 27
-    0xE0, 0xFF, 0xFF, 0x07,  // fila 28
-    0xC0, 0xFF, 0xFF, 0x03,  // fila 29
-    0x80, 0xFF, 0xFF, 0x01,  // fila 30
-    0x00, 0xFF, 0xFF, 0x00   // fila 31
-};
-
-// Frame 1: blob con ojos cerrados (líneas horizontales = parpadeo)
-static const unsigned char PROGMEM kSpriteFrame1[128] = {
-    0x00, 0xFF, 0xFF, 0x00,
-    0x80, 0xFF, 0xFF, 0x01,
-    0xC0, 0xFF, 0xFF, 0x03,
-    0xE0, 0xFF, 0xFF, 0x07,
-    0xF0, 0xFF, 0xFF, 0x0F,
-    0xF8, 0xFF, 0xFF, 0x1F,
-    0xFC, 0xFF, 0xFF, 0x3F,
-    0xFC, 0xFF, 0xFF, 0x3F,
-    0xFE, 0x01, 0x80, 0x7F,  // fila 8  — ojos cerrados (línea horizontal)
-    0xFE, 0xFF, 0xFF, 0x7F,  // fila 9
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xC3, 0xC3, 0xFF,  // sonrisa igual que frame 0
-    0xFF, 0xE7, 0xE7, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFE, 0xFF, 0xFF, 0x7F,
-    0xFE, 0xFF, 0xFF, 0x7F,
-    0xFC, 0xFF, 0xFF, 0x3F,
-    0xFC, 0xFF, 0xFF, 0x3F,
-    0xF8, 0xFF, 0xFF, 0x1F,
-    0xF0, 0xFF, 0xFF, 0x0F,
-    0xE0, 0xFF, 0xFF, 0x07,
-    0xC0, 0xFF, 0xFF, 0x03,
-    0x80, 0xFF, 0xFF, 0x01,
-    0x00, 0xFF, 0xFF, 0x00
-};
-
-// Tabla de frames para iterar por índice
-static const unsigned char* const kSpriteFrames[2] = {
-    kSpriteFrame0,
-    kSpriteFrame1
+static const unsigned char* const kBabyIdleFrames[2] = {
+    kSpriteBabyIdle0,
+    kSpriteBabyIdle1
 };
 
 // =============================================================================
@@ -133,58 +61,72 @@ void DisplayRenderer::render() {
 }
 
 // -----------------------------------------------------------------------------
-// drawIdleMain_ — idéntico al renderFrame() de Fase 0.
-// Texto a la izquierda, sprite 32×32 a la derecha (x=96).
+// drawXBMx2 — pinta un sprite XBM escalado x2 (cada pixel renderizado como 2×2).
+// U8g2 no expone drawXBMP con escala. Esta función recorre los bits del bitmap
+// PROGMEM (LSB first) y pinta cuadrados 2×2 para los activos.
+// Coste: O(w*h) drawBox calls. Para 32×32 = 1024 calls — aceptable a 5 FPS.
+// -----------------------------------------------------------------------------
+static void drawXBMx2(U8G2* u8g2, int x, int y, int w, int h, const uint8_t* bitmap) {
+    int bytesPerRow = (w + 7) / 8;
+    for (int row = 0; row < h; ++row) {
+        for (int col = 0; col < w; ++col) {
+            uint8_t byte = pgm_read_byte(bitmap + (row * bytesPerRow) + (col / 8));
+            if (byte & (1 << (col % 8))) {
+                u8g2->drawBox(x + col * 2, y + row * 2, 2, 2);
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// drawIdleMain_ — pantalla principal en portrait (64 wide × 128 tall).
+// Sprite BABY 32×32 escalado a 64×64 centrado en ancho completo, texto debajo.
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawIdleMain_() {
     u8g2_->clearBuffer();
 
+    // Sprite BABY 64×64 (32×32 escalado x2) ocupando el ancho entero, y=4..68.
+    drawXBMx2(u8g2_, 0, 4, 32, 32, kBabyIdleFrames[animFrame_]);
+
+    // Texto "Tamagochi" centrado bajo el sprite.
+    // Fuente 6×10, 9 chars × 6 px = 54 → x = (64-54)/2 = 5.
     u8g2_->setFont(u8g2_font_6x10_tf);
-    u8g2_->drawStr(0, 10, "Hola Tamagochi");
-
-    u8g2_->setFont(u8g2_font_5x7_tf);
-    u8g2_->drawStr(0, 24, "Fase 0 - Bring-up");
-
-    // Sprite 32x32 alineado a la derecha del OLED (128 - 32 = 96)
-    u8g2_->drawXBMP(96, 16, 32, 32, kSpriteFrames[animFrame_]);
+    u8g2_->drawStr(5, 90, "Tamagochi");
 
     u8g2_->sendBuffer();
 }
 
 // -----------------------------------------------------------------------------
-// drawStatsView_ — hito 6: pantalla de stats con los 3 valores numéricos.
+// drawStatsView_ — pantalla de stats en portrait con barras de progreso.
 //
-// Layout (128×64, fuente 6×10):
-//   y=10  STATS  (título centrado)
-//   y=26  Hambre:      XX / 100
-//   y=40  Felicidad:   XX / 100
-//   y=54  Salud:      XXX / 100
-//
-// stats_ se actualiza vía setStats() cuando onStatsChanged se dispara.
+// Layout (64 wide × 128 tall, fuente 6×10):
+//   y=10        STATS  (centrado)
+//   y=13        ─────
+//   y=24..36    Hambre  +  barra 64×8
+//   y=54..66    Animo   +  barra 64×8
+//   y=84..96    Salud   +  barra 64×8
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawStatsView_() {
-    char buf[24];
-
     u8g2_->clearBuffer();
     u8g2_->setFont(u8g2_font_6x10_tf);
 
-    // Título centrado (ancho pantalla 128, "STATS" = 5 chars × 6 px = 30 px → x = 49)
-    u8g2_->drawStr(49, 10, "STATS");
+    // Título centrado (5 chars × 6 px = 30 → x = 17).
+    u8g2_->drawStr(17, 10, "STATS");
+    u8g2_->drawHLine(0, 13, 64);
 
-    // Línea separadora fina bajo el título
-    u8g2_->drawHLine(0, 13, 128);
+    // Helper local: dibuja "etiqueta" + barra de progreso 64×8 según value 0-100.
+    auto drawStatBar = [this](const char* label, uint8_t value, int yLabel, int yBar) {
+        u8g2_->drawStr(0, yLabel, label);
+        u8g2_->drawFrame(0, yBar, 64, 8);
+        int fillWidth = (static_cast<int>(value) * 62) / 100;
+        if (fillWidth > 0) {
+            u8g2_->drawBox(1, yBar + 1, fillWidth, 6);
+        }
+    };
 
-    // Hunger — 0=saciado, 100=hambriento → mostramos valor directo
-    snprintf(buf, sizeof(buf), "Hambre:    %3u / 100", stats_.hunger);
-    u8g2_->drawStr(0, 28, buf);
-
-    // Happiness — 0=triste, 100=feliz
-    snprintf(buf, sizeof(buf), "Felicidad: %3u / 100", stats_.happiness);
-    u8g2_->drawStr(0, 42, buf);
-
-    // Health — 0=muerto, 100=sano
-    snprintf(buf, sizeof(buf), "Salud:     %3u / 100", stats_.health);
-    u8g2_->drawStr(0, 56, buf);
+    drawStatBar("Hambre", stats_.hunger,    32, 36);
+    drawStatBar("Animo",  stats_.happiness, 62, 66);
+    drawStatBar("Salud",  stats_.health,    92, 96);
 
     u8g2_->sendBuffer();
 }

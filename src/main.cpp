@@ -35,7 +35,9 @@
 // La placa ideaspark V3.2 cablea el OLED a GPIO14 (SCL) y GPIO12 (SDA).
 // Full buffer (1 KB RAM): drawXBMP sin restricciones de página.
 // -----------------------------------------------------------------------------
-static U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, OLED_SCL, OLED_SDA, U8X8_PIN_NONE);
+// U8G2_R1 = rotación 90° CW: la placa con USB-C arriba se ve en portrait
+// (lógico = 64 wide × 128 tall). DisplayRenderer dibuja contra esas coords.
+static U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R1, OLED_SCL, OLED_SDA, U8X8_PIN_NONE);
 
 // -----------------------------------------------------------------------------
 // Singletons — orden de construcción importa: bus primero (inyectado por ref).

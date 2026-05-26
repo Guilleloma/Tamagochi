@@ -25,7 +25,7 @@ from pathlib import Path
 from PIL import Image
 
 
-def pngToXbmBytes(pngPath: Path) -> tuple[list[int], int, int]:
+def pngToXbmBytes(pngPath: Path, invert: bool = False) -> tuple[list[int], int, int]:
     img = Image.open(pngPath).convert("1")
     width, height = img.size
 
@@ -39,7 +39,12 @@ def pngToXbmBytes(pngPath: Path) -> tuple[list[int], int, int]:
                 col = colByte * 8 + bit
                 if col < width:
                     pixel = img.getpixel((col, row))
-                    if pixel:
+                    # XBM estándar: pixel blanco -> bit=1 (ON).
+                    # Con invert: pixel negro -> bit=1 (útil cuando los PNGs
+                    # vienen con fondo blanco + sujeto negro y queremos pintar
+                    # el sujeto encendido en OLED sobre fondo apagado).
+                    shouldSet = (pixel == 0) if invert else (pixel != 0)
+                    if shouldSet:
                         byteVal |= (1 << bit)
             result.append(byteVal)
 
@@ -71,7 +76,7 @@ def cIdentifierFromFilename(filename: str) -> str:
     return f"kSprite{camel}"
 
 
-def generateHeader(inputDir: Path, outputFile: Path) -> None:
+def generateHeader(inputDir: Path, outputFile: Path, invert: bool = False) -> None:
     pngFiles = sorted(inputDir.glob("*.png"))
 
     if not pngFiles:
@@ -94,7 +99,7 @@ def generateHeader(inputDir: Path, outputFile: Path) -> None:
 
     for pngPath in pngFiles:
         try:
-            data, width, height = pngToXbmBytes(pngPath)
+            data, width, height = pngToXbmBytes(pngPath, invert=invert)
             name = cIdentifierFromFilename(pngPath.name)
             lines.append(bytesToCArray(name, data, width, height))
             lines.append("")
@@ -114,19 +119,25 @@ def generateHeader(inputDir: Path, outputFile: Path) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
-        print(f"Uso: {sys.argv[0]} <directorio_png> <archivo_salida.h>")
+    args = list(sys.argv[1:])
+    invert = False
+    if "--invert" in args:
+        invert = True
+        args.remove("--invert")
+
+    if len(args) != 2:
+        print(f"Uso: {sys.argv[0]} [--invert] <directorio_png> <archivo_salida.h>")
         sys.exit(1)
 
-    inputDir = Path(sys.argv[1])
-    outputFile = Path(sys.argv[2])
+    inputDir = Path(args[0])
+    outputFile = Path(args[1])
 
     if not inputDir.is_dir():
         print(f"ERROR: {inputDir} no es un directorio", file=sys.stderr)
         sys.exit(1)
 
     outputFile.parent.mkdir(parents=True, exist_ok=True)
-    generateHeader(inputDir, outputFile)
+    generateHeader(inputDir, outputFile, invert=invert)
 
 
 if __name__ == "__main__":
