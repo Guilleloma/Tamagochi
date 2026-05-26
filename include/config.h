@@ -4,11 +4,12 @@
 // Pines de hardware — ideaspark ESP8266 0.96" OLED Module V3.2
 // =============================================================================
 
-// I2C del SSD1306 — valores según esquemático de ideaspark V3.2.
-// VERIFICAR EMPÍRICAMENTE en Fase 0: algunas revisiones usan GPIO12/14 en su lugar.
-// Si el OLED no responde con estos valores, probar: OLED_SDA=12, OLED_SCL=14.
-#define OLED_SDA 4   // GPIO4  — D2 en numeración NodeMCU
-#define OLED_SCL 5   // GPIO5  — D1 en numeración NodeMCU
+// I2C del SSD1306 — esta revisión de ideaspark V3.2 usa SOFTWARE I2C
+// en GPIO14 (clock) y GPIO12 (data), NO el hardware I2C estándar GPIO4/5.
+// Confirmado empíricamente en Fase 0 + guía oficial del fabricante.
+// El constructor U8g2 debe ser SW_I2C (no HW_I2C). Wire.h no se usa.
+#define OLED_SDA 12  // GPIO12 — D6 en numeración NodeMCU
+#define OLED_SCL 14  // GPIO14 — D5 en numeración NodeMCU
 
 // GPIO0 = botón FLASH onboard. La placa ya tiene pull-up a 3.3V integrada
 // en la red de arranque (necesaria para modo normal vs. modo programación).

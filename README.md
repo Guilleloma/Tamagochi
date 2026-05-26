@@ -10,7 +10,7 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 |---|---|
 | MCU | ESP-12E (Xtensa LX106 80 MHz, 80 KB RAM, 4 MB Flash) |
 | Display | SSD1306 128x64 I2C integrado (0.96") |
-| Pines I2C | SDA=GPIO4, SCL=GPIO5 (verificar en Fase 0 — ver `include/config.h`) |
+| Pines OLED | SW I2C: SDA=GPIO12, SCL=GPIO14 (no HW I2C — confirmado V3.2) |
 | Botón | 1 botón onboard GPIO0 (FLASH) |
 | Power | JST LiPo + TP4056 + AMS1117 3.3V / Micro USB (CH340G) |
 
@@ -51,9 +51,8 @@ Objetivo: validar empíricamente el hardware antes de invertir en Fase 1.
 - Loguea por monitor serie cada pulsación del botón GPIO0 (short / long / double click)
 - Mide y reporta los FPS reales de render cada 5 segundos (objetivo: >= 5 FPS)
 
-**Qué verificar en esta fase:**
-1. OLED enciende y muestra el texto + sprite correctamente con `OLED_SDA=4, OLED_SCL=5`
-2. El botón GPIO0 responde sin bloquear el boot
-3. El FPS report muestra >= 5.0 fps por monitor serie
-
-**Si el OLED no responde:** cambiar `OLED_SDA` y `OLED_SCL` en `include/config.h` a `12` y `14` respectivamente y reflashear.
+**Verificado en hardware (2026-05-26):**
+1. OLED inicializa y renderiza correctamente con SW I2C en GPIO12/14
+2. Botón GPIO0 responde a click corto y pulsación larga sin bloquear el boot
+3. FPS report estable en 5.00 fps (budget cumplido)
+4. Upload estable a 460800 baud vía hub USB (921600 falla con CH340G en hub)

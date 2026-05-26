@@ -10,19 +10,18 @@
 // =============================================================================
 
 #include <Arduino.h>
-#include <Wire.h>
 #include <U8g2lib.h>
 #include <OneButton.h>
 #include "config.h"
 
 // -----------------------------------------------------------------------------
-// Display — SSD1306 128x64 I2C, full buffer (1KB en RAM).
-// Full buffer permite drawXBMP sin restricciones de zona de página.
-// El constructor HW_I2C delega en Wire, que configuramos manualmente con
-// Wire.begin(SDA, SCL) para poder verificar los pines en Fase 0.
-// U8X8_PIN_NONE = sin pin RESET dedicado (el SSD1306 de ideaspark no lo expone).
+// Display — SSD1306 128x64 SOFTWARE I2C (no HW I2C).
+// La placa ideaspark V3.2 cablea el OLED a GPIO14/12, no a los pines HW I2C
+// del ESP8266 (GPIO5/4). Por eso usamos SW_I2C bit-banging vía U8g2.
+// Full buffer (1KB en RAM) permite drawXBMP sin restricciones de página.
+// U8X8_PIN_NONE = sin pin RESET dedicado.
 // -----------------------------------------------------------------------------
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
+U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, OLED_SCL, OLED_SDA, U8X8_PIN_NONE);
 
 // -----------------------------------------------------------------------------
 // Botón — OneButton gestiona debounce, short, long y double click.
@@ -172,15 +171,11 @@ void setup() {
     Serial.println();
     Serial.println("[BOOT] Tamagochi - Fase 0 iniciando...");
 
-    // I2C explícito con los pines de config.h.
-    // Si el OLED no aparece, cambiar OLED_SDA/SCL en config.h y reflashear.
-    Wire.begin(OLED_SDA, OLED_SCL);
-    Serial.printf("[BOOT] I2C iniciado en SDA=GPIO%d SCL=GPIO%d\n", OLED_SDA, OLED_SCL);
+    // U8g2 SW I2C gestiona los pines internamente; no se llama a Wire.begin().
+    Serial.printf("[BOOT] OLED SW I2C en SCL=GPIO%d SDA=GPIO%d\n", OLED_SCL, OLED_SDA);
 
     if (!u8g2.begin()) {
-        // En caso de fallo (I2C no responde), loguear y seguir —
-        // el OLED puede estar en pines distintos en esta revisión de placa.
-        Serial.println("[ERROR] u8g2.begin() fallo - verificar pines I2C en config.h");
+        Serial.println("[ERROR] u8g2.begin() fallo - verificar pines en config.h");
     } else {
         Serial.println("[BOOT] OLED SSD1306 inicializado correctamente");
     }
