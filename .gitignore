@@ -1,0 +1,44 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Build output
+build/
+
+# VSCode (mantener extensions.json si PlatformIO lo genera)
+.vscode/*
+!.vscode/extensions.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Logs
+*.log
+logs/
+
+# Secrets y credenciales
+.env
+.env.*
+.secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.json
+credentials.json
+
+# IDEs varios
+*.swp
+*.swo
+*~
+
+# Python (si se usan scripts de soporte)
+__pycache__/
+*.pyc
+*.pyo
