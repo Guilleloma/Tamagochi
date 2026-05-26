@@ -42,3 +42,7 @@ credentials.json
 __pycache__/
 *.pyc
 *.pyo
+.venv-tools/
+
+# Sprite sheets crudos de Nano Banana — regenerables, ~3MB cada uno
+assets/sprites/raw/

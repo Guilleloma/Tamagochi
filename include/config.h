@@ -24,9 +24,31 @@
 // El budget real se mide en el FPS report por serie cada FPS_REPORT_MS.
 #define RENDER_FRAME_MS  200
 
-// El sprite dummy alterna entre frame 0 y frame 1 cada ANIM_FRAME_MS.
+// El sprite BABY alterna entre frame 0 y frame 1 cada ANIM_FRAME_MS.
 // 400 ms da una animación suave visible sin ser frenética.
 #define ANIM_FRAME_MS    400
 
 // Log de FPS medido cada 5 segundos por monitor serie.
 #define FPS_REPORT_MS    5000
+
+// =============================================================================
+// Timings Fase 1
+// =============================================================================
+
+// Frecuencia del tick de decay de StatsEngine.
+// TURBO_MODE reduce el intervalo ~60× para validar el ciclo completo de decay
+// en minutos (útil en hardware sin esperar horas).
+// Nunca activar TURBO_MODE en firmware de producción.
+#ifdef TURBO_MODE
+  #define STATS_TICK_MS  16    // ~60× turbo (~16 min de decay en ~16 s)
+#else
+  #define STATS_TICK_MS  1000  // decay a 1 Hz — 1 tick por segundo
+#endif
+
+// Versión de firmware codificada como 0xMMmm (mayor × 256 + menor).
+// 0x0100 = versión 1.0 (Fase 1 core).
+#define FIRMWARE_VERSION 0x0100
+
+// === Persistence (Hito 7) ===
+#define PERSIST_AUTOSAVE_MS    (5UL * 60UL * 1000UL)   // 5 min wall-clock
+// Política: NO se escala con TURBO_MODE — evita escribir flash en tests

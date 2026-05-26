@@ -1,166 +1,148 @@
 // =============================================================================
-// Tamagochi — Fase 0: Bring-up
+// Tamagochi — Fase 1: Core jugable offline (hito 7)
 //
-// Objetivos de esta fase:
-//   1. "Hola Tamagochi" en OLED con sprite dummy 32x32 animado
-//   2. Log por serie de pulsaciones GPIO0 (short / long / double)
-//   3. Medición de FPS real cada 5s para validar budget de render
+// Capa de orquestación: instancia módulos, suscribe handlers al EventBus
+// y ejecuta los schedulers del loop principal.
 //
-// NO incluye: WiFi, persistencia, stats, FSM, nada de Fase 1+.
+// Comportamiento visible (hito 7, acumula hitos anteriores):
+//   - OLED IdleMain: sprite animado BABY
+//   - OLED StatsView: hunger / happiness / health con valores reales
+//   - Botón corto   → alterna IdleMain ↔ StatsView
+//   - Botón largo   → alimentar: hunger -20 pts + guarda estado (on-action)
+//   - Botón doble   → evento publicado pero sin suscriptor (reservado)
+//   - Cada segundo  → StatsEngine aplica decay; si cambia algún entero → StatsChanged
+//   - Al boot       → carga estado persistido de LittleFS (sobrevive reinicios)
+//   - Cada 5 min    → autosave vía PersistRequested
+//
+// Lo que NO está en este hito (hito 8+):
+//   - OTA / WiFi / secrets.h
 // =============================================================================
 
 #include <Arduino.h>
 #include <U8g2lib.h>
-#include <OneButton.h>
+#include <LittleFS.h>
 #include "config.h"
+#include "Logger.h"
+#include "EventBus.h"
+#include "StatsEngine.h"
+#include "Persistence.h"
+#include "LittleFsStorage.h"
+#include "InputHandler.h"
+#include "DisplayRenderer.h"
 
 // -----------------------------------------------------------------------------
-// Display — SSD1306 128x64 SOFTWARE I2C (no HW I2C).
-// La placa ideaspark V3.2 cablea el OLED a GPIO14/12, no a los pines HW I2C
-// del ESP8266 (GPIO5/4). Por eso usamos SW_I2C bit-banging vía U8g2.
-// Full buffer (1KB en RAM) permite drawXBMP sin restricciones de página.
-// U8X8_PIN_NONE = sin pin RESET dedicado.
+// Hardware — SSD1306 128×64 SOFTWARE I2C.
+// La placa ideaspark V3.2 cablea el OLED a GPIO14 (SCL) y GPIO12 (SDA).
+// Full buffer (1 KB RAM): drawXBMP sin restricciones de página.
 // -----------------------------------------------------------------------------
-U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, OLED_SCL, OLED_SDA, U8X8_PIN_NONE);
+// U8G2_R1 = rotación 90° CW: la placa con USB-C arriba se ve en portrait
+// (lógico = 64 wide × 128 tall). DisplayRenderer dibuja contra esas coords.
+static U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R1, OLED_SCL, OLED_SDA, U8X8_PIN_NONE);
 
 // -----------------------------------------------------------------------------
-// Botón — OneButton gestiona debounce, short, long y double click.
-// true = INPUT_PULLUP (redundante pero explícito; la placa ya tiene pull-up HW).
+// Singletons — orden de construcción importa: bus primero (inyectado por ref).
+// storage y persistence se construyen antes que los módulos que los usan.
 // -----------------------------------------------------------------------------
-OneButton button(PIN_BUTTON, true);
+static EventBus        bus;
+static StatsEngine     statsEngine;                 // defaults: hunger=50, happiness=50, health=100
+static LittleFsStorage storage;
+static Persistence     persistence(storage);
+static InputHandler    input(bus, PIN_BUTTON);
+static DisplayRenderer renderer(u8g2, bus);
 
 // -----------------------------------------------------------------------------
-// Sprite dummy 32x32 — formato XBM (1 bit por pixel, byte-packed, LSB first).
-// Dos frames: frame 0 = cara feliz, frame 1 = cara con ojos cerrados (parpadeo).
-// El diseño no pretende ser bonito — sirve para validar drawXBMP y medir FPS.
-//
-// En XBM, bit=0 → pixel activo (blanco en OLED normal), bit=1 → apagado.
-// Los bytes se leen de izquierda a derecha, LSB primero.
+// Estado de escena — accesible a los handlers estáticos.
 // -----------------------------------------------------------------------------
-
-// Frame 0: blob redondo con ojos abiertos y sonrisa
-static const unsigned char PROGMEM kSpriteFrame0[128] = {
-    0x00, 0xFF, 0xFF, 0x00,  // fila 0
-    0x80, 0xFF, 0xFF, 0x01,  // fila 1
-    0xC0, 0xFF, 0xFF, 0x03,  // fila 2
-    0xE0, 0xFF, 0xFF, 0x07,  // fila 3
-    0xF0, 0xFF, 0xFF, 0x0F,  // fila 4
-    0xF8, 0xFF, 0xFF, 0x1F,  // fila 5
-    0xFC, 0xFF, 0xFF, 0x3F,  // fila 6
-    0xFC, 0xFF, 0xFF, 0x3F,  // fila 7
-    0xFE, 0x99, 0x99, 0x7F,  // fila 8  — ojos (huecos en 0x99)
-    0xFE, 0x99, 0x99, 0x7F,  // fila 9
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 10
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 11
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 12
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 13
-    0xFF, 0xC3, 0xC3, 0xFF,  // fila 14 — sonrisa (huecos en 0xC3)
-    0xFF, 0xE7, 0xE7, 0xFF,  // fila 15
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 16
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 17
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 18
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 19
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 20
-    0xFF, 0xFF, 0xFF, 0xFF,  // fila 21
-    0xFE, 0xFF, 0xFF, 0x7F,  // fila 22
-    0xFE, 0xFF, 0xFF, 0x7F,  // fila 23
-    0xFC, 0xFF, 0xFF, 0x3F,  // fila 24
-    0xFC, 0xFF, 0xFF, 0x3F,  // fila 25
-    0xF8, 0xFF, 0xFF, 0x1F,  // fila 26
-    0xF0, 0xFF, 0xFF, 0x0F,  // fila 27
-    0xE0, 0xFF, 0xFF, 0x07,  // fila 28
-    0xC0, 0xFF, 0xFF, 0x03,  // fila 29
-    0x80, 0xFF, 0xFF, 0x01,  // fila 30
-    0x00, 0xFF, 0xFF, 0x00   // fila 31
-};
-
-// Frame 1: blob con ojos cerrados (líneas horizontales)
-static const unsigned char PROGMEM kSpriteFrame1[128] = {
-    0x00, 0xFF, 0xFF, 0x00,
-    0x80, 0xFF, 0xFF, 0x01,
-    0xC0, 0xFF, 0xFF, 0x03,
-    0xE0, 0xFF, 0xFF, 0x07,
-    0xF0, 0xFF, 0xFF, 0x0F,
-    0xF8, 0xFF, 0xFF, 0x1F,
-    0xFC, 0xFF, 0xFF, 0x3F,
-    0xFC, 0xFF, 0xFF, 0x3F,
-    0xFE, 0x01, 0x80, 0x7F,  // fila 8  — ojos cerrados (línea horizontal)
-    0xFE, 0xFF, 0xFF, 0x7F,  // fila 9
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xC3, 0xC3, 0xFF,  // sonrisa igual
-    0xFF, 0xE7, 0xE7, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    0xFE, 0xFF, 0xFF, 0x7F,
-    0xFE, 0xFF, 0xFF, 0x7F,
-    0xFC, 0xFF, 0xFF, 0x3F,
-    0xFC, 0xFF, 0xFF, 0x3F,
-    0xF8, 0xFF, 0xFF, 0x1F,
-    0xF0, 0xFF, 0xFF, 0x0F,
-    0xE0, 0xFF, 0xFF, 0x07,
-    0xC0, 0xFF, 0xFF, 0x03,
-    0x80, 0xFF, 0xFF, 0x01,
-    0x00, 0xFF, 0xFF, 0x00
-};
-
-// Tabla de frames para iterar por índice
-static const unsigned char* const kSpriteFrames[2] = {
-    kSpriteFrame0,
-    kSpriteFrame1
-};
+static Scene currentScene = Scene::IdleMain;
 
 // -----------------------------------------------------------------------------
-// Estado de animación y FPS
+// Schedulers
 // -----------------------------------------------------------------------------
-static uint8_t  currentAnimFrame  = 0;
-static uint32_t lastRenderMs      = 0;
-static uint32_t lastAnimMs        = 0;
-static uint32_t lastFpsReportMs   = 0;
-static uint32_t framesRendered    = 0;
+static uint32_t lastStatsTickMs = 0;
+static uint32_t lastRenderMs    = 0;
+static uint32_t lastFpsReportMs = 0;
+static uint32_t lastSaveMs      = 0;
+static uint32_t framesRendered  = 0;
 
-// -----------------------------------------------------------------------------
-// Callbacks del botón — imprimen por serie el evento detectado.
-// Los mensajes en español facilitan la verificación en campo.
-// -----------------------------------------------------------------------------
-static void onShortClick() {
-    Serial.println("[BOTON] Click corto");
+// =============================================================================
+// Helpers de persistencia
+// Mantienen el acoplamiento con LittleFS limitado al begin() inicial en setup().
+// Toda la lógica de serialización pasa por Persistence (cumple rules/database.md).
+// =============================================================================
+
+// Copia el estado vivo del engine a un PersistedState listo para serializar.
+// lastSavedAtEpoch/bornAtEpoch quedan en 0 hasta NTP (Fase 1.5).
+static void fillFromEngine(PersistedState& out, const StatsEngine& engine) {
+    Persistence::fillDefaults(out);                    // magic, version, defaults
+    const Stats& s = engine.stats();
+    out.hunger    = s.hunger;
+    out.happiness = s.happiness;
+    out.health    = s.health;
+    // lifeStage permanece Baby=1 en Fase 1 (defaults ya lo pusieron)
+    // ageMinutes y deathCount quedan en 0 — no se trackean en Fase 1
+    // CRC se recalcula en Persistence::save() — aquí no hace falta
 }
 
-static void onDoubleClick() {
-    Serial.println("[BOTON] Doble click");
+// Aplica un PersistedState recién cargado al engine vivo.
+static void applyToEngine(const PersistedState& in, StatsEngine& engine) {
+    Stats s;
+    s.hunger    = in.hunger;
+    s.happiness = in.happiness;
+    s.health    = in.health;
+    engine.setStats(s);
 }
 
-static void onLongPress() {
-    Serial.println("[BOTON] Pulsacion larga");
+// Nombre legible del LoadResult — para logging al boot.
+static const char* loadResultName(LoadResult lr) {
+    switch (lr) {
+        case LoadResult::Ok:              return "Ok";
+        case LoadResult::NoneFound:       return "NoneFound";
+        case LoadResult::AllCorrupt:      return "AllCorrupt";
+        case LoadResult::Migrated:        return "Migrated";
+        case LoadResult::MigrationFailed: return "MigrationFailed";
+    }
+    return "Unknown";
 }
 
-// -----------------------------------------------------------------------------
-// renderFrame — dibuja el sprite centrado en la mitad derecha del OLED
-// y el texto "Hola Tamagochi / Fase 0" a la izquierda.
-// Posición sprite: x=96 hace que quede centrado verticalmente en la derecha
-// (128 - 32 = 96 → x=48 para centro absoluto; a la derecha x=96).
-// -----------------------------------------------------------------------------
-static void renderFrame(uint8_t frameIndex) {
-    u8g2.clearBuffer();
+// =============================================================================
+// Event handlers — funciones de archivo; tienen acceso a los singletons globales.
+// Deben ejecutarse en < 2 ms para no romper el budget de 5 FPS (EventBus síncrono).
+// =============================================================================
 
-    // Texto identificador de fase
-    u8g2.setFont(u8g2_font_6x10_tf);
-    u8g2.drawStr(0, 10, "Hola Tamagochi");
-    u8g2.setFont(u8g2_font_5x7_tf);
-    u8g2.drawStr(0, 24, "Fase 0 - Bring-up");
+// Botón corto: alterna entre IdleMain y StatsView.
+static void onShortClick(const Event&) {
+    currentScene = (currentScene == Scene::IdleMain) ? Scene::StatsView : Scene::IdleMain;
+    renderer.setScene(currentScene);
+    LOG_INFO("Scene -> %s", currentScene == Scene::IdleMain ? "IdleMain" : "StatsView");
+}
 
-    // Sprite 32x32 alineado a la derecha
-    // drawXBMP(x, y, w, h, bitmap)
-    u8g2.drawXBMP(96, 16, 32, 32, kSpriteFrames[frameIndex]);
+// Botón largo: alimentar al Tamagochi (-20 hunger). Publica StatsChanged
+// para que el renderer actualice la vista inmediatamente sin esperar al tick.
+// También publica PersistRequested para guardar on-action.
+static void onLongPress(const Event&) {
+    statsEngine.applyFeed(20);
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});    // guarda on-action
+    LOG_INFO("Feed applied -> hunger=%u", statsEngine.stats().hunger);
+}
 
-    u8g2.sendBuffer();
+// StatsChanged: sincroniza la copia interna del renderer con el estado actual.
+// Se dispara tanto por el tick de decay como por acciones del botón.
+static void onStatsChanged(const Event&) {
+    renderer.setStats(statsEngine.stats());
+}
+
+// PersistRequested: serializa el estado vivo y lo escribe en LittleFS.
+// Invocado tanto por el scheduler de 5 min como por acciones on-action.
+static void onPersistRequested(const Event&) {
+    PersistedState s;
+    fillFromEngine(s, statsEngine);
+    if (!persistence.save(s)) {
+        LOG_ERROR("Persist: save failed");
+    } else {
+        LOG_DEBUG("Persist: saved (hunger=%u happ=%u health=%u)",
+                  s.hunger, s.happiness, s.health);
+    }
 }
 
 // =============================================================================
@@ -169,68 +151,101 @@ static void renderFrame(uint8_t frameIndex) {
 void setup() {
     Serial.begin(115200);
     Serial.println();
-    Serial.println("[BOOT] Tamagochi - Fase 0 iniciando...");
+    LOG_INFO("Boot Fase 1 hito-7, version=0x%04X", FIRMWARE_VERSION);
 
-    // U8g2 SW I2C gestiona los pines internamente; no se llama a Wire.begin().
-    Serial.printf("[BOOT] OLED SW I2C en SCL=GPIO%d SDA=GPIO%d\n", OLED_SCL, OLED_SDA);
+    // OLED primero — frame de boot visible cuanto antes.
+    renderer.begin();
+    renderer.setScene(Scene::IdleMain);
+    renderer.render();
+    LOG_INFO("OLED SW I2C en SCL=GPIO%d SDA=GPIO%d", OLED_SCL, OLED_SDA);
 
-    if (!u8g2.begin()) {
-        Serial.println("[ERROR] u8g2.begin() fallo - verificar pines en config.h");
-    } else {
-        Serial.println("[BOOT] OLED SSD1306 inicializado correctamente");
+    // Precarga las stats en el renderer para que StatsView muestre los defaults
+    // si el usuario navega ahí antes de que el primer tick de decay pase.
+    renderer.setStats(statsEngine.stats());
+
+    // LittleFS — necesario antes de cualquier load/save.
+    // LittleFsStorage delega toda operación en LittleFS, que debe estar montado.
+    if (!LittleFS.begin()) {
+        LOG_ERROR("LittleFS begin failed — intentando format");
+        if (!LittleFS.format()) {
+            LOG_ERROR("LittleFS format failed — persistencia desactivada en esta sesion");
+        } else {
+            LittleFS.begin();
+            LOG_INFO("LittleFS formateado y montado");
+        }
     }
 
-    // Pantalla de inicio inmediata para confirmar visualmente que funciona
-    renderFrame(0);
+    // Cargar estado persistido (o defaults si no hay ningún slot válido).
+    PersistedState loaded;
+    LoadResult lr = persistence.load(loaded);
+    LOG_INFO("Persist load: %s (hunger=%u happ=%u health=%u)",
+             loadResultName(lr), loaded.hunger, loaded.happiness, loaded.health);
+    applyToEngine(loaded, statsEngine);
 
-    // Configuración del botón GPIO0
-    // INPUT_PULLUP explícito aunque la placa ya tiene pull-up hardware —
-    // esto protege si se usa la placa sin la resistencia de arranque.
-    button.attachClick(onShortClick);
-    button.attachDoubleClick(onDoubleClick);
-    button.attachLongPressStart(onLongPress);
-    Serial.printf("[BOOT] Boton configurado en GPIO%d (INPUT_PULLUP)\n", PIN_BUTTON);
+    // Actualizar renderer con las stats cargadas (puede diferir de los defaults).
+    renderer.setStats(statsEngine.stats());
 
-    // Inicializar temporizadores
+    // Suscripciones al EventBus — llamar en setup(), nunca en loop().
+    bus.subscribe(EventType::ButtonShortClick, onShortClick);
+    bus.subscribe(EventType::ButtonLongPress,  onLongPress);
+    bus.subscribe(EventType::StatsChanged,     onStatsChanged);
+    bus.subscribe(EventType::PersistRequested, onPersistRequested);
+
+    // Configurar OneButton con callbacks via InputHandler.
+    input.begin();
+    LOG_INFO("Boton configurado en GPIO%d", PIN_BUTTON);
+
     uint32_t now = millis();
+    lastStatsTickMs = now;
     lastRenderMs    = now;
-    lastAnimMs      = now;
     lastFpsReportMs = now;
+    lastSaveMs      = now;    // evita un save espurio en el primer tick de 5 min
 
-    Serial.println("[BOOT] Listo. Escuchando botones y renderizando...");
+    LOG_INFO("Setup done");
 }
 
 // =============================================================================
 // loop
 // =============================================================================
 void loop() {
-    // OneButton necesita tick() en cada iteración para detectar gestos correctamente.
-    // No usar delays en el loop por esta misma razón.
-    button.tick();
+    // OneButton necesita tick() en cada iteración para detectar gestos.
+    input.loop();
 
     uint32_t now = millis();
 
-    // Render a 5 FPS (cada RENDER_FRAME_MS)
+    // Decay a 1 Hz (STATS_TICK_MS = 1000 ms normal, 16 ms en TURBO_MODE).
+    if (now - lastStatsTickMs >= STATS_TICK_MS) {
+        uint32_t dt = now - lastStatsTickMs;
+        statsEngine.tick(dt);
+        lastStatsTickMs = now;
+        // Publicar StatsChanged solo si algún stat entero cambió (dirty flag).
+        if (statsEngine.consumeDirtyFlag()) {
+            bus.publish({EventType::StatsChanged, 0});
+        }
+    }
+
+    // Render a 5 FPS (RENDER_FRAME_MS = 200 ms).
     if (now - lastRenderMs >= RENDER_FRAME_MS) {
-        renderFrame(currentAnimFrame);
+        renderer.render();
         framesRendered++;
         lastRenderMs = now;
     }
 
-    // Alternar frame de animación cada ANIM_FRAME_MS (independiente del render)
-    if (now - lastAnimMs >= ANIM_FRAME_MS) {
-        currentAnimFrame = (currentAnimFrame + 1) % 2;
-        lastAnimMs = now;
+    // Autosave cada PERSIST_AUTOSAVE_MS (5 min wall-clock).
+    // No se escala con TURBO_MODE — evita escrituras de flash innecesarias en tests.
+    if (now - lastSaveMs >= PERSIST_AUTOSAVE_MS) {
+        bus.publish({EventType::PersistRequested, 0});
+        lastSaveMs = now;
     }
 
-    // Reporte de FPS real cada FPS_REPORT_MS
+    // Reporte de FPS real cada FPS_REPORT_MS (5 s).
     if (now - lastFpsReportMs >= FPS_REPORT_MS) {
-        float elapsedSeconds = (now - lastFpsReportMs) / 1000.0f;
-        float fps = framesRendered / elapsedSeconds;
-        Serial.printf("[FPS] %.2f fps (%lu frames en %.1fs)\n",
-                      fps, framesRendered, elapsedSeconds);
-        framesRendered    = 0;
-        lastFpsReportMs   = now;
+        float elapsed = (now - lastFpsReportMs) / 1000.0f;
+        float fps     = framesRendered / elapsed;
+        Serial.printf("[FPS] %.2f fps (%u frames en %.1fs)\n",
+                      fps, framesRendered, elapsed);
+        framesRendered  = 0;
+        lastFpsReportMs = now;
     }
 
     // yield() cede el control al scheduler del ESP8266 (watchdog, TCP stack...).
