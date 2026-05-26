@@ -151,7 +151,20 @@ static void onPersistRequested(const Event&) {
 void setup() {
     Serial.begin(115200);
     Serial.println();
-    LOG_INFO("Boot Fase 1 hito-7, version=0x%04X", FIRMWARE_VERSION);
+    LOG_INFO("Boot Fase 2 hito-4, version=0x%04X", FIRMWARE_VERSION);
+
+// TURBO_MODE guard: el static_assert falla en compile-time si la versión de
+// firmware no coincide con el entorno. Previene mezclar binarios turbo en
+// producción (rules/security.md — seguridad por defecto).
+#ifdef TURBO_MODE
+    LOG_WARN("=================================================");
+    LOG_WARN("== TURBO_MODE ACTIVE - factor %u                 ==", (unsigned)TURBO_FACTOR);
+    LOG_WARN("== ESTE BINARIO NO DEBE LLEGAR A PRODUCCION    ==");
+    LOG_WARN("=================================================");
+    static_assert(FIRMWARE_VERSION == 0x02FE, "TURBO build must use FIRMWARE_VERSION 0x02FE");
+#else
+    static_assert(FIRMWARE_VERSION == 0x0200, "Prod build must use FIRMWARE_VERSION 0x0200");
+#endif
 
     // OLED primero — frame de boot visible cuanto antes.
     renderer.begin();

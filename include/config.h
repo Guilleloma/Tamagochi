@@ -46,8 +46,27 @@
 #endif
 
 // Versión de firmware codificada como 0xMMmm (mayor × 256 + menor).
-// 0x0100 = versión 1.0 (Fase 1 core).
-#define FIRMWARE_VERSION 0x0100
+// 0x0200 = versión 2.0 (Fase 2 release).
+// 0x02FE = versión especial TURBO: valor que el static_assert de main.cpp
+//   verifica para garantizar que binarios turbo no se mezclen con producción.
+#ifdef TURBO_MODE
+  #define FIRMWARE_VERSION 0x02FE
+#else
+  #define FIRMWARE_VERSION 0x0200  // Fase 2 release
+#endif
+
+// Escala de tiempo para la FSM de vida.
+// TURBO_MODE acelera el envejecimiento × TURBO_FACTOR para validar el ciclo
+// completo de estados (Egg→Baby→Kid→Adult→Old→Dead) en minutos en lugar de días.
+// LIFE_FSM_TIME_SCALE=1 en producción → sin efecto sobre el avance de edad.
+#ifdef TURBO_MODE
+  #ifndef TURBO_FACTOR
+    #define TURBO_FACTOR 60
+  #endif
+  #define LIFE_FSM_TIME_SCALE   TURBO_FACTOR
+#else
+  #define LIFE_FSM_TIME_SCALE   1
+#endif
 
 // === Persistence (Hito 7) ===
 #define PERSIST_AUTOSAVE_MS    (5UL * 60UL * 1000UL)   // 5 min wall-clock

@@ -8,6 +8,21 @@
 #include "EventBus.h"
 #include "StatsEngine.h"   // struct Stats
 
+// LIFE_FSM_TIME_SCALE: multiplicador de dtMs para acelerar el envejecimiento.
+// Normalmente definido por config.h (incluido desde main.cpp que pasa el flag de
+// compilación). Este fallback inline permite que LifeFSM.cpp compile en
+// env:native sin depender de config.h, que arrastra defines de pines de hardware
+// (OLED_SDA, OLED_SCL...) incompatibles con el toolchain del host.
+// Si config.h ya definió LIFE_FSM_TIME_SCALE (por -D TURBO_MODE en el build),
+// el #ifndef respeta ese valor — no hay redefinición.
+#ifndef LIFE_FSM_TIME_SCALE
+  #ifdef TURBO_MODE
+    #define LIFE_FSM_TIME_SCALE 60
+  #else
+    #define LIFE_FSM_TIME_SCALE 1
+  #endif
+#endif
+
 // -----------------------------------------------------------------------------
 // Helper local: suma saturante a uint16_t con cap explícito.
 // Evita desbordamiento cuando dtMs acumula sobre deathSustainMs_ (uint16_t).
@@ -67,7 +82,9 @@ void LifeFSM::tick(uint32_t dtMs, const Stats& stats, uint16_t attentionScore) {
     }
 
     // --- Avance de edad ---
-    ageAccMs_ += dtMs;
+    // LIFE_FSM_TIME_SCALE amplifica dtMs para TURBO_MODE (factor 60 por defecto).
+    // En producción LIFE_FSM_TIME_SCALE=1, la operación es sin coste extra.
+    ageAccMs_ += dtMs * static_cast<uint32_t>(LIFE_FSM_TIME_SCALE);
     if (ageAccMs_ >= 60000u) {
         ageMinutes_ += ageAccMs_ / 60000u;
         ageAccMs_   %= 60000u;
