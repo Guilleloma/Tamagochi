@@ -48,3 +48,7 @@
 // Versión de firmware codificada como 0xMMmm (mayor × 256 + menor).
 // 0x0100 = versión 1.0 (Fase 1 core).
 #define FIRMWARE_VERSION 0x0100
+
+// === Persistence (Hito 7) ===
+#define PERSIST_AUTOSAVE_MS    (5UL * 60UL * 1000UL)   // 5 min wall-clock
+// Política: NO se escala con TURBO_MODE — evita escribir flash en tests
