@@ -232,9 +232,77 @@ void DisplayRenderer::drawIdleMain_() {
     // Texto "Tamagochi" centrado bajo el sprite.
     // Fuente 6×10, 9 chars × 6 px = 54 → x = (64-54)/2 = 5.
     u8g2_->setFont(u8g2_font_6x10_tf);
-    u8g2_->drawStr(5, 90, "Tamagochi");
+    u8g2_->drawStr(5, 85, "Tamagochi");
+
+    // Overlays asíncronos encima del buffer ya construido — antes del sendBuffer.
+    drawOverlays_();
 
     u8g2_->sendBuffer();
+}
+
+// -----------------------------------------------------------------------------
+// drawOverlays_ — dibuja overlays de condición encima del sprite base.
+//
+// Layout portrait 64×128. El sprite del personaje ocupa x=0..63, y=4..67.
+// Zona libre arriba: y=0..3 (mínima). Zona libre abajo: y=68..127.
+//
+// Overlays disponibles (plan §6.4):
+//
+//   Sick        16×16 — top-left  (x=4, y=4). Prioridad máxima.
+//   SleepingZ   16×16 — top, animado 800ms. x=42 normal; x=24 si Sick también activo.
+//   Hungry      16×16 — parpadeo 600ms — x=48, y=68 (justo bajo el sprite).
+//   Poop        16×16 — esquina inf-izquierda, hasta 3 cacas separadas 18px en x.
+//                        y=110 (última fila libre antes de borde, sin solapar texto "Tamagochi").
+//
+// Nota sobre el texto "Tamagochi": desplazado a y=85 (desde y=90) para dejar
+// espacio en y=88..104 para el overlay Hungry, y y=108..124 para las cacas.
+// -----------------------------------------------------------------------------
+void DisplayRenderer::drawOverlays_() {
+    const bool sickShown  = stats_.isSick;
+    const bool sleepShown = stats_.isSleeping;
+
+    // -------------------------------------------------------------------------
+    // Sick (top-left) — prioridad sobre SleepingZ en la misma zona.
+    // -------------------------------------------------------------------------
+    if (sickShown) {
+        u8g2_->drawXBMP(4, 4, 16, 16, kSpriteOverlaySick);
+    }
+
+    // -------------------------------------------------------------------------
+    // SleepingZ (top, animado cada 800 ms = 4 ticks a 5 FPS).
+    // Si Sick también activo, Z se desplaza a x=24 para no solapar.
+    // -------------------------------------------------------------------------
+    if (sleepShown) {
+        // (animFrame_ / 4) % 2 → cambia cada 4 ticks = 800 ms
+        const uint8_t* zSprite = ((animFrame_ / 4) % 2 == 0)
+                                 ? kSpriteOverlaySleepZ0
+                                 : kSpriteOverlaySleepZ1;
+        const int zX = sickShown ? 24 : 42;
+        u8g2_->drawXBMP(zX, 0, 16, 16, zSprite);
+    }
+
+    // -------------------------------------------------------------------------
+    // Hungry (parpadeo cada 600 ms = 3 ticks a 5 FPS).
+    // Solo visible cuando hunger >= 80 y el Tamagochi no está dormido.
+    // Posición: x=48, y=68 (inmediatamente bajo el sprite del personaje).
+    // -------------------------------------------------------------------------
+    if (stats_.hunger >= 80 && !stats_.isSleeping) {
+        // visible los ticks pares → mitad del tiempo encendido
+        if ((animFrame_ / 3) % 2 == 0) {
+            u8g2_->drawXBMP(48, 68, 16, 16, kSpriteOverlayHungry0);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Poop (esquina inferior-izquierda).
+    // Máximo 3 cacas visibles aunque poopCount sea mayor.
+    // Cada caca 16×16, separadas 18px en x. y=110 deja margen al borde inferior.
+    // -------------------------------------------------------------------------
+    int poopVisible = stats_.poopCount;
+    if (poopVisible > 3) poopVisible = 3;
+    for (int i = 0; i < poopVisible; ++i) {
+        u8g2_->drawXBMP(i * 18, 110, 16, 16, kSpriteOverlayPoop);
+    }
 }
 
 // -----------------------------------------------------------------------------

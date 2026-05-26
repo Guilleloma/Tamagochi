@@ -88,6 +88,7 @@ private:
     Mood computeMood_() const;
 
     void drawIdleMain_();
+    void drawOverlays_();    // overlays asíncronos sobre el sprite principal (hito 6)
     void drawStatsView_();
     void drawOtaProgress_();
     void drawDeadScreen_();
