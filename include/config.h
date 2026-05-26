@@ -24,7 +24,7 @@
 // El budget real se mide en el FPS report por serie cada FPS_REPORT_MS.
 #define RENDER_FRAME_MS  200
 
-// El sprite dummy alterna entre frame 0 y frame 1 cada ANIM_FRAME_MS.
+// El sprite BABY alterna entre frame 0 y frame 1 cada ANIM_FRAME_MS.
 // 400 ms da una animación suave visible sin ser frenética.
 #define ANIM_FRAME_MS    400
 
