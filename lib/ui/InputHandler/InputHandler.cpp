@@ -18,16 +18,15 @@ InputHandler::InputHandler(EventBus& bus, uint8_t pin, bool activeLow)
 
 void InputHandler::begin() {
     button_.attachClick(onShortClick_);
-    button_.attachDoubleClick(onDoubleClick_);
     button_.attachLongPressStart(onLongPress_);
-    // setClickMs reduce el retardo del click simple a 150ms (default 400ms).
-    // OneButton espera _clickMs tras un click para descartar doble click.
-    // 150ms basta para distinguir click vs doble click y se siente inmediato.
-    button_.setClickMs(150);
-    // setPressMs reduce el umbral de long press a 600ms (default 800ms).
-    // Permite que el usuario perciba la pulsación larga más rápido sin
-    // confundirla con click corto.
-    button_.setPressMs(600);
+    // attachDoubleClick deliberadamente NO registrado en Fase 1:
+    // con doble click registrado, OneButton espera _clickMs tras cada pulsación
+    // para distinguir single de double, lo que retrasa el click corto y en
+    // botones con rebote llega a perderse. El plan reserva el evento doble
+    // click para hitos futuros — cuando haga falta, se vuelve a registrar.
+    button_.setClickMs(80);     // espera mínima tras click (default 400ms)
+    button_.setDebounceMs(40);  // sensible para click rápido, sin doble click registrado evita rebotes contables
+    button_.setPressMs(600);    // long press a 600ms (default 800ms)
 }
 
 void InputHandler::loop() {
