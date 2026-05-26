@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""
+Convierte PNGs monocromos a arrays C en PROGMEM compatibles con U8g2 drawXBMP().
+
+Uso:
+    python3 tools/png_to_xbm.py assets/sprites/  include/sprites_generated.h
+
+Convencion XBM (U8g2):
+    - LSB first dentro de cada byte
+    - Pixel (0,0) es el bit 0 del primer byte
+    - Pixel blanco (#FFFFFF) = bit 1 (encendido en OLED)
+    - Pixel negro (#000000) = bit 0 (apagado en OLED)
+
+Convencion de nombres PNG -> identificador C:
+    baby_idle_0.png      -> kSpriteBabyIdle0
+    overlay_sick.png     -> kSpriteOverlaySick
+    action_food_meal.png -> kSpriteActionFoodMeal
+
+Requisitos:
+    pip install Pillow
+"""
+
+import sys
+from pathlib import Path
+from PIL import Image
+
+
+def pngToXbmBytes(pngPath: Path) -> tuple[list[int], int, int]:
+    img = Image.open(pngPath).convert("1")
+    width, height = img.size
+
+    bytesPerRow = (width + 7) // 8
+    result: list[int] = []
+
+    for row in range(height):
+        for colByte in range(bytesPerRow):
+            byteVal = 0
+            for bit in range(8):
+                col = colByte * 8 + bit
+                if col < width:
+                    pixel = img.getpixel((col, row))
+                    if pixel:
+                        byteVal |= (1 << bit)
+            result.append(byteVal)
+
+    return result, width, height
+
+
+def bytesToCArray(name: str, data: list[int], width: int, height: int) -> str:
+    byteCount = len(data)
+    comment = f"// {width}x{height}px - {byteCount} bytes PROGMEM"
+
+    lines = [
+        comment,
+        f"static const uint8_t {name}[] PROGMEM = {{",
+    ]
+
+    chunks = [data[i : i + 8] for i in range(0, len(data), 8)]
+    for chunk in chunks:
+        hexRow = ", ".join(f"0x{b:02X}" for b in chunk)
+        lines.append(f"    {hexRow},")
+
+    lines.append("};")
+    return "\n".join(lines)
+
+
+def cIdentifierFromFilename(filename: str) -> str:
+    stem = Path(filename).stem
+    parts = stem.split("_")
+    camel = "".join(part.capitalize() for part in parts)
+    return f"kSprite{camel}"
+
+
+def generateHeader(inputDir: Path, outputFile: Path) -> None:
+    pngFiles = sorted(inputDir.glob("*.png"))
+
+    if not pngFiles:
+        print(f"ERROR: No se encontraron PNGs en {inputDir}", file=sys.stderr)
+        sys.exit(1)
+
+    guard = outputFile.stem.upper().replace("-", "_") + "_H"
+    lines = [
+        "// AUTO-GENERADO por tools/png_to_xbm.py - NO editar manualmente",
+        f"// Fuente: {inputDir}",
+        "#pragma once",
+        f"#ifndef {guard}",
+        f"#define {guard}",
+        "",
+        "#include <Arduino.h>",
+        "",
+    ]
+
+    totalBytes = 0
+
+    for pngPath in pngFiles:
+        try:
+            data, width, height = pngToXbmBytes(pngPath)
+            name = cIdentifierFromFilename(pngPath.name)
+            lines.append(bytesToCArray(name, data, width, height))
+            lines.append("")
+            totalBytes += len(data)
+            print(f"  OK: {pngPath.name} -> {name} ({width}x{height}, {len(data)} bytes)")
+        except (OSError, ValueError) as exc:
+            print(f"  WARN: {pngPath.name} omitido - {exc}", file=sys.stderr)
+
+    lines += [
+        f"#endif // {guard}",
+        "",
+        f"// Total PROGMEM: {totalBytes} bytes ({totalBytes / 1024:.2f} KB)",
+    ]
+
+    outputFile.write_text("\n".join(lines), encoding="utf-8")
+    print(f"\nGenerado: {outputFile} ({totalBytes} bytes totales)")
+
+
+def main() -> None:
+    if len(sys.argv) != 3:
+        print(f"Uso: {sys.argv[0]} <directorio_png> <archivo_salida.h>")
+        sys.exit(1)
+
+    inputDir = Path(sys.argv[1])
+    outputFile = Path(sys.argv[2])
+
+    if not inputDir.is_dir():
+        print(f"ERROR: {inputDir} no es un directorio", file=sys.stderr)
+        sys.exit(1)
+
+    outputFile.parent.mkdir(parents=True, exist_ok=True)
+    generateHeader(inputDir, outputFile)
+
+
+if __name__ == "__main__":
+    main()
