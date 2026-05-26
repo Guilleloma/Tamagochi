@@ -207,7 +207,7 @@ struct PersistedState {
     uint16_t attentionScore;      // [28..30] 0-1000, 500 default — métrica acumulada que dirige la evolución
     uint16_t deathSustainMs;      // [30..32] cuenta atrás de health=0 — persistido para no perderlo en power-loss
     uint8_t  lastDeathCauseCode;  // [32]     0=none, 1=hunger, 2=sickness, 3=oldAge, 4=neglect, 5=unknown
-    uint8_t  reservedV2;          // [33]     padding, debe ser 0
+    uint8_t  adultType;           // [33]     0=normal, 1=athletic, 2=obese, 3=grumpy (poblado al evolucionar a Adult; default 0)
     uint16_t reservedV2b;         // [34..36] padding, debe ser 0
 
     // === CRC ===
@@ -248,7 +248,7 @@ bool Persistence::migrate_v1_to_v2_(PersistedState& s) {
     s.attentionScore     = 500;        // neutro
     s.deathSustainMs     = 0;
     s.lastDeathCauseCode = 0;
-    s.reservedV2         = 0;
+    s.adultType          = 0;
     s.reservedV2b        = 0;
     s.version            = kCurrentVersion;
     // NB: el caller (load()) recalculará el CRC tras la migración antes del próximo save.
