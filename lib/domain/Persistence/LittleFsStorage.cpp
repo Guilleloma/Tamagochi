@@ -6,6 +6,10 @@
 //
 // LittleFS garantiza atomicidad COW: si se corta la energía durante write(),
 // el archivo previo permanece intacto. Esto es la base de la rotación de slots.
+//
+// Semántica de read() (v2): si el archivo existe pero es más corto que size,
+// se rellenan con 0 los bytes faltantes y se devuelve true. Esto permite leer
+// blobs v1 (28 bytes) usando sizeof(PersistedState) = 40 sin fallar.
 // =============================================================================
 
 #ifndef UNIT_TEST
@@ -13,6 +17,7 @@
 #include "LittleFsStorage.h"
 #include "Logger.h"
 #include <LittleFS.h>
+#include <string.h>
 
 bool LittleFsStorage::exists(const char* path) {
     return LittleFS.exists(path);
@@ -25,14 +30,27 @@ bool LittleFsStorage::read(const char* path, void* buffer, size_t size) {
         return false;
     }
 
-    size_t bytesRead = f.read(static_cast<uint8_t*>(buffer), size);
+    // Zero-pad: rellenar el buffer completo antes de leer.
+    // Garantiza que los bytes faltantes (blobs de versiones anteriores) queden a 0.
+    memset(buffer, 0, size);
+
+    size_t available = f.size();
+    size_t toCopy    = (available < size) ? available : size;
+    size_t bytesRead = f.read(static_cast<uint8_t*>(buffer), toCopy);
     f.close();
 
-    if (bytesRead != size) {
+    if (bytesRead != toCopy) {
         LOG_WARN("LittleFsStorage: lectura incompleta %s (%u/%u bytes)",
-                 path, (unsigned)bytesRead, (unsigned)size);
+                 path, (unsigned)bytesRead, (unsigned)toCopy);
         return false;
     }
+
+    // Si el archivo era más corto que size, loguear para tener visibilidad.
+    if (available < size) {
+        LOG_INFO("LittleFsStorage: %s tiene %u bytes, pedidos %u — zero-pad aplicado",
+                 path, (unsigned)available, (unsigned)size);
+    }
+
     return true;
 }
 

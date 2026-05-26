@@ -1,10 +1,20 @@
 // =============================================================================
-// test_persistence.cpp — 17 tests obligatorios para Persistence (hito 3, Fase 1).
+// test_persistence.cpp — tests para Persistence (hito 1, Fase 2).
 //
 // Framework: Unity (pio test -e native).
 // Mock: InMemoryStorage (sin LittleFS, sin Arduino).
 //
-// Cada test tiene setUp/tearDown que crean/destruyen instancias limpias.
+// Tests baseline (Fase 1, adaptados a v2):
+//   1-13: lógica de CRC, save/load, rotación de slots — sin cambios funcionales.
+//   14-16: tests de migrate adaptados a la nueva versión actual (v2).
+//   17: tamaño struct adaptado a 40 bytes.
+//
+// Tests nuevos (Fase 2 — migración v1→v2):
+//   18: test_load_v1_blob_migrates_to_v2
+//   19: test_migrate_v1_to_v2_preserves_v1_fields
+//   20: test_migrate_v1_to_v2_sets_new_field_defaults
+//   21: test_load_blob_with_short_size_fills_remaining_with_zero
+//   22: test_save_in_v2_format_writes_40_bytes
 // =============================================================================
 
 #include <unity.h>
@@ -24,6 +34,50 @@ void setUp() {
 void tearDown() {
     delete g_persistence; g_persistence = nullptr;
     delete g_storage;     g_storage     = nullptr;
+}
+
+// =============================================================================
+// Helper — construye un blob v1 válido (28 bytes, CRC sobre primeros 24 bytes).
+// Simula un save de firmware Fase 1 en el storage.
+// Layout v1: magic(2) version(2) bornAt(4) lastSaved(4) age(4) lifeStage(1)
+//            hunger(1) happiness(1) health(1) deathCount(2) reserved(2) crc32(4)
+// Total: 28 bytes. CRC cubre bytes [0..24].
+// =============================================================================
+struct V1Blob {
+    uint16_t magic;
+    uint16_t version;
+    uint32_t bornAtEpoch;
+    uint32_t lastSavedAtEpoch;
+    uint32_t ageMinutes;
+    uint8_t  lifeStage;
+    uint8_t  hunger;
+    uint8_t  happiness;
+    uint8_t  health;
+    uint16_t deathCount;
+    uint16_t reserved;
+    uint32_t crc32;
+};
+static_assert(sizeof(V1Blob) == 28, "V1Blob debe ser exactamente 28 bytes para simular blobs de Fase 1");
+
+static V1Blob makeV1Blob(uint8_t hunger = 30, uint8_t happiness = 60, uint8_t health = 80,
+                          uint8_t lifeStage = 1, uint8_t deathCount = 0,
+                          uint32_t ageMinutes = 45, uint32_t lastSavedAt = 100) {
+    V1Blob b;
+    memset(&b, 0, sizeof(b));
+    b.magic            = 0xCAFE;
+    b.version          = 1;
+    b.bornAtEpoch      = 0;
+    b.lastSavedAtEpoch = lastSavedAt;
+    b.ageMinutes       = ageMinutes;
+    b.lifeStage        = lifeStage;
+    b.hunger           = hunger;
+    b.happiness        = happiness;
+    b.health           = health;
+    b.deathCount       = deathCount;
+    b.reserved         = 0;
+    // CRC sobre los primeros 24 bytes (mismo layout que v1 Fase 1)
+    b.crc32 = Persistence::computeCrc32(&b, 24);
+    return b;
 }
 
 // =============================================================================
@@ -48,8 +102,8 @@ void test_crc32_changes_on_byte_flip() {
 
     uint32_t original = state.crc32;
 
-    // Flipar un byte en el payload (hunger, offset 17)
-    state.hunger ^= 0xFF;
+    // Flipar un byte en el payload (discipline, offset 24 — campo nuevo v2)
+    state.discipline ^= 0xFF;
     uint32_t after = Persistence::computeCrc32(&state, offsetof(PersistedState, crc32));
 
     TEST_ASSERT_NOT_EQUAL(original, after);
@@ -57,21 +111,29 @@ void test_crc32_changes_on_byte_flip() {
 
 // =============================================================================
 // 3. test_fill_defaults_produces_valid_state
-// fillDefaults produce un PersistedState con magic correcto, version=1,
-// stats sanos y CRC válido.
+// fillDefaults produce un PersistedState v2 con magic correcto, version=2,
+// Egg como etapa inicial, stats de huevo y CRC válido.
 // =============================================================================
 void test_fill_defaults_produces_valid_state() {
     PersistedState state;
     Persistence::fillDefaults(state);
 
     TEST_ASSERT_EQUAL_UINT16(0xCAFE, state.magic);
-    TEST_ASSERT_EQUAL_UINT16(1,      state.version);
-    TEST_ASSERT_EQUAL_UINT8(1,       state.lifeStage);  // Baby
-    TEST_ASSERT_EQUAL_UINT8(50,      state.hunger);
-    TEST_ASSERT_EQUAL_UINT8(50,      state.happiness);
+    TEST_ASSERT_EQUAL_UINT16(2,      state.version);
+    TEST_ASSERT_EQUAL_UINT8(0,       state.lifeStage);  // Egg=0
+    TEST_ASSERT_EQUAL_UINT8(0,       state.hunger);     // huevos no tienen hambre
+    TEST_ASSERT_EQUAL_UINT8(100,     state.happiness);  // huevos son felices
     TEST_ASSERT_EQUAL_UINT8(100,     state.health);
     TEST_ASSERT_EQUAL_UINT16(0,      state.deathCount);
     TEST_ASSERT_EQUAL_UINT16(0,      state.reserved);
+    // Campos v2
+    TEST_ASSERT_EQUAL_UINT8(50,      state.discipline);
+    TEST_ASSERT_EQUAL_UINT8(50,      state.weight);
+    TEST_ASSERT_EQUAL_UINT8(0,       state.poopCount);
+    TEST_ASSERT_EQUAL_UINT8(0,       state.flags);
+    TEST_ASSERT_EQUAL_UINT16(500,    state.attentionScore);
+    TEST_ASSERT_EQUAL_UINT16(0,      state.deathSustainMs);
+    TEST_ASSERT_EQUAL_UINT8(0,       state.lastDeathCauseCode);
 
     // CRC coherente
     uint32_t expected = Persistence::computeCrc32(&state, offsetof(PersistedState, crc32));
@@ -80,15 +142,18 @@ void test_fill_defaults_produces_valid_state() {
 
 // =============================================================================
 // 4. test_save_then_load_roundtrip
-// Guardar un estado y cargarlo devuelve exactamente los mismos datos.
+// Guardar un estado v2 y cargarlo devuelve exactamente los mismos datos.
 // =============================================================================
 void test_save_then_load_roundtrip() {
     PersistedState original;
     Persistence::fillDefaults(original);
-    original.hunger    = 75;
-    original.happiness = 30;
-    original.health    = 88;
-    original.ageMinutes = 120;
+    original.hunger       = 75;
+    original.happiness    = 30;
+    original.health       = 88;
+    original.ageMinutes   = 120;
+    original.discipline   = 70;
+    original.weight       = 60;
+    original.attentionScore = 650;
 
     bool saved = g_persistence->save(original);
     TEST_ASSERT_TRUE(saved);
@@ -101,6 +166,9 @@ void test_save_then_load_roundtrip() {
     TEST_ASSERT_EQUAL_UINT8(30,  loaded.happiness);
     TEST_ASSERT_EQUAL_UINT8(88,  loaded.health);
     TEST_ASSERT_EQUAL_UINT32(120, loaded.ageMinutes);
+    TEST_ASSERT_EQUAL_UINT8(70,  loaded.discipline);
+    TEST_ASSERT_EQUAL_UINT8(60,  loaded.weight);
+    TEST_ASSERT_EQUAL_UINT16(650, loaded.attentionScore);
 }
 
 // =============================================================================
@@ -112,10 +180,12 @@ void test_load_when_no_files_returns_none_found() {
     LoadResult result = g_persistence->load(out);
 
     TEST_ASSERT_EQUAL(LoadResult::NoneFound, result);
-    // Debe haber rellenado defaults
+    // Debe haber rellenado defaults v2
     TEST_ASSERT_EQUAL_UINT16(0xCAFE, out.magic);
-    TEST_ASSERT_EQUAL_UINT8(50, out.hunger);
-    TEST_ASSERT_EQUAL_UINT8(100, out.health);
+    TEST_ASSERT_EQUAL_UINT16(2,      out.version);
+    TEST_ASSERT_EQUAL_UINT8(0,       out.hunger);   // Egg: hunger=0
+    TEST_ASSERT_EQUAL_UINT8(100,     out.health);
+    TEST_ASSERT_EQUAL_UINT8(50,      out.discipline);
 }
 
 // =============================================================================
@@ -123,19 +193,17 @@ void test_load_when_no_files_returns_none_found() {
 // Si hay archivos pero todos tienen CRC inválido, load() devuelve AllCorrupt.
 // =============================================================================
 void test_load_when_all_files_corrupted_returns_all_corrupt() {
-    // Escribir un estado válido, luego corromperlo manualmente en el storage
     PersistedState state;
     Persistence::fillDefaults(state);
     g_persistence->save(state);
 
-    // Corromper el slot 0 (que es donde fue a parar el primer save)
+    // Corromper el slot 0
     g_storage->corruptFile("/state_0.bin");
 
     PersistedState out;
     LoadResult result = g_persistence->load(out);
 
     TEST_ASSERT_EQUAL(LoadResult::AllCorrupt, result);
-    // Debe haber rellenado defaults de todas formas
     TEST_ASSERT_EQUAL_UINT16(0xCAFE, out.magic);
 }
 
@@ -148,7 +216,6 @@ void test_load_with_wrong_magic_skips_file() {
     PersistedState state;
     Persistence::fillDefaults(state);
     state.magic = 0xDEAD;  // magic inválido
-    // Escribir directamente en el storage (sin pasar por save() que fijaría CRC de magic correcto)
     uint8_t buf[sizeof(state)];
     memcpy(buf, &state, sizeof(state));
     g_storage->write("/state_0.bin", buf, sizeof(buf));
@@ -156,7 +223,6 @@ void test_load_with_wrong_magic_skips_file() {
     PersistedState out;
     LoadResult result = g_persistence->load(out);
 
-    // El slot existe pero se descarta por magic → AllCorrupt (hay archivo pero inválido)
     TEST_ASSERT_EQUAL(LoadResult::AllCorrupt, result);
 }
 
@@ -262,19 +328,11 @@ void test_save_rotation_writes_to_next_slot() {
 
 // =============================================================================
 // 12. test_save_rotation_removes_oldest_after_four_writes
-// Tras 4 saves, el slot más antiguo (el que se sobreescribirá a continuación)
-// ha sido borrado para no acumular más de ~3 slots simultáneos.
+// Tras 4 saves, el slot más antiguo ha sido borrado.
 // =============================================================================
 void test_save_rotation_removes_oldest_after_four_writes() {
     PersistedState state;
     Persistence::fillDefaults(state);
-
-    // 4 saves rotativos: slots 0, 1, 2, 3
-    // Cada save borra (slotToWrite+1)%4 después de escribir:
-    //   save→0: escribe 0, borra 1 (no existe, OK)
-    //   save→1: escribe 1, borra 2 (no existe, OK)
-    //   save→2: escribe 2, borra 3 (no existe, OK)
-    //   save→3: escribe 3, borra 0 ← slot 0 desaparece
 
     for (int i = 0; i < 4; ++i) {
         g_persistence->save(state);
@@ -291,8 +349,7 @@ void test_save_rotation_removes_oldest_after_four_writes() {
 
 // =============================================================================
 // 13. test_save_does_not_lose_old_state_on_simulated_power_loss
-// Si write() falla (simula corte de energía a mitad), el estado anterior
-// sigue siendo cargable.
+// Si write() falla (simula corte de energía), el estado anterior queda intacto.
 // =============================================================================
 void test_save_does_not_lose_old_state_on_simulated_power_loss() {
     PersistedState good;
@@ -300,11 +357,9 @@ void test_save_does_not_lose_old_state_on_simulated_power_loss() {
     good.hunger    = 42;
     good.ageMinutes = 99;
 
-    // Primer save OK
     bool ok = g_persistence->save(good);
     TEST_ASSERT_TRUE(ok);
 
-    // Simular corte de energía en el segundo save
     g_storage->simulateWriteFailure = true;
     PersistedState corrupted;
     Persistence::fillDefaults(corrupted);
@@ -313,7 +368,6 @@ void test_save_does_not_lose_old_state_on_simulated_power_loss() {
 
     g_storage->simulateWriteFailure = false;
 
-    // El estado bueno sigue cargable
     PersistedState loaded;
     LoadResult result = g_persistence->load(loaded);
 
@@ -324,18 +378,18 @@ void test_save_does_not_lose_old_state_on_simulated_power_loss() {
 
 // =============================================================================
 // 14. test_migrate_same_version_returns_true
-// migrate() con version == kCurrentVersion devuelve true sin modificar el estado.
+// migrate() con version == kCurrentVersion (2) devuelve true sin modificar estado.
 // =============================================================================
 void test_migrate_same_version_returns_true() {
     PersistedState state;
     Persistence::fillDefaults(state);
 
-    TEST_ASSERT_EQUAL_UINT16(1, state.version);
+    TEST_ASSERT_EQUAL_UINT16(2, state.version);  // kCurrentVersion = 2
     bool result = Persistence::migrate(state);
     TEST_ASSERT_TRUE(result);
     // No debe haber modificado nada
-    TEST_ASSERT_EQUAL_UINT16(1, state.version);
-    TEST_ASSERT_EQUAL_UINT8(50, state.hunger);
+    TEST_ASSERT_EQUAL_UINT16(2, state.version);
+    TEST_ASSERT_EQUAL_UINT8(50, state.discipline);
 }
 
 // =============================================================================
@@ -357,7 +411,6 @@ void test_migrate_higher_version_returns_false() {
 // y rellena defaults para que el firmware arranque igualmente.
 // =============================================================================
 void test_load_unknown_version_returns_migration_failed() {
-    // Escribir manualmente un estado con versión futura y CRC correcto
     PersistedState future;
     Persistence::fillDefaults(future);
     future.version = 42;
@@ -372,15 +425,168 @@ void test_load_unknown_version_returns_migration_failed() {
     TEST_ASSERT_EQUAL(LoadResult::MigrationFailed, result);
     // Debe haber rellenado defaults
     TEST_ASSERT_EQUAL_UINT16(0xCAFE, out.magic);
-    TEST_ASSERT_EQUAL_UINT8(50, out.hunger);  // default, no 77
+    TEST_ASSERT_EQUAL_UINT8(0, out.hunger);  // default Egg: hunger=0, no 77
 }
 
 // =============================================================================
-// 17. test_persistedstate_is_exactly_28_bytes
-// Verificación en runtime (complementa el static_assert en Persistence.h).
+// 17. test_persistedstate_is_exactly_40_bytes
+// Verificación en runtime del tamaño del struct v2 (complementa static_assert).
 // =============================================================================
-void test_persistedstate_is_exactly_28_bytes() {
-    TEST_ASSERT_EQUAL_UINT32(28, sizeof(PersistedState));
+void test_persistedstate_is_exactly_40_bytes() {
+    TEST_ASSERT_EQUAL_UINT32(40, sizeof(PersistedState));
+}
+
+// =============================================================================
+// 18. test_load_v1_blob_migrates_to_v2
+// Simula un slot con un blob v1 (28 bytes, CRC válido sobre primeros 24 bytes).
+// load() debe devolver LoadResult::Migrated, version debe ser 2,
+// campos v1 (hunger/happiness/health/lifeStage) preservados,
+// campos v2 nuevos en defaults.
+// =============================================================================
+void test_load_v1_blob_migrates_to_v2() {
+    V1Blob v1 = makeV1Blob(/*hunger=*/30, /*happiness=*/60, /*health=*/80,
+                            /*lifeStage=*/1, /*deathCount=*/0,
+                            /*ageMinutes=*/45, /*lastSavedAt=*/100);
+
+    // Escribir 28 bytes (tamaño v1) directamente en el storage
+    g_storage->write("/state_0.bin", &v1, sizeof(v1));
+
+    PersistedState out;
+    LoadResult result = g_persistence->load(out);
+
+    TEST_ASSERT_EQUAL(LoadResult::Migrated, result);
+
+    // Versión debe haberse actualizado a 2
+    TEST_ASSERT_EQUAL_UINT16(2, out.version);
+
+    // Campos v1 preservados
+    TEST_ASSERT_EQUAL_UINT8(30,  out.hunger);
+    TEST_ASSERT_EQUAL_UINT8(60,  out.happiness);
+    TEST_ASSERT_EQUAL_UINT8(80,  out.health);
+    TEST_ASSERT_EQUAL_UINT8(1,   out.lifeStage);   // Baby=1 heredado
+    TEST_ASSERT_EQUAL_UINT32(45, out.ageMinutes);
+    TEST_ASSERT_EQUAL_UINT16(0xCAFE, out.magic);
+
+    // Campos nuevos v2 en defaults
+    TEST_ASSERT_EQUAL_UINT8(50,  out.discipline);
+    TEST_ASSERT_EQUAL_UINT8(50,  out.weight);
+    TEST_ASSERT_EQUAL_UINT8(0,   out.poopCount);
+    TEST_ASSERT_EQUAL_UINT8(0,   out.flags);
+    TEST_ASSERT_EQUAL_UINT16(500, out.attentionScore);
+    TEST_ASSERT_EQUAL_UINT16(0,  out.deathSustainMs);
+    TEST_ASSERT_EQUAL_UINT8(0,   out.lastDeathCauseCode);
+}
+
+// =============================================================================
+// 19. test_migrate_v1_to_v2_preserves_v1_fields
+// migrate() sobre un estado con version=1 preserva hunger/happiness/health/
+// lifeStage y actualiza version a 2.
+// =============================================================================
+void test_migrate_v1_to_v2_preserves_v1_fields() {
+    PersistedState state;
+    memset(&state, 0, sizeof(state));
+    state.magic      = 0xCAFE;
+    state.version    = 1;
+    state.lifeStage  = 1;   // Baby
+    state.hunger     = 55;
+    state.happiness  = 40;
+    state.health     = 70;
+    state.deathCount = 3;
+    state.ageMinutes = 200;
+
+    bool ok = Persistence::migrate(state);
+    TEST_ASSERT_TRUE(ok);
+
+    // Versión actualizada
+    TEST_ASSERT_EQUAL_UINT16(2, state.version);
+
+    // Campos v1 preservados
+    TEST_ASSERT_EQUAL_UINT8(55,  state.hunger);
+    TEST_ASSERT_EQUAL_UINT8(40,  state.happiness);
+    TEST_ASSERT_EQUAL_UINT8(70,  state.health);
+    TEST_ASSERT_EQUAL_UINT8(1,   state.lifeStage);
+    TEST_ASSERT_EQUAL_UINT16(3,  state.deathCount);
+    TEST_ASSERT_EQUAL_UINT32(200, state.ageMinutes);
+}
+
+// =============================================================================
+// 20. test_migrate_v1_to_v2_sets_new_field_defaults
+// migrate() sobre un estado con version=1 asigna defaults correctos
+// para los 12 bytes nuevos del bloque v2.
+// =============================================================================
+void test_migrate_v1_to_v2_sets_new_field_defaults() {
+    PersistedState state;
+    memset(&state, 0, sizeof(state));
+    state.magic   = 0xCAFE;
+    state.version = 1;
+
+    // Poner "basura" en los campos v2 para verificar que se sobreescriben
+    state.discipline         = 0xFF;
+    state.weight             = 0xFF;
+    state.poopCount          = 99;
+    state.flags              = 0xFF;
+    state.attentionScore     = 9999;
+    state.deathSustainMs     = 9999;
+    state.lastDeathCauseCode = 99;
+    state.adultType          = 99;
+    state.reservedV2b        = 9999;
+
+    bool ok = Persistence::migrate(state);
+    TEST_ASSERT_TRUE(ok);
+
+    // Defaults v2 correctos
+    TEST_ASSERT_EQUAL_UINT8(50,   state.discipline);
+    TEST_ASSERT_EQUAL_UINT8(50,   state.weight);
+    TEST_ASSERT_EQUAL_UINT8(0,    state.poopCount);
+    TEST_ASSERT_EQUAL_UINT8(0,    state.flags);
+    TEST_ASSERT_EQUAL_UINT16(500, state.attentionScore);
+    TEST_ASSERT_EQUAL_UINT16(0,   state.deathSustainMs);
+    TEST_ASSERT_EQUAL_UINT8(0,    state.lastDeathCauseCode);
+    TEST_ASSERT_EQUAL_UINT8(0,    state.adultType);
+    TEST_ASSERT_EQUAL_UINT16(0,   state.reservedV2b);
+}
+
+// =============================================================================
+// 21. test_load_blob_with_short_size_fills_remaining_with_zero
+// InMemoryStorage::read() con un archivo más corto que size rellena con 0.
+// Verifica la semántica zero-pad directamente sobre el storage.
+// =============================================================================
+void test_load_blob_with_short_size_fills_remaining_with_zero() {
+    // Escribir 10 bytes de datos conocidos
+    uint8_t shortData[10] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, 0x33, 0x44};
+    g_storage->write("/state_0.bin", shortData, sizeof(shortData));
+
+    // Leer 20 bytes — los 10 últimos deben ser 0
+    uint8_t buf[20];
+    memset(buf, 0x55, sizeof(buf));  // rellenar con patrón diferente de 0 para detectar fallo
+
+    bool ok = g_storage->read("/state_0.bin", buf, sizeof(buf));
+    TEST_ASSERT_TRUE(ok);
+
+    // Primeros 10 bytes: datos originales
+    for (int i = 0; i < 10; ++i) {
+        TEST_ASSERT_EQUAL_UINT8(shortData[i], buf[i]);
+    }
+    // Bytes 10..19: deben ser 0 (zero-pad)
+    for (int i = 10; i < 20; ++i) {
+        TEST_ASSERT_EQUAL_UINT8(0, buf[i]);
+    }
+}
+
+// =============================================================================
+// 22. test_save_in_v2_format_writes_40_bytes
+// save() siempre escribe exactamente 40 bytes en el slot correspondiente.
+// =============================================================================
+void test_save_in_v2_format_writes_40_bytes() {
+    PersistedState state;
+    Persistence::fillDefaults(state);
+
+    bool ok = g_persistence->save(state);
+    TEST_ASSERT_TRUE(ok);
+
+    // El archivo escrito debe tener exactamente 40 bytes
+    size_t written = g_storage->fileSize("/state_0.bin");
+    TEST_ASSERT_EQUAL_UINT32(40, written);
 }
 
 // =============================================================================
@@ -405,7 +611,12 @@ int main() {
     RUN_TEST(test_migrate_same_version_returns_true);
     RUN_TEST(test_migrate_higher_version_returns_false);
     RUN_TEST(test_load_unknown_version_returns_migration_failed);
-    RUN_TEST(test_persistedstate_is_exactly_28_bytes);
+    RUN_TEST(test_persistedstate_is_exactly_40_bytes);
+    RUN_TEST(test_load_v1_blob_migrates_to_v2);
+    RUN_TEST(test_migrate_v1_to_v2_preserves_v1_fields);
+    RUN_TEST(test_migrate_v1_to_v2_sets_new_field_defaults);
+    RUN_TEST(test_load_blob_with_short_size_fills_remaining_with_zero);
+    RUN_TEST(test_save_in_v2_format_writes_40_bytes);
 
     return UNITY_END();
 }
