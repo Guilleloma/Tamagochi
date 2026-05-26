@@ -105,8 +105,8 @@ void DisplayRenderer::setScene(Scene scene) {
 }
 
 void DisplayRenderer::setStats(const Stats& stats) {
-    // Copia interna — en hito 5 no se usa en drawIdleMain_, pero la API es vinculante.
-    // TODO(hito-6): llamar a drawIdleMain_ con stats reales cuando se integre EventBus.
+    // Copia interna — usada en drawStatsView_() para pintar valores reales.
+    // Se actualiza vía onStatsChanged en main.cpp cada vez que el bus emite StatsChanged.
     stats_ = stats;
 }
 
@@ -152,12 +152,40 @@ void DisplayRenderer::drawIdleMain_() {
 }
 
 // -----------------------------------------------------------------------------
-// drawStatsView_ — stub hito 5. Se implementa en hito 6.
+// drawStatsView_ — hito 6: pantalla de stats con los 3 valores numéricos.
+//
+// Layout (128×64, fuente 6×10):
+//   y=10  STATS  (título centrado)
+//   y=26  Hambre:      XX / 100
+//   y=40  Felicidad:   XX / 100
+//   y=54  Salud:      XXX / 100
+//
+// stats_ se actualiza vía setStats() cuando onStatsChanged se dispara.
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawStatsView_() {
+    char buf[24];
+
     u8g2_->clearBuffer();
-    u8g2_->setFont(u8g2_font_5x7_tf);
-    u8g2_->drawStr(0, 30, "TODO: StatsView");
+    u8g2_->setFont(u8g2_font_6x10_tf);
+
+    // Título centrado (ancho pantalla 128, "STATS" = 5 chars × 6 px = 30 px → x = 49)
+    u8g2_->drawStr(49, 10, "STATS");
+
+    // Línea separadora fina bajo el título
+    u8g2_->drawHLine(0, 13, 128);
+
+    // Hunger — 0=saciado, 100=hambriento → mostramos valor directo
+    snprintf(buf, sizeof(buf), "Hambre:    %3u / 100", stats_.hunger);
+    u8g2_->drawStr(0, 28, buf);
+
+    // Happiness — 0=triste, 100=feliz
+    snprintf(buf, sizeof(buf), "Felicidad: %3u / 100", stats_.happiness);
+    u8g2_->drawStr(0, 42, buf);
+
+    // Health — 0=muerto, 100=sano
+    snprintf(buf, sizeof(buf), "Salud:     %3u / 100", stats_.health);
+    u8g2_->drawStr(0, 56, buf);
+
     u8g2_->sendBuffer();
 }
 
