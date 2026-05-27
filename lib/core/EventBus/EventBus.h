@@ -40,6 +40,7 @@ enum class EventType : uint8_t {
     OtaProgress,
     OtaFinished,
     OtaError,
+    WifiStateChanged,   // payload & 0xFF = WifiState enum value
     EventTypeCount      // centinela — mantener al final siempre
 };
 

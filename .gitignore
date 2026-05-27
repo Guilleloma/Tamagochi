@@ -22,7 +22,8 @@ build/
 *.log
 logs/
 
-# Secrets y credenciales
+# Secrets y credenciales — include/secrets.h nunca se commitea
+include/secrets.h
 .env
 .env.*
 .secrets/

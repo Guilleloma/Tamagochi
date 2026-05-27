@@ -1,13 +1,14 @@
 // =============================================================================
-// Tamagochi — Fase 2: Hitos 7-9 fusionados
+// Tamagochi — Fase 3: Hito 1 — WifiManager + indicador WiFi OLED
 //
 // Capa de orquestación: instancia módulos, suscribe handlers al EventBus
 // y ejecuta los schedulers del loop principal.
 //
-// Comportamiento completo (acumula hitos anteriores + hitos 7-9):
+// Comportamiento completo (acumula hitos anteriores + hito 3.1):
 //   - OLED IdleMain: sprite animado multi-etapa según LifeStage
 //   - OLED StatsView: hunger / happiness / health / discipline / weight / poop
 //   - OLED DeadScreen: pantalla RIP con causa de muerte y edad
+//   - Icono WiFi 8×6 px en esquina superior derecha (Connecting=blink, Connected=on, Off=x)
 //   - Botón corto   → alterna IdleMain ↔ StatsView
 //   - Botón largo   → alimentar: hunger -20 pts + animación EAT 2.4s + guarda
 //   - Botón doble   → evento publicado pero sin suscriptor (reservado)
@@ -17,15 +18,18 @@
 //   - Transiciones  → LifeFSM publica LifeStateChanged → renderer + persist
 //   - Resurrección  → DEAD → EGG: stats reset, escena IdleMain
 //   - Cada 5 min    → autosave vía PersistRequested
+//   - WiFi no bloqueante → WifiManager::begin()/loop(); publica WifiStateChanged
 //
-// Lo que NO está en este hito (Fase 3+):
-//   - OTA / WiFi / secrets.h
+// Lo que NO está en este hito (hitos posteriores):
+//   - OTAManager activado (hito 2)
+//   - WebUI / REST API / mDNS (hito 3+)
 // =============================================================================
 
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <LittleFS.h>
 #include "config.h"
+#include "secrets.h"
 #include "Logger.h"
 #include "EventBus.h"
 #include "StatsEngine.h"
@@ -34,6 +38,7 @@
 #include "LittleFsStorage.h"
 #include "InputHandler.h"
 #include "DisplayRenderer.h"
+#include "WifiManager.h"
 
 // -----------------------------------------------------------------------------
 // Hardware — SSD1306 128×64 SOFTWARE I2C.
@@ -56,6 +61,7 @@ static LittleFsStorage storage;
 static Persistence     persistence(storage);
 static InputHandler    input(bus, PIN_BUTTON);
 static DisplayRenderer renderer(u8g2, bus);
+static WifiManager     wifi(bus);                   // Fase 3 hito 1 — no bloqueante
 
 // -----------------------------------------------------------------------------
 // Estado de escena — accesible a los handlers estáticos.
@@ -174,6 +180,15 @@ static void onPersistRequested(const Event&) {
         LOG_DEBUG("Persist: saved (stage=%u hunger=%u happ=%u health=%u age=%u)",
                   s.lifeStage, s.hunger, s.happiness, s.health, s.ageMinutes);
     }
+}
+
+// WifiStateChanged: sincroniza el estado WiFi con el renderer para el icono OLED.
+// WebUI, OTA y mDNS se activan en hitos posteriores (2, 3+).
+static void onWifiStateChanged(const Event& e) {
+    WifiState s = static_cast<WifiState>(e.payload & 0xFF);
+    LOG_INFO("[wifi] state -> %u", static_cast<unsigned>(s));
+    renderer.setWifiState(s);
+    // TODO(Fase 3 hito 2): webUI.begin() / ota.begin() / MDNS cuando s == Connected
 }
 
 // LifeStateChanged: reacciona a transiciones del LifeFSM.
@@ -309,6 +324,11 @@ void setup() {
     bus.subscribe(EventType::StatsChanged,     onStatsChanged);
     bus.subscribe(EventType::PersistRequested, onPersistRequested);
     bus.subscribe(EventType::LifeStateChanged, onLifeStateChanged);
+    bus.subscribe(EventType::WifiStateChanged, onWifiStateChanged);
+
+    // WiFi no bloqueante — devuelve inmediatamente. El estado se actualiza en loop().
+    // Si WIFI_SSID está vacío en secrets.h, begin() marca Disabled y no hace nada más.
+    wifi.begin();
 
     // Configurar OneButton con callbacks via InputHandler.
     input.begin();
@@ -328,6 +348,9 @@ void setup() {
 // loop
 // =============================================================================
 void loop() {
+    // WiFi poll no bloqueante — guard interno actúa solo cada 500 ms.
+    wifi.loop();
+
     // OneButton necesita tick() en cada iteración para detectar gestos.
     input.loop();
 
