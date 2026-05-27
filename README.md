@@ -167,9 +167,16 @@ Comprueba:
 
 ## Roadmap
 
-- **Fase 2.5** — sprites reales para EGG, KID, ADULT (4 variantes según AdultType), OLD, DEAD.
-- **Fase 3** — interfaz web servida por el ESP8266 + REST `/api/v1/*` para acciones secundarias (limpiar caca, curar, regañar, dormir).
+- **Fase 2.5** ✅ — sprites reales para EGG, KID, ADULT (variante base), OLD, DEAD + animación EAT por etapa + animaciones de transición (eclosión, evolve).
+- **Fase 3** — interfaz web servida por el ESP8266 + REST `/api/v1/*` para acciones secundarias (limpiar caca, curar, regañar, dormir, **jugar**).
 - **Fase 4** — gestión de energía (auto-dim/off del OLED, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
-- **OTA diferido** — cuando haga falta actualizar la placa sin USB (carcasa montada, ubicación fija).
+- **OTA diferido** — cuando haga falta actualizar la placa sin USB.
+
+### Backlog específico (no perder)
+
+- `applyPlay` — falta implementar en StatsEngine (única acción del Tamagotchi clásico pendiente). Sube felicidad con coste de hambre.
+- **ActionMenu en pantalla** — menú con iconos navegable con 1 botón. Permite ejecutar todas las acciones sin WiFi.
+- **Sprites faltantes** — Adult sad, Old happy/sad. Baja prioridad (placeholders idle son coherentes con los estados emocionales contenidos de adultos serios y ancianos lentos).
+- **AdultType variants** — sprites distintos según `attentionScore` (athletic / normal / obese / grumpy).
 
 Planes completos en `docs/fase-1-plan.md` y `docs/fase-2-plan.md`. Plan maestro en `docs/plan.md`.

@@ -3,6 +3,11 @@
 #include "config.h"
 #include "sprites_generated.h"
 
+// Forward declaration de drawXBMx2 (helper de pintado escalado x2).
+// La implementación está más abajo en el archivo, pero render() y
+// los drawers la necesitan antes.
+static void drawXBMx2(U8G2* u8g2, int x, int y, int w, int h, const uint8_t* bitmap);
+
 // =============================================================================
 // SpriteFrames — agrupa los frames de una animación para indexar por Mood.
 // =============================================================================
@@ -27,13 +32,16 @@ struct SpriteFrames {
 static const SpriteFrames kSpritesByStage[6][4] = {
 
     // -------------------------------------------------------------------------
-    // Egg (0) — PLACEHOLDER hasta tener sprites Egg
+    // Egg (0) — sprites reales (4 frames: quieto, leve vibración, vibración, grieta)
+    // El huevo NO tiene moods narrativos (no come, no se entristece, no está feliz).
+    // Todos los moods usan los mismos 2 frames idle para coherencia visual.
+    // Los frames 2-3 quedan reservados para una eventual animación de eclosión.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Idle
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Happy  — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Sad    — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Eat    — n/a para Egg; placeholder
+        { {kSpriteEgg0, kSpriteEgg1, nullptr}, 2 },  // Idle
+        { {kSpriteEgg0, kSpriteEgg1, nullptr}, 2 },  // Happy
+        { {kSpriteEgg0, kSpriteEgg1, nullptr}, 2 },  // Sad
+        { {kSpriteEgg0, kSpriteEgg1, nullptr}, 2 },  // Eat
     },
 
     // -------------------------------------------------------------------------
@@ -47,44 +55,43 @@ static const SpriteFrames kSpritesByStage[6][4] = {
     },
 
     // -------------------------------------------------------------------------
-    // Kid (2) — PLACEHOLDER hasta tener sprites Kid
+    // Kid (2) — sprites reales: idle, happy, sad, eat.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Idle   — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Happy  — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Sad    — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Eat    — placeholder
+        { {kSpriteKidIdle0,  kSpriteKidIdle1,  nullptr},          2 },  // Idle
+        { {kSpriteKidHappy0, kSpriteKidHappy1, kSpriteKidHappy2}, 3 },  // Happy
+        { {kSpriteKidSad0,   kSpriteKidSad1,   nullptr},          2 },  // Sad
+        { {kSpriteKidEat0,   kSpriteKidEat1,   kSpriteKidEat2},   3 },  // Eat
     },
 
     // -------------------------------------------------------------------------
-    // Adult (3) — PLACEHOLDER hasta tener sprites Adult
+    // Adult (3) — sprites reales: idle, happy, eat. Sad → reusa idle.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Idle   — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Happy  — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Sad    — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Eat    — placeholder
+        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},            2 }, // Idle
+        { {kSpriteAdultHappy0, kSpriteAdultHappy1, kSpriteAdultHappy2}, 3 }, // Happy
+        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},            2 }, // Sad → reuse idle
+        { {kSpriteAdultEat0,   kSpriteAdultEat1,   kSpriteAdultEat2},   3 }, // Eat
     },
 
     // -------------------------------------------------------------------------
-    // Old (4) — PLACEHOLDER hasta tener sprites Old
+    // Old (4) — sprites reales: idle, eat. Happy/Sad → reusan idle (lentos).
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Idle   — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Happy  — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Sad    — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Eat    — placeholder
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr},        2 },  // Idle
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr},        2 },  // Happy → reuse idle
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr},        2 },  // Sad   → reuse idle
+        { {kSpriteOldEat0,  kSpriteOldEat1,  kSpriteOldEat2}, 3 },  // Eat
     },
 
     // -------------------------------------------------------------------------
-    // Dead (5) — PLACEHOLDER hasta tener sprite lápida (kSpriteDeadIdle0).
-    // Se usa kSpriteBabySad0/1: transmite estado triste mejor que idle.
+    // Dead (5) — sprite ghost real. Sin moods narrativos: todos usan el fantasma.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabySad0, kSpriteBabySad1, nullptr}, 2 },  // Idle — placeholder (sad > idle en pantalla muerte)
-        { {kSpriteBabySad0, kSpriteBabySad1, nullptr}, 2 },  // Happy — no aplica para Dead; placeholder
-        { {kSpriteBabySad0, kSpriteBabySad1, nullptr}, 2 },  // Sad   — placeholder
-        { {kSpriteBabySad0, kSpriteBabySad1, nullptr}, 2 },  // Eat   — no aplica para Dead; placeholder
+        { {kSpriteDeadGhost0, kSpriteDeadGhost1, nullptr}, 2 },  // Idle
+        { {kSpriteDeadGhost0, kSpriteDeadGhost1, nullptr}, 2 },  // Happy (n/a)
+        { {kSpriteDeadGhost0, kSpriteDeadGhost1, nullptr}, 2 },  // Sad   (n/a)
+        { {kSpriteDeadGhost0, kSpriteDeadGhost1, nullptr}, 2 },  // Eat   (n/a)
     },
 };
 
@@ -137,6 +144,16 @@ void DisplayRenderer::triggerEatAnimation() {
     eatAnimRemainingMs_ = 2400;
 }
 
+void DisplayRenderer::triggerHatchAnimation() {
+    // 2400 ms de eclosión: frames 2-3 del huevo (vibración + grieta).
+    hatchAnimRemainingMs_ = 2400;
+}
+
+void DisplayRenderer::triggerEvolveAnimation() {
+    // 1200 ms de parpadeo del sprite nuevo (efecto "evoluciona").
+    evolveAnimRemainingMs_ = 1200;
+}
+
 // -----------------------------------------------------------------------------
 // computeMood_ — determina el mood actual del Tamagochi.
 // Prioridad: Eat (one-shot timer) > Idle (dormido) > Sad > Happy > Idle.
@@ -155,9 +172,45 @@ Mood DisplayRenderer::computeMood_() const {
 // en las funciones de escena.
 // -----------------------------------------------------------------------------
 void DisplayRenderer::render() {
-    // Decrementar timer EAT one-shot: cada render = 200 ms (5 FPS).
+    // Decrementar timers de animaciones one-shot: cada render = 200 ms (5 FPS).
     if (eatAnimRemainingMs_ > 0) {
         eatAnimRemainingMs_ = (eatAnimRemainingMs_ > 200u) ? (eatAnimRemainingMs_ - 200u) : 0u;
+    }
+    if (hatchAnimRemainingMs_ > 0) {
+        hatchAnimRemainingMs_ = (hatchAnimRemainingMs_ > 200u) ? (hatchAnimRemainingMs_ - 200u) : 0u;
+    }
+    if (evolveAnimRemainingMs_ > 0) {
+        evolveAnimRemainingMs_ = (evolveAnimRemainingMs_ > 200u) ? (evolveAnimRemainingMs_ - 200u) : 0u;
+    }
+
+    // Animación de eclosión: dibujo dedicado, ignora lifeStage_ y mood.
+    // Aunque la transición ya cambió lifeStage_ a Baby, queremos mostrar
+    // el huevo rompiéndose unos segundos antes de revelar el bebé.
+    if (hatchAnimRemainingMs_ > 0) {
+        animTickCount_++;
+        if (animTickCount_ >= 2) {
+            animTickCount_ = 0;
+            animFrame_ = (animFrame_ + 1) % 2;
+        }
+        u8g2_->clearBuffer();
+        // Frames 2-3 del huevo: vibración fuerte + grieta.
+        const uint8_t* sprite = (animFrame_ % 2) ? kSpriteEgg3 : kSpriteEgg2;
+        drawXBMx2(u8g2_, 0, 4, 32, 32, sprite);
+        u8g2_->setFont(u8g2_font_6x10_tf);
+        u8g2_->drawStr(5, 85, "Eclosion");
+        u8g2_->sendBuffer();
+        return;
+    }
+
+    // Animación de evolve: parpadeo on/off del sprite normal cada 200 ms.
+    // Mientras dure, alternamos render normal con clear-buffer.
+    if (evolveAnimRemainingMs_ > 0) {
+        if ((evolveAnimRemainingMs_ / 200u) % 2u != 0u) {
+            u8g2_->clearBuffer();
+            u8g2_->sendBuffer();
+            return;
+        }
+        // Tick visible: cae al render normal (drawIdleMain_) tras este bloque.
     }
 
     // Avanza frame de animación cada 2 ticks (400 ms).

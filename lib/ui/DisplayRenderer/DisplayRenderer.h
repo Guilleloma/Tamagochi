@@ -62,6 +62,8 @@ public:
     void setAgeMinutes(uint32_t mins);           // edad en minutos, mostrada en DeadScreen
     void setDeathCount(uint16_t count);          // contador total de muertes, mostrado en DeadScreen
     void triggerEatAnimation();                  // arranca animación EAT one-shot (2400 ms)
+    void triggerHatchAnimation();                // Egg → Baby: vibración + grieta 2400 ms
+    void triggerEvolveAnimation();               // Baby→Kid/Kid→Adult/Adult→Old: parpadeo 1200 ms
 
     // Dibuja un frame completo. Llamar desde el scheduler a 5 FPS.
     void render();
@@ -82,8 +84,10 @@ private:
     uint32_t  ageMinutes_         = 0;
     uint16_t  deathCount_         = 0;
 
-    // Timer one-shot para animación EAT; decrementado 200 ms por render()
-    uint32_t  eatAnimRemainingMs_ = 0;
+    // Timers one-shot; decrementados 200 ms por render()
+    uint32_t  eatAnimRemainingMs_    = 0;
+    uint32_t  hatchAnimRemainingMs_  = 0;    // eclosión Egg → Baby
+    uint32_t  evolveAnimRemainingMs_ = 0;    // transición de etapa adulta
 
     Mood computeMood_() const;
 

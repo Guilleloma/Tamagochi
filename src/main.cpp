@@ -193,6 +193,18 @@ static void onLifeStateChanged(const Event& e) {
         renderer.setAdultType(subtype);
     }
 
+    // Animaciones de transición one-shot (visualizan el cambio).
+    // Eclosión Egg → Baby: usa frames 2-3 del huevo durante 2.4 s.
+    if (newStage == LifeStage::Baby && previousStage_ == LifeStage::Egg) {
+        renderer.triggerHatchAnimation();
+    }
+    // Crecimiento Baby/Kid/Adult → siguiente etapa: parpadeo 1.2 s.
+    else if ((newStage == LifeStage::Kid   && previousStage_ == LifeStage::Baby) ||
+             (newStage == LifeStage::Adult && previousStage_ == LifeStage::Kid)  ||
+             (newStage == LifeStage::Old   && previousStage_ == LifeStage::Adult)) {
+        renderer.triggerEvolveAnimation();
+    }
+
     if (newStage == LifeStage::Dead) {
         renderer.setLastDeathCause(lifeFSM.lastDeathCause());
         renderer.setAgeMinutes(lifeFSM.ageMinutes());
