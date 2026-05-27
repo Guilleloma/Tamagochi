@@ -11,10 +11,14 @@
 #define OLED_SDA 12  // GPIO12 — D6 en numeración NodeMCU
 #define OLED_SCL 14  // GPIO14 — D5 en numeración NodeMCU
 
-// GPIO0 = botón FLASH onboard. La placa ya tiene pull-up a 3.3V integrada
-// en la red de arranque (necesaria para modo normal vs. modo programación).
-// OneButton debe configurarse con INPUT_PULLUP redundante por seguridad.
-#define PIN_BUTTON 0
+// GPIO4 = sensor touch capacitivo TTP223 (módulo de 3 pines VCC/GND/I/O).
+// Salida push-pull active-HIGH: en reposo LOW, al tocar HIGH. No requiere
+// INPUT_PULLUP (la salida del chip ya impone el nivel) ni debounce externo
+// (el TTP223 entrega flanco limpio). InputHandler debe instanciarse con
+// activeLow=false y pullupActive=false — ver src/main.cpp.
+// GPIO0 sigue siendo el FLASH físico onboard, pero ya no lo lee la app:
+// queda exclusivamente como botón de programación para reflasheo manual.
+#define PIN_BUTTON 4
 
 // =============================================================================
 // Timings del loop principal (Fase 0 — bring-up)

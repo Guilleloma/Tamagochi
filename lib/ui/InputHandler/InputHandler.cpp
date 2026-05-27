@@ -6,8 +6,8 @@
 // instance_ estático — permite a los callbacks C acceder al objeto vivo.
 InputHandler* InputHandler::instance_ = nullptr;
 
-InputHandler::InputHandler(EventBus& bus, uint8_t pin, bool activeLow)
-    : bus_(&bus), button_(pin, activeLow)
+InputHandler::InputHandler(EventBus& bus, uint8_t pin, bool activeLow, bool pullupActive)
+    : bus_(&bus), button_(pin, activeLow, pullupActive)
 {
     // Garantía de singleton: solo un InputHandler activo en Fase 1.
     if (instance_ != nullptr) {

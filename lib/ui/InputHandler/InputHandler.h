@@ -16,7 +16,7 @@ class EventBus;  // fwd declaration — no se usa en hito 5, pero la API es vinc
 
 class InputHandler {
 public:
-    InputHandler(EventBus& bus, uint8_t pin, bool activeLow = true);
+    InputHandler(EventBus& bus, uint8_t pin, bool activeLow = true, bool pullupActive = true);
 
     void begin();
     void loop();   // delega a OneButton::tick()
