@@ -548,22 +548,34 @@ static const char* actionLabel(ActionKind action, bool sleeping) {
 }
 
 // -----------------------------------------------------------------------------
-// drawActionHud_ — HUD inferior de IdleMain con la acción navegable (Fase 4.1).
+// actionIcon — sprite XBM 16×16 asociado a cada ActionKind. Los iconos viven
+// en sprites_generated.h y se generan desde assets/sprites/action_*.png.
+// -----------------------------------------------------------------------------
+static const uint8_t* actionIcon(ActionKind action) {
+    switch (action) {
+        case ActionKind::Feed:       return kSpriteActionFeed;
+        case ActionKind::Play:       return kSpriteActionPlay;
+        case ActionKind::Clean:      return kSpriteActionClean;
+        case ActionKind::Medicate:   return kSpriteActionMedicate;
+        case ActionKind::Discipline: return kSpriteActionDiscipline;
+        case ActionKind::Sleep:      return kSpriteActionSleep;
+        case ActionKind::Heal:       return kSpriteActionHeal;
+        case ActionKind::Stats:      return kSpriteActionStats;
+    }
+    return nullptr;
+}
+
+// -----------------------------------------------------------------------------
+// drawActionHud_ — HUD inferior de IdleMain con la acción navegable (Fase 4.2).
 //
-// Ocupa y=80..127 (48 px disponibles bajo el sprite). Layout:
-//   y=80           línea separadora horizontal (drawHLine 0..63)
-//   y=84..93       label de la acción activa (fuente 6×10) centrado horizontal
-//   y=104..107     fila de dots: ■ filled para el activo, □ frame para los demás
-//   y=119..125     hint "long=OK" (fuente 5×7) alineado a la derecha
-//
-// Los dots se centran horizontalmente. Cada dot ocupa 3 px de ancho + 2 px de
-// separación → con 8 items máximo el bloque mide 38 px y cabe en los 64 lógicos.
+// Ocupa y=80..127 (48 px bajo el sprite). Discreto — el bicho es el protagonista.
+//   y=80         línea separadora (drawHLine 0..63)
+//   y=84..99     icono 16×16 de la acción activa, centrado horizontal (x=24..39)
+//   y=121        baseline del label (fuente 6×10), centrado horizontal
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawActionHud_() {
-    // Separador entre el sprite y el HUD.
     u8g2_->drawHLine(0, 80, 64);
 
-    // Sin items (no debería pasar — Stats siempre se añade) → nada que mostrar.
     if (visibleCount_ == 0) {
         return;
     }
@@ -571,38 +583,21 @@ void DisplayRenderer::drawActionHud_() {
     // Clamp defensivo: si las preconditions reducen la lista entre frames y el
     // cursor quedó fuera, lo replegamos al primer item para el render actual.
     uint8_t cursor = (selectedIndex_ < visibleCount_) ? selectedIndex_ : 0;
+    ActionKind action = visibleActions_[cursor];
 
-    // ---- Label de la acción activa (fuente 6×10, centrado) ----
-    const char* label = actionLabel(visibleActions_[cursor], stats_.isSleeping);
+    // Icono 16×16 centrado.
+    const uint8_t* icon = actionIcon(action);
+    if (icon != nullptr) {
+        u8g2_->drawXBMP(24, 84, 16, 16, icon);
+    }
+
+    // Label 6×10 centrado horizontalmente.
+    const char* label = actionLabel(action, stats_.isSleeping);
     u8g2_->setFont(u8g2_font_6x10_tf);
     int labelW = u8g2_->getStrWidth(label);
     int labelX = (64 - labelW) / 2;
     if (labelX < 0) labelX = 0;
-    u8g2_->drawStr(labelX, 93, label);
-
-    // ---- Dots de paginación ----
-    // Cada dot: 3×3 px + 2 px de gap. Bloque total = count*3 + (count-1)*2.
-    const int dotSize = 3;
-    const int dotGap  = 2;
-    int dotsBlockW = visibleCount_ * dotSize + (visibleCount_ - 1) * dotGap;
-    int dotsX0     = (64 - dotsBlockW) / 2;
-    if (dotsX0 < 0) dotsX0 = 0;
-    for (uint8_t i = 0; i < visibleCount_; ++i) {
-        int x = dotsX0 + i * (dotSize + dotGap);
-        if (i == cursor) {
-            u8g2_->drawBox(x, 104, dotSize, dotSize);
-        } else {
-            u8g2_->drawFrame(x, 104, dotSize, dotSize);
-        }
-    }
-
-    // ---- Hint footer (fuente 5×7, derecha) ----
-    u8g2_->setFont(u8g2_font_5x7_tf);
-    const char* hint = "long=OK";
-    int hintW = u8g2_->getStrWidth(hint);
-    int hintX = 64 - hintW;
-    if (hintX < 0) hintX = 0;
-    u8g2_->drawStr(hintX, 125, hint);
+    u8g2_->drawStr(labelX, 121, label);
 }
 
 // -----------------------------------------------------------------------------
