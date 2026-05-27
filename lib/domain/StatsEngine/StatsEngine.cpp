@@ -370,6 +370,39 @@ bool StatsEngine::consumeDirtyFlag() {
 }
 
 // -----------------------------------------------------------------------------
+// listAvailableActions — filtro de acciones aplicables al estado actual.
+//
+// Reglas (alineadas con preconditions de los apply*):
+//   - Feed:       !isSleeping            (applyFeed ignora si dormido)
+//   - Play:       !isSleeping            (applyPlay ignora si dormido)
+//   - Clean:      poopCount > 0          (applyClean es no-op si poop=0)
+//   - Medicate:   isSick                 (applyMedicate es no-op si !sick)
+//   - Discipline: siempre                (sin precondición en dominio)
+//   - Sleep:      siempre                (toggle on/off — label dinámico en UI)
+//   - Heal:       health < 100           (applyHeal sería no-op a 100)
+//   - Back:       siempre (último)       (no es acción real, es salida del menú)
+// -----------------------------------------------------------------------------
+uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) const {
+    uint8_t n = 0;
+
+    if (!stats_.isSleeping)   { out[n++] = ActionKind::Feed; }
+    if (!stats_.isSleeping)   { out[n++] = ActionKind::Play; }
+    if (stats_.poopCount > 0) { out[n++] = ActionKind::Clean; }
+    if (stats_.isSick)        { out[n++] = ActionKind::Medicate; }
+
+    // Discipline y Sleep son incondicionales — Sleep alterna en la UI según isSleeping.
+    out[n++] = ActionKind::Discipline;
+    out[n++] = ActionKind::Sleep;
+
+    if (stats_.health < 100)  { out[n++] = ActionKind::Heal; }
+
+    // Back siempre como última entrada para que la UI tenga salida garantizada.
+    out[n++] = ActionKind::Back;
+
+    return n;
+}
+
+// -----------------------------------------------------------------------------
 // clamp_ — clamp seguro a [0, 100] desde int
 // -----------------------------------------------------------------------------
 uint8_t StatsEngine::clamp_(int value) {
