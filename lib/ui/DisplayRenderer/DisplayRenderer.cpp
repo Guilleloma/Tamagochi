@@ -229,10 +229,24 @@ void DisplayRenderer::drawIdleMain_() {
         drawXBMx2(u8g2_, 0, 4, 32, 32, sprite);
     }
 
-    // Texto "Tamagochi" centrado bajo el sprite.
-    // Fuente 6×10, 9 chars × 6 px = 54 → x = (64-54)/2 = 5.
+    // Texto "Tamagotchi" centrado bajo el sprite (marca con T).
+    // Fuente 6×10, 10 chars × 6 px = 60 → x = (64-60)/2 = 2.
     u8g2_->setFont(u8g2_font_6x10_tf);
-    u8g2_->drawStr(5, 85, "Tamagochi");
+    u8g2_->drawStr(2, 85, "Tamagotchi");
+
+    // Contador de edad — fuente 6×10 (igual que "Tamagotchi") para legibilidad.
+    // Formato: "Xm" si <60 min, "XhYm" si >=60 min. Cap a 99h para caber.
+    char ageBuf[8];
+    if (ageMinutes_ < 60) {
+        snprintf(ageBuf, sizeof(ageBuf), "%um", static_cast<unsigned>(ageMinutes_));
+    } else {
+        uint32_t hours   = ageMinutes_ / 60;
+        uint32_t minutes = ageMinutes_ % 60;
+        if (hours > 99) hours = 99;
+        snprintf(ageBuf, sizeof(ageBuf), "%uh%um", static_cast<unsigned>(hours), static_cast<unsigned>(minutes));
+    }
+    u8g2_->setFont(u8g2_font_6x10_tf);
+    u8g2_->drawStr(0, 100, ageBuf);
 
     // Overlays asíncronos encima del buffer ya construido — antes del sendBuffer.
     drawOverlays_();

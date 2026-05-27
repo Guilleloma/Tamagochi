@@ -337,6 +337,9 @@ void loop() {
         }
         lifeFSM.tick(dt, statsEngine.stats(), statsEngine.stats().attentionScore);
 
+        // Propagar la edad al renderer para el mini-contador en IdleMain.
+        renderer.setAgeMinutes(lifeFSM.ageMinutes());
+
         // Publicar StatsChanged solo si algún stat entero cambió (dirty flag).
         if (statsEngine.consumeDirtyFlag()) {
             bus.publish({EventType::StatsChanged, 0});
