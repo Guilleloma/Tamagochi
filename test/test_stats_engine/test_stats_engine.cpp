@@ -169,6 +169,30 @@ void test_play_clamps_at_100() {
 }
 
 // =============================================================================
+// 9b. test_play_also_increases_hunger
+// applyPlay(20) sube happiness Y hunger (coste energético: amount/2).
+// Default hunger=50 → tras play(20), hunger=60.
+// =============================================================================
+void test_play_also_increases_hunger() {
+    g_engine->applyPlay(20);
+    TEST_ASSERT_EQUAL_UINT8(70, g_engine->stats().happiness);
+    TEST_ASSERT_EQUAL_UINT8(60, g_engine->stats().hunger);
+}
+
+// =============================================================================
+// 9c. test_play_ignored_when_sleeping
+// Si isSleeping, applyPlay no toca nada (no se juega dormido).
+// =============================================================================
+void test_play_ignored_when_sleeping() {
+    g_engine->applySleep(true);
+    Stats before = g_engine->stats();
+    g_engine->applyPlay(50);
+    Stats after = g_engine->stats();
+    TEST_ASSERT_EQUAL_UINT8(before.happiness, after.happiness);
+    TEST_ASSERT_EQUAL_UINT8(before.hunger, after.hunger);
+}
+
+// =============================================================================
 // 10. test_heal_increases_health
 // applyHeal(20) sube health en 20 desde un valor bajo.
 // =============================================================================
@@ -608,6 +632,8 @@ int main() {
     RUN_TEST(test_feed_clamps_at_zero);
     RUN_TEST(test_play_increases_happiness);
     RUN_TEST(test_play_clamps_at_100);
+    RUN_TEST(test_play_also_increases_hunger);
+    RUN_TEST(test_play_ignored_when_sleeping);
     RUN_TEST(test_heal_increases_health);
     RUN_TEST(test_health_decays_only_when_hungry_or_sad);
     RUN_TEST(test_dirty_flag_set_after_tick);

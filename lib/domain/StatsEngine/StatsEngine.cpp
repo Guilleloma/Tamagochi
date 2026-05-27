@@ -258,13 +258,27 @@ void StatsEngine::onFeedTriggered_() {
 }
 
 // -----------------------------------------------------------------------------
-// applyPlay
+// applyPlay — jugar sube happiness, pero también da hambre (coste energético).
+// Coste: hunger += amount/2 (jugar quema energía → necesidad de comer).
+// Ignorado si está durmiendo, consistente con applyFeed.
 // -----------------------------------------------------------------------------
 void StatsEngine::applyPlay(uint8_t amount) {
-    uint8_t prev = stats_.happiness;
+    if (stats_.isSleeping) {
+        LOG_DEBUG("applyPlay ignorado: tamagochi dormido");
+        return;
+    }
+    uint8_t prevHappy  = stats_.happiness;
+    uint8_t prevHunger = stats_.hunger;
+
     stats_.happiness = clamp_(static_cast<int>(stats_.happiness) + amount);
+    stats_.hunger    = clamp_(static_cast<int>(stats_.hunger) + amount / 2);
+
     happinessAcc_ = 0.0f;
-    if (stats_.happiness != prev) dirty_ = true;
+    hungerAcc_    = 0.0f;
+
+    if (stats_.happiness != prevHappy || stats_.hunger != prevHunger) {
+        dirty_ = true;
+    }
 }
 
 // -----------------------------------------------------------------------------
