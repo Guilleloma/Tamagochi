@@ -46,3 +46,4 @@ __pycache__/
 
 # Sprite sheets crudos de Nano Banana — regenerables, ~3MB cada uno
 assets/sprites/raw/
+.venv/

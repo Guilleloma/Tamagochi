@@ -5,11 +5,18 @@ Convierte PNGs monocromos a arrays C en PROGMEM compatibles con U8g2 drawXBMP().
 Uso:
     python3 tools/png_to_xbm.py assets/sprites/  include/sprites_generated.h
 
+Convencion del proyecto (default):
+    Los PNGs se dibujan de forma natural: fondo BLANCO + silueta NEGRA.
+    Por defecto la silueta (pixel negro) se mapea a bit=1 -> pixel ENCENDIDO en
+    el OLED SSD1306, sobre fondo APAGADO. Esto es lo que se ve correctamente
+    en el OLED del Tamagochi (silueta luminosa sobre fondo oscuro).
+
+    Para el caso opuesto (PNG con fondo negro + silueta blanca) usar --raw,
+    que aplica la convencion XBM estandar (pixel blanco -> bit=1).
+
 Convencion XBM (U8g2):
     - LSB first dentro de cada byte
     - Pixel (0,0) es el bit 0 del primer byte
-    - Pixel blanco (#FFFFFF) = bit 1 (encendido en OLED)
-    - Pixel negro (#000000) = bit 0 (apagado en OLED)
 
 Convencion de nombres PNG -> identificador C:
     baby_idle_0.png      -> kSpriteBabyIdle0
@@ -25,7 +32,7 @@ from pathlib import Path
 from PIL import Image
 
 
-def pngToXbmBytes(pngPath: Path, invert: bool = False) -> tuple[list[int], int, int]:
+def pngToXbmBytes(pngPath: Path, raw: bool = False) -> tuple[list[int], int, int]:
     img = Image.open(pngPath).convert("1")
     width, height = img.size
 
@@ -39,11 +46,10 @@ def pngToXbmBytes(pngPath: Path, invert: bool = False) -> tuple[list[int], int, 
                 col = colByte * 8 + bit
                 if col < width:
                     pixel = img.getpixel((col, row))
-                    # XBM estándar: pixel blanco -> bit=1 (ON).
-                    # Con invert: pixel negro -> bit=1 (útil cuando los PNGs
-                    # vienen con fondo blanco + sujeto negro y queremos pintar
-                    # el sujeto encendido en OLED sobre fondo apagado).
-                    shouldSet = (pixel == 0) if invert else (pixel != 0)
+                    # Default del proyecto: PNG con fondo blanco + silueta
+                    # negra -> bit=1 sobre la silueta (ON en OLED).
+                    # Con --raw: convención XBM estándar (pixel blanco -> bit=1).
+                    shouldSet = (pixel != 0) if raw else (pixel == 0)
                     if shouldSet:
                         byteVal |= (1 << bit)
             result.append(byteVal)
@@ -76,7 +82,7 @@ def cIdentifierFromFilename(filename: str) -> str:
     return f"kSprite{camel}"
 
 
-def generateHeader(inputDir: Path, outputFile: Path, invert: bool = False) -> None:
+def generateHeader(inputDir: Path, outputFile: Path, raw: bool = False) -> None:
     pngFiles = sorted(inputDir.glob("*.png"))
 
     if not pngFiles:
@@ -99,7 +105,7 @@ def generateHeader(inputDir: Path, outputFile: Path, invert: bool = False) -> No
 
     for pngPath in pngFiles:
         try:
-            data, width, height = pngToXbmBytes(pngPath, invert=invert)
+            data, width, height = pngToXbmBytes(pngPath, raw=raw)
             name = cIdentifierFromFilename(pngPath.name)
             lines.append(bytesToCArray(name, data, width, height))
             lines.append("")
@@ -120,13 +126,13 @@ def generateHeader(inputDir: Path, outputFile: Path, invert: bool = False) -> No
 
 def main() -> None:
     args = list(sys.argv[1:])
-    invert = False
-    if "--invert" in args:
-        invert = True
-        args.remove("--invert")
+    raw = False
+    if "--raw" in args:
+        raw = True
+        args.remove("--raw")
 
     if len(args) != 2:
-        print(f"Uso: {sys.argv[0]} [--invert] <directorio_png> <archivo_salida.h>")
+        print(f"Uso: {sys.argv[0]} [--raw] <directorio_png> <archivo_salida.h>")
         sys.exit(1)
 
     inputDir = Path(args[0])
@@ -137,7 +143,7 @@ def main() -> None:
         sys.exit(1)
 
     outputFile.parent.mkdir(parents=True, exist_ok=True)
-    generateHeader(inputDir, outputFile, invert=invert)
+    generateHeader(inputDir, outputFile, raw=raw)
 
 
 if __name__ == "__main__":
