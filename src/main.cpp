@@ -156,19 +156,22 @@ static void executeSelectedAction_() {
     switch (action) {
         case ActionKind::Feed:
             bus.publish({EventType::ActionFeedRequested, 20});
-            renderer.triggerEatAnimation();
+            renderer.triggerEatAnimation();   // mood EAT del sprite del personaje
             break;
         case ActionKind::Play:
             bus.publish({EventType::ActionPlayRequested, 20});
+            renderer.triggerActionAnimation(action);
             break;
         case ActionKind::Clean:
             bus.publish({EventType::ActionCleanRequested, 0});
+            renderer.triggerActionAnimation(action);
             break;
         case ActionKind::Medicate:
             bus.publish({EventType::ActionMedicateRequested, 0});
             break;
         case ActionKind::Discipline:
             bus.publish({EventType::ActionDisciplineRequested, 10});
+            renderer.triggerActionAnimation(action);
             break;
         case ActionKind::Sleep:
             // Toggle: si estaba durmiendo, despertar (0); si no, dormir (1).
@@ -177,6 +180,7 @@ static void executeSelectedAction_() {
             break;
         case ActionKind::Heal:
             bus.publish({EventType::ActionHealRequested, 20});
+            renderer.triggerActionAnimation(action);
             break;
         case ActionKind::Stats:
             // Manejado en onLongPress como transición de escena, no debería llegar.

@@ -66,6 +66,11 @@ public:
     void triggerHatchAnimation();                // Egg → Baby: vibración + grieta 2400 ms
     void triggerEvolveAnimation();               // Baby→Kid/Kid→Adult/Adult→Old: parpadeo 1200 ms
 
+    // Sustituye al sprite del personaje en IdleMain por la animación de la acción
+    // ejecutada. Solo aplica a Play, Clean, Discipline, Heal — el resto no
+    // tienen frames asociados y la llamada es no-op.
+    void triggerActionAnimation(ActionKind action);
+
     // Actualiza el estado WiFi para el indicador de esquina superior derecha.
     // Disabled → sin icono. Connecting → parpadeo. Connected/Disconnected → icono fijo.
     void setWifiState(WifiState state);
@@ -110,6 +115,12 @@ private:
     uint32_t  eatAnimRemainingMs_    = 0;
     uint32_t  hatchAnimRemainingMs_  = 0;    // eclosión Egg → Baby
     uint32_t  evolveAnimRemainingMs_ = 0;    // transición de etapa adulta
+
+    // Animación de acción ejecutada desde el HUD inferior — sustituye al sprite
+    // del personaje en IdleMain mientras dure. Duración = frameCount × 600 ms.
+    uint32_t  actionAnimRemainingMs_ = 0;
+    uint32_t  actionAnimTotalMs_     = 0;
+    ActionKind actionAnimKind_       = ActionKind::Feed;
 
     // Estado del menú de acciones físicas (Fase 4).
     // visibleActions_ contiene las acciones aplicables al estado actual del

@@ -3,10 +3,15 @@
 #include "config.h"
 #include "sprites_generated.h"
 
-// Forward declaration de drawXBMx2 (helper de pintado escalado x2).
-// La implementación está más abajo en el archivo, pero render() y
-// los drawers la necesitan antes.
+// Forward declaration de drawXBMx2 / drawXBMx4 (helpers de pintado escalado).
+// La implementación está más abajo en el archivo, pero render() y los drawers
+// las necesitan antes.
 static void drawXBMx2(U8G2* u8g2, int x, int y, int w, int h, const uint8_t* bitmap);
+static void drawXBMx4(U8G2* u8g2, int x, int y, int w, int h, const uint8_t* bitmap);
+
+// Forward declarations de los helpers de animación de acciones (Fase 4.2).
+static uint8_t actionAnimFrameCount(ActionKind action);
+static const uint8_t* actionAnimFrame(ActionKind action, uint8_t frameIdx);
 
 // =============================================================================
 // Sprites WiFi — bitmaps XBM 8×6 (6 bytes en formato LSB-first por fila).
@@ -203,6 +208,15 @@ void DisplayRenderer::triggerEvolveAnimation() {
     evolveAnimRemainingMs_ = 1200;
 }
 
+void DisplayRenderer::triggerActionAnimation(ActionKind action) {
+    uint8_t frames = actionAnimFrameCount(action);
+    if (frames == 0) return;  // acción sin animación de sustitución
+
+    actionAnimKind_         = action;
+    actionAnimTotalMs_      = static_cast<uint32_t>(frames) * 600u;  // 600 ms por frame
+    actionAnimRemainingMs_  = actionAnimTotalMs_;
+}
+
 // -----------------------------------------------------------------------------
 // computeMood_ — determina el mood actual del Tamagochi.
 // Prioridad: Eat (one-shot timer) > Idle (dormido) > Sad > Happy > Idle.
@@ -230,6 +244,9 @@ void DisplayRenderer::render() {
     }
     if (evolveAnimRemainingMs_ > 0) {
         evolveAnimRemainingMs_ = (evolveAnimRemainingMs_ > 200u) ? (evolveAnimRemainingMs_ - 200u) : 0u;
+    }
+    if (actionAnimRemainingMs_ > 0) {
+        actionAnimRemainingMs_ = (actionAnimRemainingMs_ > 200u) ? (actionAnimRemainingMs_ - 200u) : 0u;
     }
 
     // Animación de eclosión: dibujo dedicado, ignora lifeStage_ y mood.
@@ -305,12 +322,71 @@ static void drawXBMx2(U8G2* u8g2, int x, int y, int w, int h,
 }
 
 // -----------------------------------------------------------------------------
+// drawXBMx4 — pinta un sprite XBM escalado x4 (cada pixel → cuadrado 4×4).
+// Usado para los frames de animación de acciones (16×16 → 64×64) que sustituyen
+// al sprite del personaje durante la ejecución de Play/Clean/Discipline/Heal.
+// -----------------------------------------------------------------------------
+static void drawXBMx4(U8G2* u8g2, int x, int y, int w, int h,
+                       const uint8_t* bitmap) {
+    const int bytesPerRow = (w + 7) / 8;
+    for (int row = 0; row < h; ++row) {
+        for (int col = 0; col < w; ++col) {
+            uint8_t byte = pgm_read_byte(bitmap + (row * bytesPerRow) + (col / 8));
+            if (byte & (1 << (col % 8))) {
+                u8g2->drawBox(x + col * 4, y + row * 4, 4, 4);
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// actionAnimFrameCount — número de frames de animación por acción.
+// 0 indica que la acción no tiene animación de sustitución.
+// -----------------------------------------------------------------------------
+static uint8_t actionAnimFrameCount(ActionKind action) {
+    switch (action) {
+        case ActionKind::Play:       return 4;
+        case ActionKind::Clean:      return 2;
+        case ActionKind::Discipline: return 2;
+        case ActionKind::Heal:       return 2;
+        default:                     return 0;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// actionAnimFrame — sprite XBM del frame N de la animación de una acción.
+// Devuelve nullptr si la acción no tiene frames o el índice es inválido.
+// -----------------------------------------------------------------------------
+static const uint8_t* actionAnimFrame(ActionKind action, uint8_t frameIdx) {
+    switch (action) {
+        case ActionKind::Play:
+            switch (frameIdx % 4) {
+                case 0: return kSpriteActionPlay0;
+                case 1: return kSpriteActionPlay1;
+                case 2: return kSpriteActionPlay2;
+                case 3: return kSpriteActionPlay3;
+            }
+            return kSpriteActionPlay0;
+        case ActionKind::Clean:
+            return (frameIdx % 2) ? kSpriteActionClean1 : kSpriteActionClean0;
+        case ActionKind::Discipline:
+            return (frameIdx % 2) ? kSpriteActionDiscipline1 : kSpriteActionDiscipline0;
+        case ActionKind::Heal:
+            return (frameIdx % 2) ? kSpriteActionHeal1 : kSpriteActionHeal0;
+        default:
+            return nullptr;
+    }
+}
+
+// -----------------------------------------------------------------------------
 // drawIdleMain_ — pantalla principal portrait (64 wide × 128 tall).
 //
-// Layout:
-//   HUD top    (y=0..15) : edad izq | estado rotante 16×16 centro | WiFi 8×6 der
-//   Personaje  (y=16..79): sprite 32×32 escalado ×2 → 64×64
-//   HUD inferior (y=80..127): acción activa + dots + hint (drawActionHud_)
+// Layout (sprite centrado verticalmente con 16 px de aire arriba y abajo):
+//   HUD top      (y=0..15)  : edad izq | estado rotante centro | WiFi 8×6 der
+//   Aire         (y=16..31) : 16 px libres
+//   Personaje    (y=32..95) : sprite 32×32 escalado ×2 → 64×64
+//   Aire         (y=96..111): 16 px libres
+//   HUD inferior (y=112..127): icono 16×16 + label en una fila (drawActionHud_)
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawIdleMain_() {
     u8g2_->clearBuffer();
@@ -328,19 +404,34 @@ void DisplayRenderer::drawIdleMain_() {
     u8g2_->setFont(u8g2_font_6x10_tf);
     u8g2_->drawStr(0, 11, ageBuf);
 
-    // ---- Personaje: sprite 64×64 a y=16 ----
-    Mood               mood = computeMood_();
-    int                stageIdx = static_cast<int>(lifeStage_);
-    int                moodIdx  = static_cast<int>(mood);
-    const SpriteFrames& sf  = kSpritesByStage[stageIdx][moodIdx];
+    // ---- Personaje: sprite 64×64 centrado en y=32 ----
+    // Si hay animación de acción activa (Play/Clean/Disc/Heal), sustituimos el
+    // sprite del personaje por el frame de acción correspondiente escalado ×4
+    // (16×16 → 64×64). Si no, render normal del personaje según mood.
+    if (actionAnimRemainingMs_ > 0) {
+        uint8_t frames = actionAnimFrameCount(actionAnimKind_);
+        if (frames > 0) {
+            uint32_t elapsedMs = actionAnimTotalMs_ - actionAnimRemainingMs_;
+            uint8_t  frameIdx  = static_cast<uint8_t>((elapsedMs / 600u) % frames);
+            const uint8_t* actionSprite = actionAnimFrame(actionAnimKind_, frameIdx);
+            if (actionSprite != nullptr) {
+                drawXBMx4(u8g2_, 0, 32, 16, 16, actionSprite);
+            }
+        }
+    } else {
+        Mood               mood = computeMood_();
+        int                stageIdx = static_cast<int>(lifeStage_);
+        int                moodIdx  = static_cast<int>(mood);
+        const SpriteFrames& sf  = kSpritesByStage[stageIdx][moodIdx];
 
-    uint8_t frameIdx = (sf.frameCount > 0)
-                     ? (animFrame_ % sf.frameCount)
-                     : 0u;
+        uint8_t frameIdx = (sf.frameCount > 0)
+                         ? (animFrame_ % sf.frameCount)
+                         : 0u;
 
-    const uint8_t* sprite = sf.frames[frameIdx];
-    if (sprite != nullptr) {
-        drawXBMx2(u8g2_, 0, 16, 32, 32, sprite);
+        const uint8_t* sprite = sf.frames[frameIdx];
+        if (sprite != nullptr) {
+            drawXBMx2(u8g2_, 0, 32, 32, 32, sprite);
+        }
     }
 
     // ---- Overlays HUD: estado rotante a la derecha ----
@@ -566,38 +657,32 @@ static const uint8_t* actionIcon(ActionKind action) {
 }
 
 // -----------------------------------------------------------------------------
-// drawActionHud_ — HUD inferior de IdleMain con la acción navegable (Fase 4.2).
+// drawActionHud_ — HUD inferior compacto en una sola fila (Fase 4.2 refinado).
 //
-// Ocupa y=80..127 (48 px bajo el sprite). Discreto — el bicho es el protagonista.
-//   y=80         línea separadora (drawHLine 0..63)
-//   y=84..99     icono 16×16 de la acción activa, centrado horizontal (x=24..39)
-//   y=121        baseline del label (fuente 6×10), centrado horizontal
+// Ocupa solo y=112..127 (16 px). Deja toda la franja y=80..111 vacía para que
+// el bicho respire visualmente — el sprite es el protagonista.
+//   x=0..15  y=112..127  icono 16×16 de la acción activa
+//   x=18..   baseline y=124  label fuente 6×10 alineado al icono
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawActionHud_() {
-    u8g2_->drawHLine(0, 80, 64);
-
-    if (visibleCount_ == 0) {
-        return;
-    }
+    if (visibleCount_ == 0) return;
 
     // Clamp defensivo: si las preconditions reducen la lista entre frames y el
     // cursor quedó fuera, lo replegamos al primer item para el render actual.
     uint8_t cursor = (selectedIndex_ < visibleCount_) ? selectedIndex_ : 0;
     ActionKind action = visibleActions_[cursor];
 
-    // Icono 16×16 centrado.
+    // Icono 16×16 anclado abajo-izquierda.
     const uint8_t* icon = actionIcon(action);
     if (icon != nullptr) {
-        u8g2_->drawXBMP(24, 84, 16, 16, icon);
+        u8g2_->drawXBMP(0, 112, 16, 16, icon);
     }
 
-    // Label 6×10 centrado horizontalmente.
+    // Label 6×10 a la derecha del icono, centrado verticalmente respecto a él.
+    // Centro vertical del icono = y=120 → baseline 6×10 a y=124 deja el cap entre y=115..124.
     const char* label = actionLabel(action, stats_.isSleeping);
     u8g2_->setFont(u8g2_font_6x10_tf);
-    int labelW = u8g2_->getStrWidth(label);
-    int labelX = (64 - labelW) / 2;
-    if (labelX < 0) labelX = 0;
-    u8g2_->drawStr(labelX, 121, label);
+    u8g2_->drawStr(18, 124, label);
 }
 
 // -----------------------------------------------------------------------------
