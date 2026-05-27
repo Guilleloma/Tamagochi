@@ -22,12 +22,11 @@
 static constexpr uint8_t kMaxPoopCount = 9;
 
 // -----------------------------------------------------------------------------
-// ActionKind — enumera las acciones invocables desde la UI física (menú OLED).
-// Coincide en orden con las opciones del dashboard web. `Back` no es una acción
-// real sobre el dominio: el código de UI la usa como ítem de salida del menú.
+// ActionKind — enumera los items navegables del HUD inferior de IdleMain.
+// Las primeras 7 corresponden a las acciones del dashboard web (mismo orden);
+// `Stats` no es una acción de dominio: la UI la usa para entrar a StatsView.
 // El valor numérico no se persiste ni se publica en eventos — solo se usa para
-// que la UI seleccione qué EventType emitir, así que es seguro reordenar siempre
-// que se mantenga el caso `Back` como salida.
+// que la UI seleccione qué EventType emitir o qué escena abrir.
 // -----------------------------------------------------------------------------
 enum class ActionKind : uint8_t {
     Feed = 0,
@@ -37,11 +36,11 @@ enum class ActionKind : uint8_t {
     Discipline,
     Sleep,
     Heal,
-    Back   // salida del menú (no genera evento)
+    Stats   // abre la pantalla densa de stats (no genera evento de acción)
 };
 
 // Tamaño máximo del buffer destino para listAvailableActions.
-// 7 acciones + 1 entrada Back = 8 items en el peor caso.
+// 7 acciones + 1 entrada Stats = 8 items en el peor caso.
 static constexpr uint8_t kMaxActionMenuItems = 8;
 
 struct Stats {

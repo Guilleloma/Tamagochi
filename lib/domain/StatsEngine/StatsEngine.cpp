@@ -380,7 +380,7 @@ bool StatsEngine::consumeDirtyFlag() {
 //   - Discipline: siempre                (sin precondición en dominio)
 //   - Sleep:      siempre                (toggle on/off — label dinámico en UI)
 //   - Heal:       health < 100           (applyHeal sería no-op a 100)
-//   - Back:       siempre (último)       (no es acción real, es salida del menú)
+//   - Stats:      siempre (último)       (no es acción real, abre StatsView)
 // -----------------------------------------------------------------------------
 uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) const {
     uint8_t n = 0;
@@ -396,8 +396,8 @@ uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) c
 
     if (stats_.health < 100)  { out[n++] = ActionKind::Heal; }
 
-    // Back siempre como última entrada para que la UI tenga salida garantizada.
-    out[n++] = ActionKind::Back;
+    // Stats siempre como última entrada — el HUD inferior la usa para abrir StatsView.
+    out[n++] = ActionKind::Stats;
 
     return n;
 }

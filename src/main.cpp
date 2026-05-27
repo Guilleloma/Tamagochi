@@ -148,17 +148,9 @@ static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const L
 // Deben ejecutarse en < 2 ms para no romper el budget de 5 FPS (EventBus síncrono).
 // =============================================================================
 
-// Helper de quick-feed: replica el comportamiento del long-press original.
-// Compartido entre IdleMain y StatsView para que el atajo de feed sea consistente.
-static void quickFeed_() {
-    bus.publish({EventType::ActionFeedRequested, 20});  // mismo canal que dashboard
-    renderer.triggerEatAnimation();
-    LOG_INFO("Quick feed (long-press) -> hunger=%u", statsEngine.stats().hunger);
-}
-
-// Publica el EventType asociado a la acción seleccionada en el menú físico.
-// Excepto Back, todas las acciones cierran el menú y vuelven a IdleMain.
-// El payload por defecto reproduce los defaults del dashboard (ver WebUI).
+// Publica el EventType asociado a la acción del HUD inferior y lanza animación
+// si aplica. Stats no se gestiona aquí (lo maneja onLongPress abriendo escena).
+// Los payloads por defecto reproducen los del dashboard (ver WebUI).
 static void executeSelectedAction_() {
     ActionKind action = renderer.currentSelectedAction();
     switch (action) {
@@ -186,63 +178,57 @@ static void executeSelectedAction_() {
         case ActionKind::Heal:
             bus.publish({EventType::ActionHealRequested, 20});
             break;
-        case ActionKind::Back:
-            // No-op: solo cierra el menú.
+        case ActionKind::Stats:
+            // Manejado en onLongPress como transición de escena, no debería llegar.
             break;
     }
-    currentScene = Scene::IdleMain;
-    renderer.setScene(Scene::IdleMain);
-    LOG_INFO("Action menu: executed %u -> IdleMain", static_cast<unsigned>(action));
+    LOG_INFO("Action HUD: executed %u", static_cast<unsigned>(action));
 }
 
-// Botón corto: navega el ciclo IdleMain → StatsView → ActionsMenu → IdleMain.
-// Dentro de ActionsMenu, el short click mueve el cursor al siguiente item.
-// No reacciona en DeadScreen (botón largo lo manejará si añadimos reset físico)
-// ni en OtaProgress (la UI no debe responder durante una actualización).
+// Botón corto:
+//   IdleMain  → refresca preconditions y avanza el cursor del HUD inferior.
+//   StatsView → cierra StatsView y vuelve al HUD principal.
+// No reacciona en DeadScreen ni en OtaProgress (UI inerte durante actualizacion).
 static void onShortClick(const Event&) {
     if (lifeFSM.stage() == LifeStage::Dead) return;
     if (currentScene == Scene::OtaProgress) return;
 
     switch (currentScene) {
         case Scene::IdleMain:
-            currentScene = Scene::StatsView;
-            renderer.setScene(currentScene);
-            LOG_INFO("Scene -> StatsView");
-            break;
-        case Scene::StatsView:
-            renderer.refreshActionMenu(statsEngine);
-            currentScene = Scene::ActionsMenu;
-            renderer.setScene(currentScene);
-            LOG_INFO("Scene -> ActionsMenu");
-            break;
-        case Scene::ActionsMenu:
             // Recalcular visibles antes de avanzar — preconditions pueden haber
-            // cambiado (decay, tick) desde la última entrada al menú.
+            // cambiado desde el último click (decay, acción remota desde dashboard).
             renderer.refreshActionMenu(statsEngine);
             renderer.moveCursor();
+            break;
+        case Scene::StatsView:
+            currentScene = Scene::IdleMain;
+            renderer.setScene(currentScene);
+            LOG_INFO("Scene -> IdleMain (from StatsView)");
             break;
         default:
             break;
     }
 }
 
-// Botón largo: en IdleMain/StatsView ejecuta quick-feed (atajo legado);
-// en ActionsMenu ejecuta la acción seleccionada y cierra el menú.
+// Botón largo:
+//   IdleMain  → ejecuta la acción activa del HUD inferior. Si la activa es
+//               Stats, abre StatsView en lugar de publicar evento.
+//   StatsView → no-op (long press solo tiene semantica en IdleMain).
 static void onLongPress(const Event&) {
     if (lifeFSM.stage() == LifeStage::Dead) return;
     if (currentScene == Scene::OtaProgress) return;
 
-    switch (currentScene) {
-        case Scene::IdleMain:
-        case Scene::StatsView:
-            quickFeed_();
-            break;
-        case Scene::ActionsMenu:
-            executeSelectedAction_();
-            break;
-        default:
-            break;
+    if (currentScene != Scene::IdleMain) return;
+
+    ActionKind action = renderer.currentSelectedAction();
+    if (action == ActionKind::Stats) {
+        currentScene = Scene::StatsView;
+        renderer.setScene(currentScene);
+        LOG_INFO("Scene -> StatsView (from HUD)");
+        return;
     }
+
+    executeSelectedAction_();
 }
 
 // StatsChanged: sincroniza la copia interna del renderer con el estado actual.
@@ -497,6 +483,11 @@ void setup() {
     renderer.setLastDeathCause(loaded.lastDeathCauseCode);
     renderer.setAgeMinutes(loaded.ageMinutes);
     renderer.setDeathCount(loaded.deathCount);
+
+    // Inicializar el HUD inferior con las acciones aplicables al estado cargado,
+    // para que el primer frame de IdleMain ya muestre el cursor en una entrada
+    // válida y los dots de paginación reflejen las preconditions correctas.
+    renderer.refreshActionMenu(statsEngine);
 
     // Si arranca ya muerto (power-loss durante DeadScreen), restaurar la escena.
     if (lifeFSM.stage() == LifeStage::Dead) {
