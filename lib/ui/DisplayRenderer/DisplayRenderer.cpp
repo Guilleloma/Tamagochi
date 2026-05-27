@@ -307,37 +307,15 @@ static void drawXBMx2(U8G2* u8g2, int x, int y, int w, int h,
 // -----------------------------------------------------------------------------
 // drawIdleMain_ — pantalla principal portrait (64 wide × 128 tall).
 //
-// Selecciona sprite según etapa de vida (kSpritesByStage) y mood calculado
-// con computeMood_(). Indexa el frame con animFrame_ % frameCount para
-// soportar animaciones de 1, 2 o 3 frames sin overflow.
+// Layout:
+//   HUD top (y=0..15): edad izq | estado rotante 16×16 centro | WiFi 8×6 der
+//   Personaje (y=16..79): sprite 32×32 escalado ×2 → 64×64
+//   Zona libre (y=80..127): reservada para acciones futuras
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawIdleMain_() {
     u8g2_->clearBuffer();
 
-    Mood               mood = computeMood_();
-    int                stageIdx = static_cast<int>(lifeStage_);
-    int                moodIdx  = static_cast<int>(mood);
-    const SpriteFrames& sf  = kSpritesByStage[stageIdx][moodIdx];
-
-    // Guardia defensiva: si frameCount es 0 (no debería ocurrir con la tabla
-    // actual, pero evita UB en producción).
-    uint8_t frameIdx = (sf.frameCount > 0)
-                     ? (animFrame_ % sf.frameCount)
-                     : 0u;
-
-    const uint8_t* sprite = sf.frames[frameIdx];
-    if (sprite != nullptr) {
-        // Sprite 32×32 escalado ×2 → 64×64, ancho completo, y=4..68.
-        drawXBMx2(u8g2_, 0, 4, 32, 32, sprite);
-    }
-
-    // Texto "Tamagotchi" centrado bajo el sprite (marca con T).
-    // Fuente 6×10, 10 chars × 6 px = 60 → x = (64-60)/2 = 2.
-    u8g2_->setFont(u8g2_font_6x10_tf);
-    u8g2_->drawStr(2, 85, "Tamagotchi");
-
-    // Contador de edad — fuente 6×10 (igual que "Tamagotchi") para legibilidad.
-    // Formato: "Xm" si <60 min, "XhYm" si >=60 min. Cap a 99h para caber.
+    // ---- HUD top: edad arriba-izquierda ----
     char ageBuf[8];
     if (ageMinutes_ < 60) {
         snprintf(ageBuf, sizeof(ageBuf), "%um", static_cast<unsigned>(ageMinutes_));
@@ -348,96 +326,82 @@ void DisplayRenderer::drawIdleMain_() {
         snprintf(ageBuf, sizeof(ageBuf), "%uh%um", static_cast<unsigned>(hours), static_cast<unsigned>(minutes));
     }
     u8g2_->setFont(u8g2_font_6x10_tf);
-    u8g2_->drawStr(0, 100, ageBuf);
+    u8g2_->drawStr(0, 11, ageBuf);
 
-    // Overlays asíncronos encima del buffer ya construido — antes del sendBuffer.
+    // ---- Personaje: sprite 64×64 a y=16 ----
+    Mood               mood = computeMood_();
+    int                stageIdx = static_cast<int>(lifeStage_);
+    int                moodIdx  = static_cast<int>(mood);
+    const SpriteFrames& sf  = kSpritesByStage[stageIdx][moodIdx];
+
+    uint8_t frameIdx = (sf.frameCount > 0)
+                     ? (animFrame_ % sf.frameCount)
+                     : 0u;
+
+    const uint8_t* sprite = sf.frames[frameIdx];
+    if (sprite != nullptr) {
+        drawXBMx2(u8g2_, 0, 16, 32, 32, sprite);
+    }
+
+    // ---- Overlays HUD: estado rotante a la derecha ----
     drawOverlays_();
 
-    // Icono WiFi (8×6 px, esquina superior derecha). No interfiere con overlays
-    // full-screen (SICK/POOP) — es un sprite de esquina, no un overlay de prioridad.
+    // ---- WiFi: esquina sup-der del HUD ----
     drawWifiIcon_();
 
     u8g2_->sendBuffer();
 }
 
 // -----------------------------------------------------------------------------
-// drawOverlays_ — dibuja overlays de condición encima del sprite base.
+// drawOverlays_ — estado rotante 16×16 en el HUD top, posición fija (x=32, y=0).
 //
-// Layout portrait 64×128. El sprite del personaje ocupa x=0..63, y=4..67.
-// Zona libre arriba: y=0..3 (mínima). Zona libre abajo: y=68..127.
+// Construye la lista de estados activos en orden de prioridad y muestra uno
+// cada 1.5 s (≈ 7 ticks a 5 FPS) cuando hay más de uno. Si solo hay uno, se
+// queda fijo. Si no hay ninguno, no se pinta nada.
 //
-// Overlays disponibles (plan §6.4):
-//
-//   Sick        16×16 — top-left  (x=4, y=4). Prioridad máxima.
-//   SleepingZ   16×16 — top, animado 800ms. x=42 normal; x=24 si Sick también activo.
-//   Hungry      16×16 — parpadeo 600ms — x=48, y=68 (justo bajo el sprite).
-//   Poop        16×16 — esquina inf-izquierda, hasta 3 cacas separadas 18px en x.
-//                        y=110 (última fila libre antes de borde, sin solapar texto "Tamagochi").
-//
-// Nota sobre el texto "Tamagochi": desplazado a y=85 (desde y=90) para dejar
-// espacio en y=88..104 para el overlay Hungry, y y=108..124 para las cacas.
+// Estados (orden de aparición en la rotación):
+//   1. Sick      — kSpriteOverlaySick      cuando stats_.isSick
+//   2. SleepingZ — kSpriteOverlaySleepZ0/1 alterna cada 800 ms si isSleeping
+//   3. Hungry    — kSpriteOverlayHungry0   cuando hunger >= 80 && !isSleeping
+//   4. Poop      — kSpriteOverlayPoop      cuando poopCount > 0
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawOverlays_() {
-    const bool sickShown  = stats_.isSick;
-    const bool sleepShown = stats_.isSleeping;
+    const uint8_t* statuses[4];
+    uint8_t        count = 0;
 
-    // -------------------------------------------------------------------------
-    // Sick (top-left) — prioridad sobre SleepingZ en la misma zona.
-    // -------------------------------------------------------------------------
-    if (sickShown) {
-        u8g2_->drawXBMP(4, 4, 16, 16, kSpriteOverlaySick);
+    if (stats_.isSick) {
+        statuses[count++] = kSpriteOverlaySick;
     }
-
-    // -------------------------------------------------------------------------
-    // SleepingZ (top, animado cada 800 ms = 4 ticks a 5 FPS).
-    // Si Sick también activo, Z se desplaza a x=24 para no solapar.
-    // -------------------------------------------------------------------------
-    if (sleepShown) {
-        // (animFrame_ / 4) % 2 → cambia cada 4 ticks = 800 ms
-        const uint8_t* zSprite = ((animFrame_ / 4) % 2 == 0)
-                                 ? kSpriteOverlaySleepZ0
-                                 : kSpriteOverlaySleepZ1;
-        const int zX = sickShown ? 24 : 42;
-        u8g2_->drawXBMP(zX, 0, 16, 16, zSprite);
+    if (stats_.isSleeping) {
+        statuses[count++] = ((animFrame_ / 4) % 2 == 0)
+                          ? kSpriteOverlaySleepZ0
+                          : kSpriteOverlaySleepZ1;
     }
-
-    // -------------------------------------------------------------------------
-    // Hungry (parpadeo cada 600 ms = 3 ticks a 5 FPS).
-    // Solo visible cuando hunger >= 80 y el Tamagochi no está dormido.
-    // Posición: x=48, y=68 (inmediatamente bajo el sprite del personaje).
-    // -------------------------------------------------------------------------
     if (stats_.hunger >= 80 && !stats_.isSleeping) {
-        // visible los ticks pares → mitad del tiempo encendido
-        if ((animFrame_ / 3) % 2 == 0) {
-            u8g2_->drawXBMP(48, 68, 16, 16, kSpriteOverlayHungry0);
-        }
+        statuses[count++] = kSpriteOverlayHungry0;
+    }
+    if (stats_.poopCount > 0) {
+        statuses[count++] = kSpriteOverlayPoop;
     }
 
-    // -------------------------------------------------------------------------
-    // Poop (esquina inferior-izquierda).
-    // Máximo 3 cacas visibles aunque poopCount sea mayor.
-    // Cada caca 16×16, separadas 18px en x. y=110 deja margen al borde inferior.
-    // -------------------------------------------------------------------------
-    int poopVisible = stats_.poopCount;
-    if (poopVisible > 3) poopVisible = 3;
-    for (int i = 0; i < poopVisible; ++i) {
-        u8g2_->drawXBMP(i * 18, 110, 16, 16, kSpriteOverlayPoop);
-    }
+    if (count == 0) return;
+
+    // Rotación cada 7 ticks (≈ 1.4 s a 5 FPS). Si solo hay 1, idx siempre 0.
+    uint8_t idx = (count > 1) ? ((animFrame_ / 7) % count) : 0;
+    u8g2_->drawXBMP(32, 0, 16, 16, statuses[idx]);
 }
 
 // -----------------------------------------------------------------------------
-// drawWifiIcon_ — icono WiFi 8×6 px en esquina superior derecha (56, 0).
+// drawWifiIcon_ — icono WiFi 8×6 px en esquina superior derecha del HUD.
 //
-// Se pinta sobre cualquier escena excepto OtaProgress (donde la pantalla de
-// actualización tiene prioridad absoluta).
+// Posición: x=56..63, y=5..10 (centrado vertical en HUD de 16 px de alto).
+// Se pinta sobre cualquier escena excepto OtaProgress.
 //
-// Política de visibilidad según plan §6.2:
+// Política de visibilidad:
 //   Disabled     → no se pinta nada.
 //   Connected    → kSpriteWifiOn fijo.
 //   Disconnected → kSpriteWifiOff fijo.
-//   Connecting   → kSpriteWifiOff con blink 500ms (animFrame_ par = visible).
-//     A 5 FPS (200 ms/frame), animFrame_ % 2 alterna cada 2 frames = 400 ms.
-//     Es la aproximación más cercana a 500ms sin timer dedicado.
+//   Connecting   → kSpriteWifiOff con blink ~400 ms (animFrame_ par = visible).
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawWifiIcon_() {
     if (wifiState_ == WifiState::Disabled) return;
@@ -448,14 +412,12 @@ void DisplayRenderer::drawWifiIcon_() {
         sprite = kSpriteWifiOn;
     } else {
         sprite = kSpriteWifiOff;
-        // Blink cuando está intentando conectar: ocultar en frames impares.
         if (wifiState_ == WifiState::Connecting && (animFrame_ % 2) != 0) {
             return;
         }
     }
 
-    // drawXBMP: x=56, y=0, w=8, h=6 — esquina superior derecha portrait 64×128.
-    u8g2_->drawXBMP(56, 0, 8, 6, sprite);
+    u8g2_->drawXBMP(56, 5, 8, 6, sprite);
 }
 
 // -----------------------------------------------------------------------------
