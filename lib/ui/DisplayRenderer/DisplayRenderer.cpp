@@ -280,7 +280,6 @@ void DisplayRenderer::render() {
     switch (scene_) {
         case Scene::IdleMain:    drawIdleMain_();    break;
         case Scene::StatsView:   drawStatsView_();   break;
-        case Scene::ActionsMenu: drawActionsMenu_(); break;
         case Scene::OtaProgress: drawOtaProgress_(); break;
         case Scene::DeadScreen:  drawDeadScreen_();  break;
     }
@@ -309,9 +308,9 @@ static void drawXBMx2(U8G2* u8g2, int x, int y, int w, int h,
 // drawIdleMain_ — pantalla principal portrait (64 wide × 128 tall).
 //
 // Layout:
-//   HUD top (y=0..15): edad izq | estado rotante 16×16 centro | WiFi 8×6 der
-//   Personaje (y=16..79): sprite 32×32 escalado ×2 → 64×64
-//   Zona libre (y=80..127): reservada para acciones futuras
+//   HUD top    (y=0..15) : edad izq | estado rotante 16×16 centro | WiFi 8×6 der
+//   Personaje  (y=16..79): sprite 32×32 escalado ×2 → 64×64
+//   HUD inferior (y=80..127): acción activa + dots + hint (drawActionHud_)
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawIdleMain_() {
     u8g2_->clearBuffer();
@@ -349,6 +348,9 @@ void DisplayRenderer::drawIdleMain_() {
 
     // ---- WiFi: esquina sup-der del HUD ----
     drawWifiIcon_();
+
+    // ---- HUD inferior: acción activa + dots + hint ----
+    drawActionHud_();
 
     u8g2_->sendBuffer();
 }
@@ -437,7 +439,7 @@ void DisplayRenderer::drawWifiIcon_() {
 //   y=70   "Enf:Y/N  Dor:Y/N"
 //   y=78   "Caca:N"
 //   y=88   "Edad: NhNm"
-//   y=100  hint footer "click=Acciones"
+//   y=100  hint footer "click=Back"
 //
 // Las barras (24 px de ancho, label de 4 chars × 5 px = 20 px, valor a la derecha)
 // caben en los 64 px lógicos del portrait. Valores entre 0 y 100 mapean a 0..22 px
@@ -514,8 +516,8 @@ void DisplayRenderer::drawStatsView_() {
     }
     u8g2_->drawStr(0, 88, ageBuf);
 
-    // Hint footer: invita al usuario a navegar al menú de acciones.
-    u8g2_->drawStr(0, 100, "click=Menu");
+    // Hint footer: short click cierra esta vista y vuelve al HUD principal.
+    u8g2_->drawStr(0, 100, "click=Back");
 
 #ifdef TURBO_MODE
     drawTurboBanner_();
@@ -527,75 +529,106 @@ void DisplayRenderer::drawStatsView_() {
 }
 
 // -----------------------------------------------------------------------------
-// drawActionsMenu_ — menú navegable circular de acciones físicas (Fase 4).
-//
-// Layout portrait 64×128, fuente `u8g2_font_5x7_tf`:
-//   y=7    "ACCIONES"  + wifi icon
-//   y=10   línea separadora
-//   y=20.. lista vertical de items (8 px por fila): "► Label" o "  Label"
-//   y=120  hint footer "long=OK"
-//
-// El cursor `►` (chr 0x10 ASCII no, usamos '>') marca selectedIndex_. Los items
-// se dibujan de visibleActions_[0..visibleCount_) tal cual los rellenó
-// listAvailableActions(). Sleep tiene label dinámico según isSleeping.
+// actionLabel — etiqueta del HUD inferior para una ActionKind. Sleep alterna
+// según isSleeping para reflejar el toggle. Stats es la entrada a StatsView.
+// Mayúsculas: contrastan con el resto de fuentes pequeñas y dan presencia.
 // -----------------------------------------------------------------------------
-void DisplayRenderer::drawActionsMenu_() {
-    u8g2_->clearBuffer();
-    u8g2_->setFont(u8g2_font_5x7_tf);
-
-    u8g2_->drawStr(0, 7, "ACCIONES");
-    u8g2_->drawHLine(0, 10, 64);
-
-    // Salvaguarda: si por algún motivo no hay items, mostrar mensaje y salir.
-    // No debería ocurrir — Back siempre se añade por listAvailableActions.
-    if (visibleCount_ == 0) {
-        u8g2_->drawStr(0, 24, "(vacio)");
-        drawWifiIcon_();
-        u8g2_->sendBuffer();
-        return;
+static const char* actionLabel(ActionKind action, bool sleeping) {
+    switch (action) {
+        case ActionKind::Feed:       return "FEED";
+        case ActionKind::Play:       return "PLAY";
+        case ActionKind::Clean:      return "CLEAN";
+        case ActionKind::Medicate:   return "MED";
+        case ActionKind::Discipline: return "DISC";
+        case ActionKind::Sleep:      return sleeping ? "WAKE" : "SLEEP";
+        case ActionKind::Heal:       return "HEAL";
+        case ActionKind::Stats:      return "STATS";
     }
-
-    // Defensivo: clampa selectedIndex_ al rango válido por si refreshActionMenu
-    // recortó la lista entre frames (p.ej. la enfermedad pasó y Medicate se fue).
-    uint8_t cursor = (selectedIndex_ < visibleCount_) ? selectedIndex_ : 0;
-
-    for (uint8_t i = 0; i < visibleCount_; ++i) {
-        int y = 20 + static_cast<int>(i) * 9;
-        if (y > 110) break;   // protección por si crece la lista
-
-        const char* prefix = (i == cursor) ? ">" : " ";
-        const char* label  = "?";
-        switch (visibleActions_[i]) {
-            case ActionKind::Feed:       label = "Feed";       break;
-            case ActionKind::Play:       label = "Play";       break;
-            case ActionKind::Clean:      label = "Clean";      break;
-            case ActionKind::Medicate:   label = "Med";        break;
-            case ActionKind::Discipline: label = "Disc";       break;
-            case ActionKind::Sleep:      label = stats_.isSleeping ? "Despertar" : "Sleep"; break;
-            case ActionKind::Heal:       label = "Heal";       break;
-            case ActionKind::Back:       label = "< Volver";   break;
-        }
-
-        char rowBuf[16];
-        snprintf(rowBuf, sizeof(rowBuf), "%s %s", prefix, label);
-        u8g2_->drawStr(0, y, rowBuf);
-    }
-
-    // Hint footer.
-    u8g2_->drawStr(0, 120, "long=OK");
-
-    drawWifiIcon_();
-    u8g2_->sendBuffer();
+    return "?";
 }
 
 // -----------------------------------------------------------------------------
-// refreshActionMenu — recalcula visibleActions_ a partir del StatsEngine actual
-// y resetea el cursor al primer item. Invocar al entrar en Scene::ActionsMenu
-// o tras ejecutar una acción que pueda cambiar las preconditions.
+// drawActionHud_ — HUD inferior de IdleMain con la acción navegable (Fase 4.1).
+//
+// Ocupa y=80..127 (48 px disponibles bajo el sprite). Layout:
+//   y=80           línea separadora horizontal (drawHLine 0..63)
+//   y=84..93       label de la acción activa (fuente 6×10) centrado horizontal
+//   y=104..107     fila de dots: ■ filled para el activo, □ frame para los demás
+//   y=119..125     hint "long=OK" (fuente 5×7) alineado a la derecha
+//
+// Los dots se centran horizontalmente. Cada dot ocupa 3 px de ancho + 2 px de
+// separación → con 8 items máximo el bloque mide 38 px y cabe en los 64 lógicos.
+// -----------------------------------------------------------------------------
+void DisplayRenderer::drawActionHud_() {
+    // Separador entre el sprite y el HUD.
+    u8g2_->drawHLine(0, 80, 64);
+
+    // Sin items (no debería pasar — Stats siempre se añade) → nada que mostrar.
+    if (visibleCount_ == 0) {
+        return;
+    }
+
+    // Clamp defensivo: si las preconditions reducen la lista entre frames y el
+    // cursor quedó fuera, lo replegamos al primer item para el render actual.
+    uint8_t cursor = (selectedIndex_ < visibleCount_) ? selectedIndex_ : 0;
+
+    // ---- Label de la acción activa (fuente 6×10, centrado) ----
+    const char* label = actionLabel(visibleActions_[cursor], stats_.isSleeping);
+    u8g2_->setFont(u8g2_font_6x10_tf);
+    int labelW = u8g2_->getStrWidth(label);
+    int labelX = (64 - labelW) / 2;
+    if (labelX < 0) labelX = 0;
+    u8g2_->drawStr(labelX, 93, label);
+
+    // ---- Dots de paginación ----
+    // Cada dot: 3×3 px + 2 px de gap. Bloque total = count*3 + (count-1)*2.
+    const int dotSize = 3;
+    const int dotGap  = 2;
+    int dotsBlockW = visibleCount_ * dotSize + (visibleCount_ - 1) * dotGap;
+    int dotsX0     = (64 - dotsBlockW) / 2;
+    if (dotsX0 < 0) dotsX0 = 0;
+    for (uint8_t i = 0; i < visibleCount_; ++i) {
+        int x = dotsX0 + i * (dotSize + dotGap);
+        if (i == cursor) {
+            u8g2_->drawBox(x, 104, dotSize, dotSize);
+        } else {
+            u8g2_->drawFrame(x, 104, dotSize, dotSize);
+        }
+    }
+
+    // ---- Hint footer (fuente 5×7, derecha) ----
+    u8g2_->setFont(u8g2_font_5x7_tf);
+    const char* hint = "long=OK";
+    int hintW = u8g2_->getStrWidth(hint);
+    int hintX = 64 - hintW;
+    if (hintX < 0) hintX = 0;
+    u8g2_->drawStr(hintX, 125, hint);
+}
+
+// -----------------------------------------------------------------------------
+// refreshActionMenu — recalcula visibleActions_ a partir del StatsEngine actual.
+//
+// Política de cursor (Fase 4.1): preserva la posición del cursor si la acción
+// previa sigue presente en la nueva lista. Si desapareció (p.ej. Medicate ya no
+// aplica porque el bicho se curó), el cursor se replega al primer item.
+// Esta política aporta continuidad visual al usuario tras ejecutar acciones.
 // -----------------------------------------------------------------------------
 void DisplayRenderer::refreshActionMenu(const StatsEngine& engine) {
-    visibleCount_  = engine.listAvailableActions(visibleActions_);
+    // Recordar la acción seleccionada antes del recálculo (si existía).
+    ActionKind previous = (visibleCount_ > 0 && selectedIndex_ < visibleCount_)
+                        ? visibleActions_[selectedIndex_]
+                        : ActionKind::Feed;
+
+    visibleCount_ = engine.listAvailableActions(visibleActions_);
+
+    // Buscar la acción anterior en la nueva lista para preservar el cursor.
     selectedIndex_ = 0;
+    for (uint8_t i = 0; i < visibleCount_; ++i) {
+        if (visibleActions_[i] == previous) {
+            selectedIndex_ = i;
+            break;
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -607,11 +640,12 @@ void DisplayRenderer::moveCursor() {
 }
 
 // -----------------------------------------------------------------------------
-// currentSelectedAction — devuelve la acción bajo el cursor. Back si no hay items.
+// currentSelectedAction — devuelve la acción bajo el cursor. Stats es el item
+// garantizado por listAvailableActions, así que sirve como fallback seguro.
 // -----------------------------------------------------------------------------
 ActionKind DisplayRenderer::currentSelectedAction() const {
-    if (visibleCount_ == 0)             return ActionKind::Back;
-    if (selectedIndex_ >= visibleCount_) return ActionKind::Back;
+    if (visibleCount_ == 0)              return ActionKind::Stats;
+    if (selectedIndex_ >= visibleCount_) return ActionKind::Stats;
     return visibleActions_[selectedIndex_];
 }
 
