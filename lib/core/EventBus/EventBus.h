@@ -41,6 +41,13 @@ enum class EventType : uint8_t {
     OtaEnded,           // actualización completada; ESP reinicia justo después
     OtaError,
     WifiStateChanged,   // payload & 0xFF = WifiState enum value
+    ActionFeedRequested,        // payload = amount (1-100)
+    ActionPlayRequested,        // payload = amount (1-100)
+    ActionHealRequested,        // payload = amount (1-100)
+    ActionCleanRequested,       // payload = 0 (sin amount)
+    ActionMedicateRequested,    // payload = 0
+    ActionDisciplineRequested,  // payload = amount (1-100)
+    ActionSleepRequested,       // payload = 0 (off) / 1 (on)
     EventTypeCount      // centinela — mantener al final siempre
 };
 

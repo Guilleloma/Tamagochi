@@ -245,6 +245,63 @@ static void onOtaError(const Event& e) {
     currentScene = Scene::IdleMain;
 }
 
+// =============================================================================
+// Handlers de acciones WebUI (hito 6)
+// Publicados por WebUI al EventBus; ejecutados síncronamente antes de que
+// WebUI envíe la respuesta HTTP. Aplican la acción y persisten.
+// =============================================================================
+
+static void onActionFeed(const Event& e) {
+    statsEngine.applyFeed(static_cast<uint8_t>(e.payload));
+    renderer.triggerEatAnimation();
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] feed +%d -> hunger=%u", static_cast<int>(e.payload), statsEngine.stats().hunger);
+}
+
+static void onActionPlay(const Event& e) {
+    statsEngine.applyPlay(static_cast<uint8_t>(e.payload));
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] play +%d -> happiness=%u", static_cast<int>(e.payload), statsEngine.stats().happiness);
+}
+
+static void onActionHeal(const Event& e) {
+    statsEngine.applyHeal(static_cast<uint8_t>(e.payload));
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] heal +%d -> health=%u", static_cast<int>(e.payload), statsEngine.stats().health);
+}
+
+static void onActionClean(const Event&) {
+    statsEngine.applyClean();
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] clean -> poop=%u", statsEngine.stats().poopCount);
+}
+
+static void onActionMedicate(const Event&) {
+    statsEngine.applyMedicate();
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] medicate -> isSick=%u health=%u", statsEngine.stats().isSick, statsEngine.stats().health);
+}
+
+static void onActionDiscipline(const Event& e) {
+    statsEngine.applyDiscipline(static_cast<uint8_t>(e.payload));
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] discipline +%d -> discipline=%u", static_cast<int>(e.payload), statsEngine.stats().discipline);
+}
+
+static void onActionSleep(const Event& e) {
+    bool on = (e.payload != 0);
+    statsEngine.applySleep(on);
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] sleep %s -> isSleeping=%u", on ? "on" : "off", statsEngine.stats().isSleeping);
+}
+
 // LifeStateChanged: reacciona a transiciones del LifeFSM.
 // Actualiza el renderer, activa DeadScreen, detecta resurrección.
 // Persiste inmediatamente al cambiar de etapa (stage change = evento crítico).
@@ -383,6 +440,15 @@ void setup() {
     bus.subscribe(EventType::OtaProgress,      onOtaProgress);
     bus.subscribe(EventType::OtaEnded,         onOtaEnded);
     bus.subscribe(EventType::OtaError,         onOtaError);
+
+    // Acciones WebUI (hito 6) — publicadas por los POST handlers de WebUI
+    bus.subscribe(EventType::ActionFeedRequested,       onActionFeed);
+    bus.subscribe(EventType::ActionPlayRequested,       onActionPlay);
+    bus.subscribe(EventType::ActionHealRequested,       onActionHeal);
+    bus.subscribe(EventType::ActionCleanRequested,      onActionClean);
+    bus.subscribe(EventType::ActionMedicateRequested,   onActionMedicate);
+    bus.subscribe(EventType::ActionDisciplineRequested, onActionDiscipline);
+    bus.subscribe(EventType::ActionSleepRequested,      onActionSleep);
 
     // WiFi no bloqueante — devuelve inmediatamente. El estado se actualiza en loop().
     // Si WIFI_SSID está vacío en secrets.h, begin() marca Disabled y no hace nada más.

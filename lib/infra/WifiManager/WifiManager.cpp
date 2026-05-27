@@ -10,6 +10,8 @@
 //   - Fail fast: si SSID vacío, Disabled inmediato.
 // =============================================================================
 
+#ifndef UNIT_TEST  // Guard: este archivo no se compila en env:native (Arduino-only)
+
 // Guard explícito: si secrets.h no existe, el error en compile-time es descriptivo.
 #if __has_include("secrets.h")
   #include "secrets.h"
@@ -128,3 +130,5 @@ void WifiManager::publishState_(WifiState newState) {
     state_ = newState;
     bus_.publish({EventType::WifiStateChanged, static_cast<int32_t>(newState)});
 }
+
+#endif  // UNIT_TEST

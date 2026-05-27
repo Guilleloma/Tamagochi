@@ -2,6 +2,13 @@
 // WebUI.cpp — Implementación del servidor HTTP REST para el Tamagochi.
 //
 // Hito 5, Fase 3. Endpoints GET /api/v1/state y GET /api/v1/info.
+// Hito 6, Fase 3. Endpoints POST /api/v1/{feed,play,heal,discipline,sleep,clean,medicate}.
+//
+// Patrón de acciones: WebUI publica eventos al EventBus (síncrono). Los handlers
+// en main.cpp aplican la acción sobre StatsEngine y persisten. Como el bus es
+// síncrono, las stats están actualizadas cuando publish() retorna, por lo que
+// sendActionResponse_() ya ve el estado post-acción.
+//
 // Seguridad: HTTP Basic Auth + Rate limit token-bucket por IP.
 // =============================================================================
 
@@ -68,12 +75,66 @@ void WebUI::loop() {
 // =============================================================================
 
 void WebUI::mountRoutes_() {
+    // --- GET endpoints ---
     server_.on("/api/v1/state", HTTP_GET, [this](AsyncWebServerRequest* req) {
         handleGetState_(req);
     });
 
     server_.on("/api/v1/info", HTTP_GET, [this](AsyncWebServerRequest* req) {
         handleGetInfo_(req);
+    });
+
+    // --- POST endpoints con body JSON (amount o value) ---
+    // AsyncCallbackJsonWebHandler exige Content-Type: application/json.
+    // Parsea el body y llama al handler con un JsonVariant ya deserializado.
+    auto* feedHandler = new AsyncCallbackJsonWebHandler("/api/v1/feed",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            handlePostFeed_(req, json);
+        }
+    );
+    feedHandler->setMethod(HTTP_POST);
+    server_.addHandler(feedHandler);
+
+    auto* playHandler = new AsyncCallbackJsonWebHandler("/api/v1/play",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            handlePostPlay_(req, json);
+        }
+    );
+    playHandler->setMethod(HTTP_POST);
+    server_.addHandler(playHandler);
+
+    auto* healHandler = new AsyncCallbackJsonWebHandler("/api/v1/heal",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            handlePostHeal_(req, json);
+        }
+    );
+    healHandler->setMethod(HTTP_POST);
+    server_.addHandler(healHandler);
+
+    auto* disciplineHandler = new AsyncCallbackJsonWebHandler("/api/v1/discipline",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            handlePostDiscipline_(req, json);
+        }
+    );
+    disciplineHandler->setMethod(HTTP_POST);
+    server_.addHandler(disciplineHandler);
+
+    auto* sleepHandler = new AsyncCallbackJsonWebHandler("/api/v1/sleep",
+        [this](AsyncWebServerRequest* req, JsonVariant& json) {
+            handlePostSleep_(req, json);
+        }
+    );
+    sleepHandler->setMethod(HTTP_POST);
+    server_.addHandler(sleepHandler);
+
+    // --- POST endpoints sin body (clean, medicate) ---
+    // Usan server_.on() directo: no requieren Content-Type ni body.
+    server_.on("/api/v1/clean", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostClean_(req);
+    });
+
+    server_.on("/api/v1/medicate", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostMedicate_(req);
     });
 
     server_.onNotFound([this](AsyncWebServerRequest* req) {
@@ -140,6 +201,135 @@ void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
     if (len == 0) {
         LOG_ERROR("[webui] GET /api/v1/info: serialization failed");
         sendJsonError_(req, 500, "SERIALIZATION_FAILED", "Failed to encode info");
+        return;
+    }
+
+    AsyncWebServerResponse* resp = req->beginResponse(200, "application/json", buf);
+    resp->addHeader("Cache-Control", "no-store");
+    req->send(resp);
+}
+
+// =============================================================================
+// POST handlers — acciones de juego (hito 6)
+// =============================================================================
+
+// Extrae y valida "amount" (int 1-100) de un JsonVariant ya deserializado.
+// ArduinoJson v7: json["amount"].is<int>() es false si el campo no existe o no es int.
+bool WebUI::extractAmount_(AsyncWebServerRequest* req, JsonVariant& json, int& outAmount) {
+    JsonVariantConst amountVar = json["amount"];
+    if (amountVar.isUnbound() || amountVar.isNull()) {
+        sendJsonError_(req, 422, "MISSING_FIELD", "amount field required (int 1-100)");
+        return false;
+    }
+    if (!amountVar.is<int>()) {
+        sendJsonError_(req, 422, "INVALID_AMOUNT", "amount must be an integer");
+        return false;
+    }
+    outAmount = amountVar.as<int>();
+    if (outAmount < 1 || outAmount > 100) {
+        sendJsonError_(req, 422, "INVALID_AMOUNT", "amount must be 1..100");
+        return false;
+    }
+    return true;
+}
+
+void WebUI::handlePostFeed_(AsyncWebServerRequest* req, JsonVariant& json) {
+    if (!checkAuthAndRate_(req)) return;
+    int amount = 0;
+    if (!extractAmount_(req, json, amount)) return;
+    bus_.publish({EventType::ActionFeedRequested, static_cast<int32_t>(amount)});
+    LOG_INFO("[webui] POST /api/v1/feed amount=%d", amount);
+    sendActionResponse_(req, "feed", static_cast<int32_t>(amount));
+}
+
+void WebUI::handlePostPlay_(AsyncWebServerRequest* req, JsonVariant& json) {
+    if (!checkAuthAndRate_(req)) return;
+    int amount = 0;
+    if (!extractAmount_(req, json, amount)) return;
+    bus_.publish({EventType::ActionPlayRequested, static_cast<int32_t>(amount)});
+    LOG_INFO("[webui] POST /api/v1/play amount=%d", amount);
+    sendActionResponse_(req, "play", static_cast<int32_t>(amount));
+}
+
+void WebUI::handlePostHeal_(AsyncWebServerRequest* req, JsonVariant& json) {
+    if (!checkAuthAndRate_(req)) return;
+    int amount = 0;
+    if (!extractAmount_(req, json, amount)) return;
+    bus_.publish({EventType::ActionHealRequested, static_cast<int32_t>(amount)});
+    LOG_INFO("[webui] POST /api/v1/heal amount=%d", amount);
+    sendActionResponse_(req, "heal", static_cast<int32_t>(amount));
+}
+
+void WebUI::handlePostDiscipline_(AsyncWebServerRequest* req, JsonVariant& json) {
+    if (!checkAuthAndRate_(req)) return;
+    int amount = 0;
+    if (!extractAmount_(req, json, amount)) return;
+    bus_.publish({EventType::ActionDisciplineRequested, static_cast<int32_t>(amount)});
+    LOG_INFO("[webui] POST /api/v1/discipline amount=%d", amount);
+    sendActionResponse_(req, "discipline", static_cast<int32_t>(amount));
+}
+
+void WebUI::handlePostSleep_(AsyncWebServerRequest* req, JsonVariant& json) {
+    if (!checkAuthAndRate_(req)) return;
+
+    JsonVariantConst valueVar = json["value"];
+    if (valueVar.isUnbound() || valueVar.isNull()) {
+        sendJsonError_(req, 422, "MISSING_FIELD", "value field required (bool)");
+        return;
+    }
+    if (!valueVar.is<bool>()) {
+        sendJsonError_(req, 422, "INVALID_VALUE", "value must be a boolean (true|false)");
+        return;
+    }
+
+    bool on = valueVar.as<bool>();
+    bus_.publish({EventType::ActionSleepRequested, on ? 1 : 0});
+    LOG_INFO("[webui] POST /api/v1/sleep value=%s", on ? "true" : "false");
+    // Para sleep, actionValue encoda true/false como 1/0
+    sendActionResponse_(req, "sleep", on ? 1 : 0);
+}
+
+void WebUI::handlePostClean_(AsyncWebServerRequest* req) {
+    if (!checkAuthAndRate_(req)) return;
+    bus_.publish({EventType::ActionCleanRequested, 0});
+    LOG_INFO("[webui] POST /api/v1/clean");
+    sendActionResponse_(req, "clean", -1);  // -1 = sin amount en la respuesta
+}
+
+void WebUI::handlePostMedicate_(AsyncWebServerRequest* req) {
+    if (!checkAuthAndRate_(req)) return;
+    bus_.publish({EventType::ActionMedicateRequested, 0});
+    LOG_INFO("[webui] POST /api/v1/medicate");
+    sendActionResponse_(req, "medicate", -1);  // -1 = sin amount en la respuesta
+}
+
+void WebUI::sendActionResponse_(AsyncWebServerRequest* req,
+                                const char* actionType, int32_t actionValue) {
+    char buf[600];  // serializeActionResponse ocupa ~420 bytes + overhead de actionApplied
+
+    bool turbo = false;
+#ifdef TURBO_MODE
+    turbo = true;
+#endif
+
+    const uint16_t deathCount = 0;  // TODO mismo que en handleGetState_: sin acceso a Persistence
+
+    size_t len = JsonCodec::serializeActionResponse(
+        engine_.stats(),
+        fsm_.stage(),
+        fsm_.ageMinutes(),
+        deathCount,
+        turbo,
+        millis(),
+        actionType,
+        actionValue,
+        buf,
+        sizeof(buf)
+    );
+
+    if (len == 0) {
+        LOG_ERROR("[webui] sendActionResponse_: serialization failed action=%s", actionType);
+        sendJsonError_(req, 500, "SERIALIZATION_FAILED", "Failed to encode action response");
         return;
     }
 

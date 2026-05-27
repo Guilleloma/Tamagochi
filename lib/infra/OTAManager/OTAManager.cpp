@@ -10,6 +10,8 @@
 // El estado persistido (PersistedState v2) sobrevive a la actualización.
 // =============================================================================
 
+#ifndef UNIT_TEST  // Guard: este archivo no se compila en env:native (Arduino-only)
+
 #include "OTAManager.h"
 #include <Arduino.h>
 #include <ArduinoOTA.h>
@@ -110,3 +112,5 @@ void OTAManager::onError_(ota_error_t error) {
     instance_->bus_.publish({EventType::OtaError, static_cast<int32_t>(error)});
     LOG_ERROR("[ota] error code=%u", static_cast<unsigned>(error));
 }
+
+#endif  // UNIT_TEST
