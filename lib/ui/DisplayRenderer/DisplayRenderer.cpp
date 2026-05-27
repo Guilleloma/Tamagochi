@@ -55,44 +55,43 @@ static const SpriteFrames kSpritesByStage[6][4] = {
     },
 
     // -------------------------------------------------------------------------
-    // Kid (2) — PLACEHOLDER hasta tener sprites Kid
+    // Kid (2) — sprites reales: idle, happy, sad. Eat → reusa idle.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Idle   — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Happy  — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Sad    — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Eat    — placeholder
+        { {kSpriteKidIdle0,  kSpriteKidIdle1,  nullptr},         2 },  // Idle
+        { {kSpriteKidHappy0, kSpriteKidHappy1, kSpriteKidHappy2}, 3 }, // Happy
+        { {kSpriteKidSad0,   kSpriteKidSad1,   nullptr},         2 },  // Sad
+        { {kSpriteKidIdle0,  kSpriteKidIdle1,  nullptr},         2 },  // Eat → reuse idle (no asset eat)
     },
 
     // -------------------------------------------------------------------------
-    // Adult (3) — PLACEHOLDER hasta tener sprites Adult
+    // Adult (3) — sprites reales: idle, happy. Sad/Eat → reusan idle.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Idle   — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Happy  — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Sad    — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Eat    — placeholder
+        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},          2 }, // Idle
+        { {kSpriteAdultHappy0, kSpriteAdultHappy1, kSpriteAdultHappy2}, 3 }, // Happy
+        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},          2 }, // Sad → reuse idle
+        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},          2 }, // Eat → reuse idle
     },
 
     // -------------------------------------------------------------------------
-    // Old (4) — PLACEHOLDER hasta tener sprites Old
+    // Old (4) — sprites reales: idle. Resto reusan idle (los ancianos hacen poco).
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Idle   — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Happy  — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Sad    — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Eat    — placeholder
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr}, 2 },  // Idle
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr}, 2 },  // Happy → reuse idle
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr}, 2 },  // Sad   → reuse idle
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr}, 2 },  // Eat   → reuse idle
     },
 
     // -------------------------------------------------------------------------
-    // Dead (5) — PLACEHOLDER hasta tener sprite lápida (kSpriteDeadIdle0).
-    // Se usa kSpriteBabySad0/1: transmite estado triste mejor que idle.
+    // Dead (5) — sprite ghost real. Sin moods narrativos: todos usan el fantasma.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabySad0, kSpriteBabySad1, nullptr}, 2 },  // Idle — placeholder (sad > idle en pantalla muerte)
-        { {kSpriteBabySad0, kSpriteBabySad1, nullptr}, 2 },  // Happy — no aplica para Dead; placeholder
-        { {kSpriteBabySad0, kSpriteBabySad1, nullptr}, 2 },  // Sad   — placeholder
-        { {kSpriteBabySad0, kSpriteBabySad1, nullptr}, 2 },  // Eat   — no aplica para Dead; placeholder
+        { {kSpriteDeadGhost0, kSpriteDeadGhost1, nullptr}, 2 },  // Idle
+        { {kSpriteDeadGhost0, kSpriteDeadGhost1, nullptr}, 2 },  // Happy (n/a)
+        { {kSpriteDeadGhost0, kSpriteDeadGhost1, nullptr}, 2 },  // Sad   (n/a)
+        { {kSpriteDeadGhost0, kSpriteDeadGhost1, nullptr}, 2 },  // Eat   (n/a)
     },
 };
 
