@@ -43,6 +43,7 @@
 #include "DisplayRenderer.h"
 #include "WifiManager.h"
 #include "OTAManager.h"
+#include "WebUI.h"
 
 // -----------------------------------------------------------------------------
 // Hardware — SSD1306 128×64 SOFTWARE I2C.
@@ -67,6 +68,7 @@ static InputHandler    input(bus, PIN_BUTTON);
 static DisplayRenderer renderer(u8g2, bus);
 static WifiManager     wifi(bus);                   // Fase 3 hito 1 — no bloqueante
 static OTAManager      ota(bus);                    // Fase 3 hito 2 — activa al conectar WiFi
+static WebUI           webUI(bus, statsEngine, lifeFSM, wifi);  // Fase 3 hito 5 — HTTP server
 
 // -----------------------------------------------------------------------------
 // Estado de escena — accesible a los handlers estáticos.
@@ -198,9 +200,12 @@ static void onWifiStateChanged(const Event& e) {
         // Activar OTA — requiere WiFi conectado con IP asignada.
         ota.begin();
 
-        // Publicar hostname mDNS para que la LAN encuentre el dispositivo.
-        // MDNS.addService("http", "tcp", 80) reservado para hito 3 (WebUI).
+        // Activar WebUI — servidor HTTP en puerto 80 con endpoints REST.
+        if (!webUI.isRunning()) webUI.begin();
+
+        // Publicar hostname mDNS + servicio HTTP para que la LAN nos descubra.
         if (MDNS.begin(OTA_HOSTNAME)) {
+            MDNS.addService("http", "tcp", 80);
             LOG_INFO("[mdns] hostname=%s.local", OTA_HOSTNAME);
         } else {
             LOG_WARN("[mdns] begin failed — continuando sin mDNS");
@@ -208,6 +213,7 @@ static void onWifiStateChanged(const Event& e) {
     } else {
         // Cualquier estado distinto de Connected.
         if (ota.isReady()) ota.end();
+        if (webUI.isRunning()) webUI.end();
         // mDNS se queda corriendo pasivamente; si WiFi vuelve, un nuevo MDNS.begin()
         // lo reiniciará. No hay MDNS.end() en el SDK de Arduino para ESP8266.
     }
