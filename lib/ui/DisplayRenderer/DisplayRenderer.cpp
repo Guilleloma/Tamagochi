@@ -280,6 +280,7 @@ void DisplayRenderer::render() {
     switch (scene_) {
         case Scene::IdleMain:    drawIdleMain_();    break;
         case Scene::StatsView:   drawStatsView_();   break;
+        case Scene::ActionsMenu: drawActionsMenu_(); break;
         case Scene::OtaProgress: drawOtaProgress_(); break;
         case Scene::DeadScreen:  drawDeadScreen_();  break;
     }
@@ -421,37 +422,100 @@ void DisplayRenderer::drawWifiIcon_() {
 }
 
 // -----------------------------------------------------------------------------
-// drawStatsView_ — pantalla de stats con barras de progreso.
+// drawStatsView_ — vista densa con las 9 stats en una sola pantalla.
 //
-// Layout (64 wide × 128 tall, fuente 6×10):
-//   y=10        STATS  (centrado)
-//   y=13        ─────
-//   y=24..36    Hambre  + barra 64×8
-//   y=54..66    Animo   + barra 64×8
-//   y=84..96    Salud   + barra 64×8
+// Layout portrait 64×128, fuente `u8g2_font_5x7_tf` (5 px ancho × 7 px alto):
+//   y=7    "STATS"  + icono WiFi a la derecha (drawWifiIcon_ pinta y=5..10)
+//   y=10   línea separadora horizontal
+//   y=18   "Hamb" + barra 24×5 + valor numérico (0-100)
+//   y=26   "Anim" + barra 24×5 + valor numérico
+//   y=34   "Salu" + barra 24×5 + valor numérico
+//   y=42   "Disc" + barra 24×5 + valor numérico
+//   y=50   "Peso" + barra 24×5 + valor numérico
+//   y=58   "Aten" + barra 24×5 + valor numérico (0-1000)
+//   y=62   línea separadora
+//   y=70   "Enf:Y/N  Dor:Y/N"
+//   y=78   "Caca:N"
+//   y=88   "Edad: NhNm"
+//   y=100  hint footer "click=Acciones"
 //
-// Al final, si TURBO_MODE activo, dibuja banner "T" como recordatorio.
+// Las barras (24 px de ancho, label de 4 chars × 5 px = 20 px, valor a la derecha)
+// caben en los 64 px lógicos del portrait. Valores entre 0 y 100 mapean a 0..22 px
+// de relleno; attentionScore (0-1000) mapea a 0..22 px dividiendo por ~46.
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawStatsView_() {
     u8g2_->clearBuffer();
-    u8g2_->setFont(u8g2_font_6x10_tf);
+    u8g2_->setFont(u8g2_font_5x7_tf);
 
-    // Título centrado (5 chars × 6 px = 30 → x = 17).
-    u8g2_->drawStr(17, 10, "STATS");
-    u8g2_->drawHLine(0, 13, 64);
+    // Título y separador.
+    u8g2_->drawStr(0, 7, "STATS");
+    u8g2_->drawHLine(0, 10, 64);
 
-    auto drawStatBar = [this](const char* label, uint8_t value, int yLabel, int yBar) {
-        u8g2_->drawStr(0, yLabel, label);
-        u8g2_->drawFrame(0, yBar, 64, 8);
-        int fillWidth = (static_cast<int>(value) * 62) / 100;
+    // Helper: dibuja "Label barra valor" en una fila.
+    // - label: ≤4 chars (5×7 font → 4×5=20 px)
+    // - bar: x=22..45 (24 px de ancho, 5 px de alto)
+    // - value: x=48 (hasta 4 chars: "1000\0")
+    auto drawRow = [this](const char* label, int value, int valueMax, int y) {
+        u8g2_->drawStr(0, y, label);
+
+        // Marco de la barra.
+        int barX = 22;
+        int barY = y - 6;
+        u8g2_->drawFrame(barX, barY, 24, 6);
+
+        // Relleno: clampa value al rango [0, valueMax] y mapea a 0..22 px.
+        if (value < 0)         value = 0;
+        if (value > valueMax)  value = valueMax;
+        int fillWidth = (valueMax > 0) ? (value * 22) / valueMax : 0;
         if (fillWidth > 0) {
-            u8g2_->drawBox(1, yBar + 1, fillWidth, 6);
+            u8g2_->drawBox(barX + 1, barY + 1, fillWidth, 4);
         }
+
+        // Valor numérico a la derecha.
+        char buf[6];
+        snprintf(buf, sizeof(buf), "%d", value);
+        u8g2_->drawStr(48, y, buf);
     };
 
-    drawStatBar("Hambre", stats_.hunger,    32, 36);
-    drawStatBar("Animo",  stats_.happiness, 62, 66);
-    drawStatBar("Salud",  stats_.health,    92, 96);
+    drawRow("Hamb", stats_.hunger,         100,  18);
+    drawRow("Anim", stats_.happiness,      100,  26);
+    drawRow("Salu", stats_.health,         100,  34);
+    drawRow("Disc", stats_.discipline,     100,  42);
+    drawRow("Peso", stats_.weight,         100,  50);
+    drawRow("Aten", stats_.attentionScore, 1000, 58);
+
+    // Separador antes de la sección de flags.
+    u8g2_->drawHLine(0, 62, 64);
+
+    // Flags compactos: enfermedad y sueño en una línea.
+    char flagsBuf[20];
+    snprintf(flagsBuf, sizeof(flagsBuf), "Enf:%c Dor:%c",
+             stats_.isSick     ? 'Y' : 'N',
+             stats_.isSleeping ? 'Y' : 'N');
+    u8g2_->drawStr(0, 70, flagsBuf);
+
+    // Cacas en línea propia (puede crecer hasta "Caca:9").
+    char poopBuf[10];
+    snprintf(poopBuf, sizeof(poopBuf), "Caca:%u", static_cast<unsigned>(stats_.poopCount));
+    u8g2_->drawStr(0, 78, poopBuf);
+
+    // Edad formateada — mismo formato que drawIdleMain_ (NhNm o NNm).
+    char ageBuf[12];
+    if (ageMinutes_ >= 60) {
+        uint32_t hours   = ageMinutes_ / 60;
+        uint32_t minutes = ageMinutes_ % 60;
+        if (hours > 99) hours = 99;
+        snprintf(ageBuf, sizeof(ageBuf), "Edad:%uh%um",
+                 static_cast<unsigned>(hours),
+                 static_cast<unsigned>(minutes));
+    } else {
+        snprintf(ageBuf, sizeof(ageBuf), "Edad:%um",
+                 static_cast<unsigned>(ageMinutes_));
+    }
+    u8g2_->drawStr(0, 88, ageBuf);
+
+    // Hint footer: invita al usuario a navegar al menú de acciones.
+    u8g2_->drawStr(0, 100, "click=Menu");
 
 #ifdef TURBO_MODE
     drawTurboBanner_();
@@ -460,6 +524,95 @@ void DisplayRenderer::drawStatsView_() {
     drawWifiIcon_();
 
     u8g2_->sendBuffer();
+}
+
+// -----------------------------------------------------------------------------
+// drawActionsMenu_ — menú navegable circular de acciones físicas (Fase 4).
+//
+// Layout portrait 64×128, fuente `u8g2_font_5x7_tf`:
+//   y=7    "ACCIONES"  + wifi icon
+//   y=10   línea separadora
+//   y=20.. lista vertical de items (8 px por fila): "► Label" o "  Label"
+//   y=120  hint footer "long=OK"
+//
+// El cursor `►` (chr 0x10 ASCII no, usamos '>') marca selectedIndex_. Los items
+// se dibujan de visibleActions_[0..visibleCount_) tal cual los rellenó
+// listAvailableActions(). Sleep tiene label dinámico según isSleeping.
+// -----------------------------------------------------------------------------
+void DisplayRenderer::drawActionsMenu_() {
+    u8g2_->clearBuffer();
+    u8g2_->setFont(u8g2_font_5x7_tf);
+
+    u8g2_->drawStr(0, 7, "ACCIONES");
+    u8g2_->drawHLine(0, 10, 64);
+
+    // Salvaguarda: si por algún motivo no hay items, mostrar mensaje y salir.
+    // No debería ocurrir — Back siempre se añade por listAvailableActions.
+    if (visibleCount_ == 0) {
+        u8g2_->drawStr(0, 24, "(vacio)");
+        drawWifiIcon_();
+        u8g2_->sendBuffer();
+        return;
+    }
+
+    // Defensivo: clampa selectedIndex_ al rango válido por si refreshActionMenu
+    // recortó la lista entre frames (p.ej. la enfermedad pasó y Medicate se fue).
+    uint8_t cursor = (selectedIndex_ < visibleCount_) ? selectedIndex_ : 0;
+
+    for (uint8_t i = 0; i < visibleCount_; ++i) {
+        int y = 20 + static_cast<int>(i) * 9;
+        if (y > 110) break;   // protección por si crece la lista
+
+        const char* prefix = (i == cursor) ? ">" : " ";
+        const char* label  = "?";
+        switch (visibleActions_[i]) {
+            case ActionKind::Feed:       label = "Feed";       break;
+            case ActionKind::Play:       label = "Play";       break;
+            case ActionKind::Clean:      label = "Clean";      break;
+            case ActionKind::Medicate:   label = "Med";        break;
+            case ActionKind::Discipline: label = "Disc";       break;
+            case ActionKind::Sleep:      label = stats_.isSleeping ? "Despertar" : "Sleep"; break;
+            case ActionKind::Heal:       label = "Heal";       break;
+            case ActionKind::Back:       label = "< Volver";   break;
+        }
+
+        char rowBuf[16];
+        snprintf(rowBuf, sizeof(rowBuf), "%s %s", prefix, label);
+        u8g2_->drawStr(0, y, rowBuf);
+    }
+
+    // Hint footer.
+    u8g2_->drawStr(0, 120, "long=OK");
+
+    drawWifiIcon_();
+    u8g2_->sendBuffer();
+}
+
+// -----------------------------------------------------------------------------
+// refreshActionMenu — recalcula visibleActions_ a partir del StatsEngine actual
+// y resetea el cursor al primer item. Invocar al entrar en Scene::ActionsMenu
+// o tras ejecutar una acción que pueda cambiar las preconditions.
+// -----------------------------------------------------------------------------
+void DisplayRenderer::refreshActionMenu(const StatsEngine& engine) {
+    visibleCount_  = engine.listAvailableActions(visibleActions_);
+    selectedIndex_ = 0;
+}
+
+// -----------------------------------------------------------------------------
+// moveCursor — avanza el cursor al siguiente item visible (circular).
+// -----------------------------------------------------------------------------
+void DisplayRenderer::moveCursor() {
+    if (visibleCount_ == 0) return;
+    selectedIndex_ = (selectedIndex_ + 1) % visibleCount_;
+}
+
+// -----------------------------------------------------------------------------
+// currentSelectedAction — devuelve la acción bajo el cursor. Back si no hay items.
+// -----------------------------------------------------------------------------
+ActionKind DisplayRenderer::currentSelectedAction() const {
+    if (visibleCount_ == 0)             return ActionKind::Back;
+    if (selectedIndex_ >= visibleCount_) return ActionKind::Back;
+    return visibleActions_[selectedIndex_];
 }
 
 // -----------------------------------------------------------------------------

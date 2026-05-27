@@ -43,6 +43,7 @@ enum class Mood : uint8_t {
 enum class Scene : uint8_t {
     IdleMain,
     StatsView,
+    ActionsMenu, // menú navegable de acciones físicas (Fase 4 hito 1)
     OtaProgress,
     DeadScreen   // activa automáticamente cuando lifeStage_ == Dead
 };
@@ -69,6 +70,19 @@ public:
     // Actualiza el estado WiFi para el indicador de esquina superior derecha.
     // Disabled → sin icono. Connecting → parpadeo. Connected/Disconnected → icono fijo.
     void setWifiState(WifiState state);
+
+    // -- Menú de acciones físicas (Fase 4) --
+    // Recalcula la lista de acciones visibles a partir del estado actual de
+    // StatsEngine y resetea el cursor al primer item. Llamar al entrar al menú
+    // o tras ejecutar una acción que pueda cambiar las preconditions.
+    void refreshActionMenu(const StatsEngine& engine);
+
+    // Avanza el cursor al siguiente item visible (circular). No-op si no hay items.
+    void moveCursor();
+
+    // Devuelve la acción actualmente seleccionada en el cursor.
+    // Si no hay items (no debería ocurrir — Back siempre está), devuelve Back.
+    ActionKind currentSelectedAction() const;
 
     // Dibuja un frame completo. Llamar desde el scheduler a 5 FPS.
     void render();
@@ -97,12 +111,23 @@ private:
     uint32_t  hatchAnimRemainingMs_  = 0;    // eclosión Egg → Baby
     uint32_t  evolveAnimRemainingMs_ = 0;    // transición de etapa adulta
 
+    // Estado del menú de acciones físicas (Fase 4).
+    // visibleActions_ contiene las acciones aplicables al estado actual del
+    // tamagochi; visibleCount_ es su longitud real (≤ kMaxActionMenuItems).
+    // selectedIndex_ se mantiene siempre en [0, visibleCount_) por moveCursor()
+    // y refreshActionMenu() — la UI clampea en la frontera para evitar lecturas
+    // fuera de rango si las preconditions cambian entre frames.
+    ActionKind visibleActions_[kMaxActionMenuItems] = {};
+    uint8_t    visibleCount_  = 0;
+    uint8_t    selectedIndex_ = 0;
+
     Mood computeMood_() const;
 
     void drawIdleMain_();
     void drawOverlays_();    // overlays asíncronos sobre el sprite principal (hito 6)
     void drawWifiIcon_();    // icono WiFi 8×6 en esquina superior derecha
     void drawStatsView_();
+    void drawActionsMenu_(); // menú navegable Fase 4
     void drawOtaProgress_();
     void drawDeadScreen_();
 

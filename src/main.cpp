@@ -148,26 +148,101 @@ static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const L
 // Deben ejecutarse en < 2 ms para no romper el budget de 5 FPS (EventBus síncrono).
 // =============================================================================
 
-// Botón corto: alterna entre IdleMain y StatsView.
-// No alterna cuando estamos en DeadScreen — el botón largo reinicia.
-static void onShortClick(const Event&) {
-    if (lifeFSM.stage() == LifeStage::Dead) return;   // ignorar en DeadScreen
-    currentScene = (currentScene == Scene::IdleMain) ? Scene::StatsView : Scene::IdleMain;
-    renderer.setScene(currentScene);
-    LOG_INFO("Scene -> %s", currentScene == Scene::IdleMain ? "IdleMain" : "StatsView");
+// Helper de quick-feed: replica el comportamiento del long-press original.
+// Compartido entre IdleMain y StatsView para que el atajo de feed sea consistente.
+static void quickFeed_() {
+    bus.publish({EventType::ActionFeedRequested, 20});  // mismo canal que dashboard
+    renderer.triggerEatAnimation();
+    LOG_INFO("Quick feed (long-press) -> hunger=%u", statsEngine.stats().hunger);
 }
 
-// Botón largo: alimentar al Tamagochi (-20 hunger).
-// Dispara la animación EAT (2400 ms one-shot en el renderer).
-// Publica StatsChanged para actualizar la vista inmediatamente sin esperar al tick.
-// Publica PersistRequested para guardar on-action.
+// Publica el EventType asociado a la acción seleccionada en el menú físico.
+// Excepto Back, todas las acciones cierran el menú y vuelven a IdleMain.
+// El payload por defecto reproduce los defaults del dashboard (ver WebUI).
+static void executeSelectedAction_() {
+    ActionKind action = renderer.currentSelectedAction();
+    switch (action) {
+        case ActionKind::Feed:
+            bus.publish({EventType::ActionFeedRequested, 20});
+            renderer.triggerEatAnimation();
+            break;
+        case ActionKind::Play:
+            bus.publish({EventType::ActionPlayRequested, 20});
+            break;
+        case ActionKind::Clean:
+            bus.publish({EventType::ActionCleanRequested, 0});
+            break;
+        case ActionKind::Medicate:
+            bus.publish({EventType::ActionMedicateRequested, 0});
+            break;
+        case ActionKind::Discipline:
+            bus.publish({EventType::ActionDisciplineRequested, 10});
+            break;
+        case ActionKind::Sleep:
+            // Toggle: si estaba durmiendo, despertar (0); si no, dormir (1).
+            bus.publish({EventType::ActionSleepRequested,
+                         statsEngine.stats().isSleeping ? 0 : 1});
+            break;
+        case ActionKind::Heal:
+            bus.publish({EventType::ActionHealRequested, 20});
+            break;
+        case ActionKind::Back:
+            // No-op: solo cierra el menú.
+            break;
+    }
+    currentScene = Scene::IdleMain;
+    renderer.setScene(Scene::IdleMain);
+    LOG_INFO("Action menu: executed %u -> IdleMain", static_cast<unsigned>(action));
+}
+
+// Botón corto: navega el ciclo IdleMain → StatsView → ActionsMenu → IdleMain.
+// Dentro de ActionsMenu, el short click mueve el cursor al siguiente item.
+// No reacciona en DeadScreen (botón largo lo manejará si añadimos reset físico)
+// ni en OtaProgress (la UI no debe responder durante una actualización).
+static void onShortClick(const Event&) {
+    if (lifeFSM.stage() == LifeStage::Dead) return;
+    if (currentScene == Scene::OtaProgress) return;
+
+    switch (currentScene) {
+        case Scene::IdleMain:
+            currentScene = Scene::StatsView;
+            renderer.setScene(currentScene);
+            LOG_INFO("Scene -> StatsView");
+            break;
+        case Scene::StatsView:
+            renderer.refreshActionMenu(statsEngine);
+            currentScene = Scene::ActionsMenu;
+            renderer.setScene(currentScene);
+            LOG_INFO("Scene -> ActionsMenu");
+            break;
+        case Scene::ActionsMenu:
+            // Recalcular visibles antes de avanzar — preconditions pueden haber
+            // cambiado (decay, tick) desde la última entrada al menú.
+            renderer.refreshActionMenu(statsEngine);
+            renderer.moveCursor();
+            break;
+        default:
+            break;
+    }
+}
+
+// Botón largo: en IdleMain/StatsView ejecuta quick-feed (atajo legado);
+// en ActionsMenu ejecuta la acción seleccionada y cierra el menú.
 static void onLongPress(const Event&) {
-    if (lifeFSM.stage() == LifeStage::Dead) return;   // ignorar en DeadScreen
-    statsEngine.applyFeed(20);
-    renderer.triggerEatAnimation();                    // animación EAT 2.4s
-    bus.publish({EventType::StatsChanged, 0});
-    bus.publish({EventType::PersistRequested, 0});
-    LOG_INFO("Feed applied -> hunger=%u", statsEngine.stats().hunger);
+    if (lifeFSM.stage() == LifeStage::Dead) return;
+    if (currentScene == Scene::OtaProgress) return;
+
+    switch (currentScene) {
+        case Scene::IdleMain:
+        case Scene::StatsView:
+            quickFeed_();
+            break;
+        case Scene::ActionsMenu:
+            executeSelectedAction_();
+            break;
+        default:
+            break;
+    }
 }
 
 // StatsChanged: sincroniza la copia interna del renderer con el estado actual.
