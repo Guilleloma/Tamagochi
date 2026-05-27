@@ -501,12 +501,44 @@ void DisplayRenderer::drawStatsView_() {
 }
 
 // -----------------------------------------------------------------------------
-// drawOtaProgress_ — stub hito 5. Se implementa en hito 8.
+// drawOtaProgress_ — pantalla de progreso OTA (Fase 3 hito 2).
+//
+// Layout portrait 64×128:
+//   y=12        "Updating..." centrado (fuente 5×7)
+//   y=30        "X%" centrado (porcentaje numérico, fuente 6×10)
+//   y=50..58    Barra de progreso: frame 64×8 + relleno proporcional
+//
+// La barra ocupa x=0..63, y=50..57 (64px de ancho).
+// Relleno: fillWidth = otaProgress_ * 62 / 100 (px dentro del marco de 62 px).
+//
+// El icono WiFi NO se pinta aquí — en pantalla OTA la prioridad visual es máxima.
+// drawWifiIcon_() tiene guard: if (scene_ == Scene::OtaProgress) return.
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawOtaProgress_() {
     u8g2_->clearBuffer();
+
+    // Texto "Updating..." — fuente 5×7, 11 chars × 5px = 55 → x = (64-55)/2 ≈ 4
     u8g2_->setFont(u8g2_font_5x7_tf);
-    u8g2_->drawStr(0, 30, "TODO: OTA");
+    u8g2_->drawStr(4, 20, "Updating...");
+
+    // Porcentaje numérico centrado — fuente 6×10
+    // Hasta 3 dígitos + "%" = 4 chars × 6px = 24 → x = (64-24)/2 = 20
+    u8g2_->setFont(u8g2_font_6x10_tf);
+    char pctBuf[6];
+    snprintf(pctBuf, sizeof(pctBuf), "%u%%", static_cast<unsigned>(otaProgress_));
+    // Centrar dinámicamente: medir ancho en chars × 6 px
+    uint8_t pctLen = static_cast<uint8_t>(strlen(pctBuf));
+    int pctX = (64 - pctLen * 6) / 2;
+    if (pctX < 0) pctX = 0;
+    u8g2_->drawStr(pctX, 44, pctBuf);
+
+    // Barra de progreso: marco exterior 64×8 en y=50, relleno proporcional.
+    u8g2_->drawFrame(0, 50, 64, 8);
+    int fillWidth = (static_cast<int>(otaProgress_) * 62) / 100;
+    if (fillWidth > 0) {
+        u8g2_->drawBox(1, 51, fillWidth, 6);
+    }
+
     u8g2_->sendBuffer();
 }
 

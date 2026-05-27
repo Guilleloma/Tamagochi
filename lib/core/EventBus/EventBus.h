@@ -38,7 +38,7 @@ enum class EventType : uint8_t {
     PersistRequested,   // alguien solicita guardar estado inmediatamente
     OtaStarted,
     OtaProgress,
-    OtaFinished,
+    OtaEnded,           // actualización completada; ESP reinicia justo después
     OtaError,
     WifiStateChanged,   // payload & 0xFF = WifiState enum value
     EventTypeCount      // centinela — mantener al final siempre
