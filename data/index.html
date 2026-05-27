@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tamagotchi</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="header">
+  <h1 class="header__title">Tamagotchi</h1>
+  <span id="wifi-indicator" class="badge badge--ok" title="Estado de conexion">&#9679; Online</span>
+</header>
+
+<main>
+
+  <section class="pet-section" aria-label="Estado de la mascota">
+    <div class="pet-sprite" id="pet-sprite" aria-hidden="true">&#x1F95A;</div>
+    <div class="pet-info">
+      <span id="pet-stage" class="pet-stage">Egg</span>
+      <span id="pet-age" class="pet-age">0m</span>
+    </div>
+    <div class="pet-badges" id="pet-badges" aria-live="polite"></div>
+  </section>
+
+  <section class="stats-section" aria-label="Estadisticas">
+    <h2 class="section-title">Stats</h2>
+
+    <div class="stat-row">
+      <span class="stat-label">Hambre</span>
+      <div class="stat-bar" role="progressbar" aria-label="Hambre" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div class="stat-bar__fill" id="bar-hunger" style="width:0%"></div>
+      </div>
+      <span class="stat-value" id="val-hunger">0</span>
+    </div>
+
+    <div class="stat-row">
+      <span class="stat-label">Animo</span>
+      <div class="stat-bar" role="progressbar" aria-label="Animo" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div class="stat-bar__fill" id="bar-happiness" style="width:0%"></div>
+      </div>
+      <span class="stat-value" id="val-happiness">0</span>
+    </div>
+
+    <div class="stat-row">
+      <span class="stat-label">Salud</span>
+      <div class="stat-bar" role="progressbar" aria-label="Salud" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div class="stat-bar__fill" id="bar-health" style="width:0%"></div>
+      </div>
+      <span class="stat-value" id="val-health">0</span>
+    </div>
+
+    <div class="stat-row">
+      <span class="stat-label">Disc.</span>
+      <div class="stat-bar" role="progressbar" aria-label="Disciplina" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div class="stat-bar__fill" id="bar-discipline" style="width:0%"></div>
+      </div>
+      <span class="stat-value" id="val-discipline">0</span>
+    </div>
+
+    <div class="stat-extra">
+      <span>Peso: <strong id="val-weight">?</strong></span>
+      <span>Caca: <strong id="val-poop">0</strong></span>
+    </div>
+  </section>
+
+  <section class="actions-section" aria-label="Acciones">
+    <h2 class="section-title">Acciones</h2>
+    <div class="actions-grid">
+      <button class="btn" id="btn-feed"       aria-label="Alimentar">&#x1F354; Feed</button>
+      <button class="btn" id="btn-play"       aria-label="Jugar">&#x1F3AE; Play</button>
+      <button class="btn" id="btn-clean"      aria-label="Limpiar">&#x1F9F9; Clean</button>
+      <button class="btn" id="btn-medicate"   aria-label="Medicar">&#x1F48A; Med</button>
+      <button class="btn" id="btn-discipline" aria-label="Disciplinar">&#x1F46E; Disc</button>
+      <button class="btn" id="btn-sleep"      aria-label="Dormir o despertar">&#x1F634; Sleep</button>
+      <button class="btn" id="btn-heal"       aria-label="Curar">&#x2764;&#xFE0F; Heal</button>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer" aria-live="polite">
+  <span id="last-update">Sin datos aun</span>
+  <span id="offline-badge" class="badge badge--error" hidden>&#9888; Offline</span>
+</footer>
+
+<div id="toast" class="toast" aria-live="assertive" aria-atomic="true" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>

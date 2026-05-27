@@ -1,13 +1,15 @@
 // =============================================================================
-// Tamagochi — Fase 2: Hitos 7-9 fusionados
+// Tamagochi — Fase 3: Hito 2 — OTAManager + mDNS
 //
 // Capa de orquestación: instancia módulos, suscribe handlers al EventBus
 // y ejecuta los schedulers del loop principal.
 //
-// Comportamiento completo (acumula hitos anteriores + hitos 7-9):
+// Comportamiento completo (acumula hitos anteriores + hito 3.2):
 //   - OLED IdleMain: sprite animado multi-etapa según LifeStage
 //   - OLED StatsView: hunger / happiness / health / discipline / weight / poop
 //   - OLED DeadScreen: pantalla RIP con causa de muerte y edad
+//   - OLED OtaProgress: barra de progreso OTA durante actualización inalámbrica
+//   - Icono WiFi 8×6 px en esquina superior derecha (Connecting=blink, Connected=on, Off=x)
 //   - Botón corto   → alterna IdleMain ↔ StatsView
 //   - Botón largo   → alimentar: hunger -20 pts + animación EAT 2.4s + guarda
 //   - Botón doble   → evento publicado pero sin suscriptor (reservado)
@@ -17,15 +19,20 @@
 //   - Transiciones  → LifeFSM publica LifeStateChanged → renderer + persist
 //   - Resurrección  → DEAD → EGG: stats reset, escena IdleMain
 //   - Cada 5 min    → autosave vía PersistRequested
+//   - WiFi no bloqueante → WifiManager::begin()/loop(); publica WifiStateChanged
+//   - OTA ArduinoOTA con password (secrets.h) → activado al conectar WiFi
+//   - mDNS → tamagotchi.local disponible en LAN cuando WiFi Connected
 //
-// Lo que NO está en este hito (Fase 3+):
-//   - OTA / WiFi / secrets.h
+// Lo que NO está en este hito (hitos posteriores):
+//   - WebUI / REST API (hito 3+)
 // =============================================================================
 
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <LittleFS.h>
+#include <ESP8266mDNS.h>
 #include "config.h"
+#include "secrets.h"
 #include "Logger.h"
 #include "EventBus.h"
 #include "StatsEngine.h"
@@ -34,6 +41,9 @@
 #include "LittleFsStorage.h"
 #include "InputHandler.h"
 #include "DisplayRenderer.h"
+#include "WifiManager.h"
+#include "OTAManager.h"
+#include "WebUI.h"
 
 // -----------------------------------------------------------------------------
 // Hardware — SSD1306 128×64 SOFTWARE I2C.
@@ -56,6 +66,9 @@ static LittleFsStorage storage;
 static Persistence     persistence(storage);
 static InputHandler    input(bus, PIN_BUTTON);
 static DisplayRenderer renderer(u8g2, bus);
+static WifiManager     wifi(bus);                   // Fase 3 hito 1 — no bloqueante
+static OTAManager      ota(bus);                    // Fase 3 hito 2 — activa al conectar WiFi
+static WebUI           webUI(bus, statsEngine, lifeFSM, wifi);  // Fase 3 hito 5 — HTTP server
 
 // -----------------------------------------------------------------------------
 // Estado de escena — accesible a los handlers estáticos.
@@ -174,6 +187,119 @@ static void onPersistRequested(const Event&) {
         LOG_DEBUG("Persist: saved (stage=%u hunger=%u happ=%u health=%u age=%u)",
                   s.lifeStage, s.hunger, s.happiness, s.health, s.ageMinutes);
     }
+}
+
+// WifiStateChanged: sincroniza el estado WiFi con el renderer e inicia/detiene OTA y mDNS.
+// WebUI se activa en hito 3+.
+static void onWifiStateChanged(const Event& e) {
+    WifiState s = static_cast<WifiState>(e.payload & 0xFF);
+    LOG_INFO("[wifi] state -> %u", static_cast<unsigned>(s));
+    renderer.setWifiState(s);
+
+    if (s == WifiState::Connected) {
+        // Activar OTA — requiere WiFi conectado con IP asignada.
+        ota.begin();
+
+        // Activar WebUI — servidor HTTP en puerto 80 con endpoints REST.
+        if (!webUI.isRunning()) webUI.begin();
+
+        // Publicar hostname mDNS + servicio HTTP para que la LAN nos descubra.
+        if (MDNS.begin(OTA_HOSTNAME)) {
+            MDNS.addService("http", "tcp", 80);
+            LOG_INFO("[mdns] hostname=%s.local", OTA_HOSTNAME);
+        } else {
+            LOG_WARN("[mdns] begin failed — continuando sin mDNS");
+        }
+    } else {
+        // Cualquier estado distinto de Connected.
+        if (ota.isReady()) ota.end();
+        if (webUI.isRunning()) webUI.end();
+        // mDNS se queda corriendo pasivamente; si WiFi vuelve, un nuevo MDNS.begin()
+        // lo reiniciará. No hay MDNS.end() en el SDK de Arduino para ESP8266.
+    }
+}
+
+// OtaStarted: cambiar a pantalla de progreso OTA.
+static void onOtaStarted(const Event&) {
+    LOG_INFO("[ota] update started — switching to OtaProgress scene");
+    renderer.setScene(Scene::OtaProgress);
+    currentScene = Scene::OtaProgress;
+    renderer.setOtaProgress(0);
+}
+
+// OtaProgress: actualizar la barra de progreso en OLED.
+static void onOtaProgress(const Event& e) {
+    uint8_t pct = static_cast<uint8_t>(e.payload & 0xFF);
+    renderer.setOtaProgress(pct);
+}
+
+// OtaEnded: el ESP reinicia automáticamente tras este evento. No restauramos scene.
+static void onOtaEnded(const Event&) {
+    LOG_INFO("[ota] update ended — reboot imminent");
+}
+
+// OtaError: restaurar escena anterior y loguear el código de error.
+static void onOtaError(const Event& e) {
+    LOG_ERROR("[ota] error code=%d", static_cast<int>(e.payload));
+    renderer.setScene(Scene::IdleMain);
+    currentScene = Scene::IdleMain;
+}
+
+// =============================================================================
+// Handlers de acciones WebUI (hito 6)
+// Publicados por WebUI al EventBus; ejecutados síncronamente antes de que
+// WebUI envíe la respuesta HTTP. Aplican la acción y persisten.
+// =============================================================================
+
+static void onActionFeed(const Event& e) {
+    statsEngine.applyFeed(static_cast<uint8_t>(e.payload));
+    renderer.triggerEatAnimation();
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] feed +%d -> hunger=%u", static_cast<int>(e.payload), statsEngine.stats().hunger);
+}
+
+static void onActionPlay(const Event& e) {
+    statsEngine.applyPlay(static_cast<uint8_t>(e.payload));
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] play +%d -> happiness=%u", static_cast<int>(e.payload), statsEngine.stats().happiness);
+}
+
+static void onActionHeal(const Event& e) {
+    statsEngine.applyHeal(static_cast<uint8_t>(e.payload));
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] heal +%d -> health=%u", static_cast<int>(e.payload), statsEngine.stats().health);
+}
+
+static void onActionClean(const Event&) {
+    statsEngine.applyClean();
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] clean -> poop=%u", statsEngine.stats().poopCount);
+}
+
+static void onActionMedicate(const Event&) {
+    statsEngine.applyMedicate();
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] medicate -> isSick=%u health=%u", statsEngine.stats().isSick, statsEngine.stats().health);
+}
+
+static void onActionDiscipline(const Event& e) {
+    statsEngine.applyDiscipline(static_cast<uint8_t>(e.payload));
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] discipline +%d -> discipline=%u", static_cast<int>(e.payload), statsEngine.stats().discipline);
+}
+
+static void onActionSleep(const Event& e) {
+    bool on = (e.payload != 0);
+    statsEngine.applySleep(on);
+    bus.publish({EventType::StatsChanged, 0});
+    bus.publish({EventType::PersistRequested, 0});
+    LOG_INFO("[action] sleep %s -> isSleeping=%u", on ? "on" : "off", statsEngine.stats().isSleeping);
 }
 
 // LifeStateChanged: reacciona a transiciones del LifeFSM.
@@ -309,6 +435,24 @@ void setup() {
     bus.subscribe(EventType::StatsChanged,     onStatsChanged);
     bus.subscribe(EventType::PersistRequested, onPersistRequested);
     bus.subscribe(EventType::LifeStateChanged, onLifeStateChanged);
+    bus.subscribe(EventType::WifiStateChanged, onWifiStateChanged);
+    bus.subscribe(EventType::OtaStarted,       onOtaStarted);
+    bus.subscribe(EventType::OtaProgress,      onOtaProgress);
+    bus.subscribe(EventType::OtaEnded,         onOtaEnded);
+    bus.subscribe(EventType::OtaError,         onOtaError);
+
+    // Acciones WebUI (hito 6) — publicadas por los POST handlers de WebUI
+    bus.subscribe(EventType::ActionFeedRequested,       onActionFeed);
+    bus.subscribe(EventType::ActionPlayRequested,       onActionPlay);
+    bus.subscribe(EventType::ActionHealRequested,       onActionHeal);
+    bus.subscribe(EventType::ActionCleanRequested,      onActionClean);
+    bus.subscribe(EventType::ActionMedicateRequested,   onActionMedicate);
+    bus.subscribe(EventType::ActionDisciplineRequested, onActionDiscipline);
+    bus.subscribe(EventType::ActionSleepRequested,      onActionSleep);
+
+    // WiFi no bloqueante — devuelve inmediatamente. El estado se actualiza en loop().
+    // Si WIFI_SSID está vacío en secrets.h, begin() marca Disabled y no hace nada más.
+    wifi.begin();
 
     // Configurar OneButton con callbacks via InputHandler.
     input.begin();
@@ -328,6 +472,15 @@ void setup() {
 // loop
 // =============================================================================
 void loop() {
+    // WiFi poll no bloqueante — guard interno actúa solo cada 500 ms.
+    wifi.loop();
+
+    // OTA: sondea el servidor ArduinoOTA. Coste < 5 µs sin actualización en curso.
+    ota.loop();
+
+    // mDNS: mantiene el anuncio de hostname en la LAN.
+    MDNS.update();
+
     // OneButton necesita tick() en cada iteración para detectar gestos.
     input.loop();
 

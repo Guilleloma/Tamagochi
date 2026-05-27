@@ -9,6 +9,51 @@
 static void drawXBMx2(U8G2* u8g2, int x, int y, int w, int h, const uint8_t* bitmap);
 
 // =============================================================================
+// Sprites WiFi — bitmaps XBM 8×6 (6 bytes en formato LSB-first por fila).
+//
+// Diseño a mano, 8 columnas × 6 filas:
+//
+// kSpriteWifiOn (3 arcos concéntricos clásicos):
+//   Fila 0:  _ _ _ X _ _ _ _   0x08  arco exterior — centrado en col 3
+//   Fila 1:  _ _ X _ X _ _ _   0x14  arco exterior, dos flancos
+//   Fila 2:  _ _ _ _ _ _ _ _   0x00  separación
+//   Fila 3:  _ _ _ X _ _ _ _   0x08  arco medio
+//   Fila 4:  _ _ _ _ _ _ _ _   0x00  separación
+//   Fila 5:  _ _ _ X _ _ _ _   0x08  punto central (señal)
+//
+// kSpriteWifiOff — mismos arcos + línea X superpuesta:
+//   Fila 0:  X _ _ X _ _ _ X  0x89
+//   Fila 1:  _ X X _ X X _ _  0x36
+//   Fila 2:  _ _ _ _ _ _ _ _  0x00
+//   Fila 3:  _ _ _ X _ _ _ _  0x08
+//   Fila 4:  _ _ _ _ _ _ _ _  0x00
+//   Fila 5:  _ _ _ X _ _ _ _  0x08
+//
+// Posición en display portrait 64×128: esquina superior derecha → (56, 0).
+// El sprite ocupa x=56..63, y=0..5 — sin solapar el sprite del personaje
+// (que empieza en y=4 con un margen de 4px). La zona y=0..3 queda libre.
+// =============================================================================
+
+// XBM formato: byte[fila] = bits de col 0..7, bit 0 = columna izquierda (LSB first).
+static const uint8_t kSpriteWifiOn[] PROGMEM = {
+    0x08,  // fila 0: ...X....  arco exterior centro
+    0x14,  // fila 1: ..X.X...  arco exterior flancos
+    0x00,  // fila 2: ........  espacio
+    0x08,  // fila 3: ...X....  arco medio
+    0x00,  // fila 4: ........  espacio
+    0x08,  // fila 5: ...X....  punto de señal
+};
+
+static const uint8_t kSpriteWifiOff[] PROGMEM = {
+    0x89,  // fila 0: X..X...X  arco + X barra diagonal derecha (bit0, bit3, bit7)
+    0x36,  // fila 1: .XX.XX..  arco flancos + X barra diagonal izquierda (bit1,2,4,5)
+    0x00,  // fila 2: ........  espacio
+    0x08,  // fila 3: ...X....  arco medio
+    0x00,  // fila 4: ........  espacio
+    0x08,  // fila 5: ...X....  punto de señal
+};
+
+// =============================================================================
 // SpriteFrames — agrupa los frames de una animación para indexar por Mood.
 // =============================================================================
 
@@ -137,6 +182,10 @@ void DisplayRenderer::setAgeMinutes(uint32_t mins) {
 
 void DisplayRenderer::setDeathCount(uint16_t count) {
     deathCount_ = count;
+}
+
+void DisplayRenderer::setWifiState(WifiState state) {
+    wifiState_ = state;
 }
 
 void DisplayRenderer::triggerEatAnimation() {
@@ -304,6 +353,10 @@ void DisplayRenderer::drawIdleMain_() {
     // Overlays asíncronos encima del buffer ya construido — antes del sendBuffer.
     drawOverlays_();
 
+    // Icono WiFi (8×6 px, esquina superior derecha). No interfiere con overlays
+    // full-screen (SICK/POOP) — es un sprite de esquina, no un overlay de prioridad.
+    drawWifiIcon_();
+
     u8g2_->sendBuffer();
 }
 
@@ -373,6 +426,39 @@ void DisplayRenderer::drawOverlays_() {
 }
 
 // -----------------------------------------------------------------------------
+// drawWifiIcon_ — icono WiFi 8×6 px en esquina superior derecha (56, 0).
+//
+// Se pinta sobre cualquier escena excepto OtaProgress (donde la pantalla de
+// actualización tiene prioridad absoluta).
+//
+// Política de visibilidad según plan §6.2:
+//   Disabled     → no se pinta nada.
+//   Connected    → kSpriteWifiOn fijo.
+//   Disconnected → kSpriteWifiOff fijo.
+//   Connecting   → kSpriteWifiOff con blink 500ms (animFrame_ par = visible).
+//     A 5 FPS (200 ms/frame), animFrame_ % 2 alterna cada 2 frames = 400 ms.
+//     Es la aproximación más cercana a 500ms sin timer dedicado.
+// -----------------------------------------------------------------------------
+void DisplayRenderer::drawWifiIcon_() {
+    if (wifiState_ == WifiState::Disabled) return;
+    if (scene_ == Scene::OtaProgress)      return;
+
+    const uint8_t* sprite;
+    if (wifiState_ == WifiState::Connected) {
+        sprite = kSpriteWifiOn;
+    } else {
+        sprite = kSpriteWifiOff;
+        // Blink cuando está intentando conectar: ocultar en frames impares.
+        if (wifiState_ == WifiState::Connecting && (animFrame_ % 2) != 0) {
+            return;
+        }
+    }
+
+    // drawXBMP: x=56, y=0, w=8, h=6 — esquina superior derecha portrait 64×128.
+    u8g2_->drawXBMP(56, 0, 8, 6, sprite);
+}
+
+// -----------------------------------------------------------------------------
 // drawStatsView_ — pantalla de stats con barras de progreso.
 //
 // Layout (64 wide × 128 tall, fuente 6×10):
@@ -409,16 +495,50 @@ void DisplayRenderer::drawStatsView_() {
     drawTurboBanner_();
 #endif
 
+    drawWifiIcon_();
+
     u8g2_->sendBuffer();
 }
 
 // -----------------------------------------------------------------------------
-// drawOtaProgress_ — stub hito 5. Se implementa en hito 8.
+// drawOtaProgress_ — pantalla de progreso OTA (Fase 3 hito 2).
+//
+// Layout portrait 64×128:
+//   y=12        "Updating..." centrado (fuente 5×7)
+//   y=30        "X%" centrado (porcentaje numérico, fuente 6×10)
+//   y=50..58    Barra de progreso: frame 64×8 + relleno proporcional
+//
+// La barra ocupa x=0..63, y=50..57 (64px de ancho).
+// Relleno: fillWidth = otaProgress_ * 62 / 100 (px dentro del marco de 62 px).
+//
+// El icono WiFi NO se pinta aquí — en pantalla OTA la prioridad visual es máxima.
+// drawWifiIcon_() tiene guard: if (scene_ == Scene::OtaProgress) return.
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawOtaProgress_() {
     u8g2_->clearBuffer();
+
+    // Texto "Updating..." — fuente 5×7, 11 chars × 5px = 55 → x = (64-55)/2 ≈ 4
     u8g2_->setFont(u8g2_font_5x7_tf);
-    u8g2_->drawStr(0, 30, "TODO: OTA");
+    u8g2_->drawStr(4, 20, "Updating...");
+
+    // Porcentaje numérico centrado — fuente 6×10
+    // Hasta 3 dígitos + "%" = 4 chars × 6px = 24 → x = (64-24)/2 = 20
+    u8g2_->setFont(u8g2_font_6x10_tf);
+    char pctBuf[6];
+    snprintf(pctBuf, sizeof(pctBuf), "%u%%", static_cast<unsigned>(otaProgress_));
+    // Centrar dinámicamente: medir ancho en chars × 6 px
+    uint8_t pctLen = static_cast<uint8_t>(strlen(pctBuf));
+    int pctX = (64 - pctLen * 6) / 2;
+    if (pctX < 0) pctX = 0;
+    u8g2_->drawStr(pctX, 44, pctBuf);
+
+    // Barra de progreso: marco exterior 64×8 en y=50, relleno proporcional.
+    u8g2_->drawFrame(0, 50, 64, 8);
+    int fillWidth = (static_cast<int>(otaProgress_) * 62) / 100;
+    if (fillWidth > 0) {
+        u8g2_->drawBox(1, 51, fillWidth, 6);
+    }
+
     u8g2_->sendBuffer();
 }
 
@@ -479,6 +599,8 @@ void DisplayRenderer::drawDeadScreen_() {
     char ripBuf[16];
     snprintf(ripBuf, sizeof(ripBuf), "RIPs: %u", deathCount_);
     u8g2_->drawStr(0, 114, ripBuf);
+
+    drawWifiIcon_();
 
     u8g2_->sendBuffer();
 }

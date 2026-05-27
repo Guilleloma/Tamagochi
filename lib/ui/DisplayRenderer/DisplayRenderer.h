@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "../../domain/StatsEngine/StatsEngine.h"
 #include "../../domain/Persistence/Persistence.h"   // LifeStage enum
+#include "../../infra/WifiManager/WifiManager.h"    // WifiState enum
 
 // =============================================================================
 // DisplayRenderer — encapsula el dibujado de escenas en el OLED SSD1306.
@@ -65,6 +66,10 @@ public:
     void triggerHatchAnimation();                // Egg → Baby: vibración + grieta 2400 ms
     void triggerEvolveAnimation();               // Baby→Kid/Kid→Adult/Adult→Old: parpadeo 1200 ms
 
+    // Actualiza el estado WiFi para el indicador de esquina superior derecha.
+    // Disabled → sin icono. Connecting → parpadeo. Connected/Disconnected → icono fijo.
+    void setWifiState(WifiState state);
+
     // Dibuja un frame completo. Llamar desde el scheduler a 5 FPS.
     void render();
 
@@ -84,6 +89,9 @@ private:
     uint32_t  ageMinutes_         = 0;
     uint16_t  deathCount_         = 0;
 
+    // Estado WiFi — icono 8×6 px en esquina superior derecha.
+    WifiState wifiState_ = WifiState::Disabled;
+
     // Timers one-shot; decrementados 200 ms por render()
     uint32_t  eatAnimRemainingMs_    = 0;
     uint32_t  hatchAnimRemainingMs_  = 0;    // eclosión Egg → Baby
@@ -93,6 +101,7 @@ private:
 
     void drawIdleMain_();
     void drawOverlays_();    // overlays asíncronos sobre el sprite principal (hito 6)
+    void drawWifiIcon_();    // icono WiFi 8×6 en esquina superior derecha
     void drawStatsView_();
     void drawOtaProgress_();
     void drawDeadScreen_();
