@@ -64,7 +64,8 @@ static StatsEngine     statsEngine;                 // defaults: hunger=50, happ
 static LifeFSM         lifeFSM(bus);                // tras statsEngine — necesita bus para publicar
 static LittleFsStorage storage;
 static Persistence     persistence(storage);
-static InputHandler    input(bus, PIN_BUTTON);
+// TTP223 capacitivo: salida push-pull active-HIGH → activeLow=false, pullupActive=false.
+static InputHandler    input(bus, PIN_BUTTON, /*activeLow=*/false, /*pullupActive=*/false);
 static DisplayRenderer renderer(u8g2, bus);
 static WifiManager     wifi(bus);                   // Fase 3 hito 1 — no bloqueante
 static OTAManager      ota(bus);                    // Fase 3 hito 2 — activa al conectar WiFi
@@ -526,7 +527,7 @@ void setup() {
 
     // Configurar OneButton con callbacks via InputHandler.
     input.begin();
-    LOG_INFO("Boton configurado en GPIO%d", PIN_BUTTON);
+    LOG_INFO("Boton (touch TTP223) configurado en GPIO%d", PIN_BUTTON);
 
     uint32_t now = millis();
     lastStatsTickMs = now;

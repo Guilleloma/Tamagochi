@@ -6,8 +6,8 @@
 // instance_ estático — permite a los callbacks C acceder al objeto vivo.
 InputHandler* InputHandler::instance_ = nullptr;
 
-InputHandler::InputHandler(EventBus& bus, uint8_t pin, bool activeLow)
-    : bus_(&bus), button_(pin, activeLow)
+InputHandler::InputHandler(EventBus& bus, uint8_t pin, bool activeLow, bool pullupActive)
+    : bus_(&bus), button_(pin, activeLow, pullupActive)
 {
     // Garantía de singleton: solo un InputHandler activo en Fase 1.
     if (instance_ != nullptr) {
@@ -24,9 +24,13 @@ void InputHandler::begin() {
     // para distinguir single de double, lo que retrasa el click corto y en
     // botones con rebote llega a perderse. El plan reserva el evento doble
     // click para hitos futuros — cuando haga falta, se vuelve a registrar.
-    button_.setClickMs(80);     // espera mínima tras click (default 400ms)
-    button_.setDebounceMs(40);  // sensible para click rápido, sin doble click registrado evita rebotes contables
-    button_.setPressMs(600);    // long press a 600ms (default 800ms)
+    // Timings ajustados al TTP223 capacitivo (flanco limpio, sin rebote mecánico).
+    // Con el botón FLASH antiguo el debounce conservador era 40 ms; el touch
+    // capacitivo entrega una señal estable, así que 10 ms es más que suficiente
+    // y reduce la latencia percibida del click corto a la mitad.
+    button_.setClickMs(30);     // sin doubleClick attach, este timeout es irrelevante para el click corto
+    button_.setDebounceMs(10);  // touch capacitivo: 10 ms basta, el flanco ya viene limpio del chip
+    button_.setPressMs(600);    // long press se mantiene en 600 ms — umbral cómodo para distinguir intención
 }
 
 void InputHandler::loop() {
