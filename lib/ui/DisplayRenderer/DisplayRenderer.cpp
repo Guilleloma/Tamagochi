@@ -3,6 +3,11 @@
 #include "config.h"
 #include "sprites_generated.h"
 
+// Forward declaration de drawXBMx2 (helper de pintado escalado x2).
+// La implementación está más abajo en el archivo, pero render() y
+// los drawers la necesitan antes.
+static void drawXBMx2(U8G2* u8g2, int x, int y, int w, int h, const uint8_t* bitmap);
+
 // =============================================================================
 // SpriteFrames — agrupa los frames de una animación para indexar por Mood.
 // =============================================================================
@@ -28,17 +33,15 @@ static const SpriteFrames kSpritesByStage[6][4] = {
 
     // -------------------------------------------------------------------------
     // Egg (0) — sprites reales (4 frames: quieto, leve vibración, vibración, grieta)
-    // El huevo no tiene moods narrativos (no come, no se entristece). Mapeo:
-    //   Idle  → frames 0+1 (huevo quieto + leve vibración)
-    //   Happy → frames 2+3 (vibración fuerte y grieta = "vivo, listo para eclosionar")
-    //   Sad   → frame 0 solo (huevo inerte)
-    //   Eat   → frames 0+1 (idem idle; el huevo no come, pero la API requiere algo)
+    // El huevo NO tiene moods narrativos (no come, no se entristece, no está feliz).
+    // Todos los moods usan los mismos 2 frames idle para coherencia visual.
+    // Los frames 2-3 quedan reservados para una eventual animación de eclosión.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteEgg0, kSpriteEgg1, nullptr},     2 },  // Idle
-        { {kSpriteEgg2, kSpriteEgg3, nullptr},     2 },  // Happy
-        { {kSpriteEgg0, nullptr,     nullptr},     1 },  // Sad
-        { {kSpriteEgg0, kSpriteEgg1, nullptr},     2 },  // Eat
+        { {kSpriteEgg0, kSpriteEgg1, nullptr}, 2 },  // Idle
+        { {kSpriteEgg0, kSpriteEgg1, nullptr}, 2 },  // Happy
+        { {kSpriteEgg0, kSpriteEgg1, nullptr}, 2 },  // Sad
+        { {kSpriteEgg0, kSpriteEgg1, nullptr}, 2 },  // Eat
     },
 
     // -------------------------------------------------------------------------
@@ -142,6 +145,16 @@ void DisplayRenderer::triggerEatAnimation() {
     eatAnimRemainingMs_ = 2400;
 }
 
+void DisplayRenderer::triggerHatchAnimation() {
+    // 2400 ms de eclosión: frames 2-3 del huevo (vibración + grieta).
+    hatchAnimRemainingMs_ = 2400;
+}
+
+void DisplayRenderer::triggerEvolveAnimation() {
+    // 1200 ms de parpadeo del sprite nuevo (efecto "evoluciona").
+    evolveAnimRemainingMs_ = 1200;
+}
+
 // -----------------------------------------------------------------------------
 // computeMood_ — determina el mood actual del Tamagochi.
 // Prioridad: Eat (one-shot timer) > Idle (dormido) > Sad > Happy > Idle.
@@ -160,9 +173,45 @@ Mood DisplayRenderer::computeMood_() const {
 // en las funciones de escena.
 // -----------------------------------------------------------------------------
 void DisplayRenderer::render() {
-    // Decrementar timer EAT one-shot: cada render = 200 ms (5 FPS).
+    // Decrementar timers de animaciones one-shot: cada render = 200 ms (5 FPS).
     if (eatAnimRemainingMs_ > 0) {
         eatAnimRemainingMs_ = (eatAnimRemainingMs_ > 200u) ? (eatAnimRemainingMs_ - 200u) : 0u;
+    }
+    if (hatchAnimRemainingMs_ > 0) {
+        hatchAnimRemainingMs_ = (hatchAnimRemainingMs_ > 200u) ? (hatchAnimRemainingMs_ - 200u) : 0u;
+    }
+    if (evolveAnimRemainingMs_ > 0) {
+        evolveAnimRemainingMs_ = (evolveAnimRemainingMs_ > 200u) ? (evolveAnimRemainingMs_ - 200u) : 0u;
+    }
+
+    // Animación de eclosión: dibujo dedicado, ignora lifeStage_ y mood.
+    // Aunque la transición ya cambió lifeStage_ a Baby, queremos mostrar
+    // el huevo rompiéndose unos segundos antes de revelar el bebé.
+    if (hatchAnimRemainingMs_ > 0) {
+        animTickCount_++;
+        if (animTickCount_ >= 2) {
+            animTickCount_ = 0;
+            animFrame_ = (animFrame_ + 1) % 2;
+        }
+        u8g2_->clearBuffer();
+        // Frames 2-3 del huevo: vibración fuerte + grieta.
+        const uint8_t* sprite = (animFrame_ % 2) ? kSpriteEgg3 : kSpriteEgg2;
+        drawXBMx2(u8g2_, 0, 4, 32, 32, sprite);
+        u8g2_->setFont(u8g2_font_6x10_tf);
+        u8g2_->drawStr(5, 85, "Eclosion");
+        u8g2_->sendBuffer();
+        return;
+    }
+
+    // Animación de evolve: parpadeo on/off del sprite normal cada 200 ms.
+    // Mientras dure, alternamos render normal con clear-buffer.
+    if (evolveAnimRemainingMs_ > 0) {
+        if ((evolveAnimRemainingMs_ / 200u) % 2u != 0u) {
+            u8g2_->clearBuffer();
+            u8g2_->sendBuffer();
+            return;
+        }
+        // Tick visible: cae al render normal (drawIdleMain_) tras este bloque.
     }
 
     // Avanza frame de animación cada 2 ticks (400 ms).
