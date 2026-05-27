@@ -32,7 +32,7 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 
 ---
 
-## Estado actual — Fase 2 completada
+## Estado actual — Fase 3 completada
 
 | Capa | Feature | Estado |
 |---|---|---|
@@ -45,11 +45,16 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 | **ui** | DisplayRenderer multi-sprite por etapa + DeadScreen | ✅ |
 | **ui** | Overlays asíncronos SICK / SLEEP_Z / HUNGRY / POOP | ✅ |
 | **ui** | Animaciones IDLE / HAPPY / SAD / EAT one-shot | ✅ |
+| **infra** | WifiManager STA no bloqueante + reconexión | ✅ |
+| **infra** | OTAManager (ArduinoOTA + password) | ✅ |
+| **infra** | WebUI — AsyncWebServer + 9 endpoints REST + mDNS | ✅ |
+| **infra** | RateLimiter (token bucket por IP) + AuthChecker (HTTP Basic) | ✅ |
+| **ui** | Frontend HTML/CSS/JS mobile-first servido desde LittleFS | ✅ |
 | **build** | TURBO_MODE ×60 (env `esp12e_turbo`) para QA | ✅ |
-| **build** | Tests host-native — **71 tests pasando** | ✅ |
+| **build** | OTA upload via WiFi (env `esp12e_ota`) | ✅ |
+| **build** | Tests host-native — **108 tests pasando** | ✅ |
+| **build** | Script integración HTTP — **27 tests pasando** | ✅ |
 | **diferido** | Sprites EGG/KID/ADULT/OLD/DEAD reales | ⏸️ usando BABY como placeholder |
-| **diferido** | OTA + WiFi STA | ⏸️ Fase 3 o posterior |
-| **diferido** | Interfaz web | ⏸️ Fase 3 |
 | **diferido** | Gestión de energía (auto-dim, sleep) | ⏸️ Fase 4 |
 
 ---
@@ -68,6 +73,12 @@ pio run -e esp12e_turbo
 # Flashear (USB)
 pio run -e esp12e -t upload
 
+# Subir frontend (data/*) al filesystem LittleFS de la placa
+pio run -e esp12e -t uploadfs
+
+# Flashear por WiFi (requiere OTA_PASSWORD en env var y placa en la red)
+OTA_PASSWORD="tu_password" pio run -e esp12e_ota -t upload
+
 # Monitor serie (115200 baud)
 pio device monitor
 
@@ -78,6 +89,19 @@ pio test -e native
 > Si el flasheo da `Invalid head of packet` por hub USB, `upload_speed` está fijado a 460800 en `platformio.ini` (921600 falla a través de hub).
 >
 > Los binarios `esp12e` (`FIRMWARE_VERSION=0x0200`) y `esp12e_turbo` (`FIRMWARE_VERSION=0x02FE`) son **mutuamente excluyentes** vía `static_assert` para evitar mezclas.
+
+### Secrets
+
+Antes del primer build hay que crear `include/secrets.h` (gitignored) a partir de la plantilla:
+
+```bash
+cp include/secrets.h.example include/secrets.h
+# editar y rellenar WIFI_SSID, WIFI_PASSWORD, OTA_PASSWORD, WEB_AUTH_USER, WEB_AUTH_PASSWORD
+```
+
+- **WIFI_SSID vacío** → WiFi se queda en `Disabled`, el Tamagotchi funciona offline.
+- **OTA_PASSWORD vacío** → OTA queda deshabilitada (sin error).
+- **WEB_AUTH_PASSWORD vacío** → todos los endpoints REST devuelven 503.
 
 ---
 
@@ -97,15 +121,26 @@ Tamagotchi/
 │   │   ├── StatsEngine/       ← 6 stats + decay + 7 acciones + RNG inyectable
 │   │   ├── LifeFSM/           ← 6 etapas + transiciones automáticas
 │   │   └── Persistence/       ← LittleFS rotativo + CRC32 + IStorage + migrate
+│   ├── infra/
+│   │   ├── WifiManager/       ← STA no bloqueante + reconexión con backoff
+│   │   ├── OTAManager/        ← ArduinoOTA con password (port 8266)
+│   │   └── WebUI/             ← AsyncWebServer + JsonCodec + RateLimiter + AuthChecker
 │   └── ui/
 │       ├── InputHandler/      ← wrapper OneButton → EventBus
 │       └── DisplayRenderer/   ← U8g2 + scenes + tabla sprites por etapa + overlays
+├── data/                      ← LittleFS: index.html + app.css + app.js (frontend)
+├── scripts/
+│   └── integration_test.sh   ← script de tests HTTP contra placa real (27 tests)
 ├── src/main.cpp               ← orquestación: singletons + suscripciones + loop
 ├── test/
 │   ├── test_smoke/            ← canario del env native
-│   ├── test_stats_engine/     ← 32 tests (Fase 1+2)
+│   ├── test_stats_engine/     ← 34 tests
 │   ├── test_persistence/      ← 22 tests (incluye migrate v1→v2)
-│   └── test_life_fsm/         ← 16 tests (transiciones de etapas)
+│   ├── test_life_fsm/         ← 16 tests (transiciones de etapas)
+│   ├── test_json_codec/       ← 14 tests (parse + render JSON)
+│   ├── test_payload_validator/← 6 tests
+│   ├── test_rate_limiter/     ← 9 tests (token bucket)
+│   └── test_auth_checker/     ← 6 tests (HTTP Basic Auth)
 ├── assets/sprites/            ← PNGs fuente (1-bit, 32×32 y 16×16)
 ├── tools/
 │   ├── slice_sheet.py         ← trocea sprite sheets (Nano Banana)
@@ -118,11 +153,44 @@ Tamagotchi/
 
 ---
 
-## Verificación de Fase 2
+## Web UI — Fase 3
+
+Una vez la placa esté en la WiFi y `data/*` esté subido al filesystem:
+
+| URL | Descripción |
+|---|---|
+| `http://tamagotchi.local/` | Frontend mobile-first (HTML/CSS/JS desde LittleFS) |
+| `http://tamagotchi.local/api/v1/state` | Snapshot del Tamagotchi (`lifeStage`, stats, flags) |
+| `http://tamagotchi.local/api/v1/info` | Telemetría: `freeHeap`, `uptimeMs`, `rssi`, etc. |
+| `POST /api/v1/{feed,play,heal,discipline}` | Body `{"amount": 1..100}` |
+| `POST /api/v1/{clean,medicate}` | Sin body |
+| `POST /api/v1/sleep` | Body `{"value": true}` o `{"value": false}` |
+
+**Autenticación:** HTTP Basic Auth con `WEB_AUTH_USER:WEB_AUTH_PASSWORD` de `secrets.h`. Todos los endpoints `/api/v1/*` la requieren.
+
+**Rate limiting:** token bucket por IP, 10 tokens iniciales + 1 token/600 ms. 429 si se agota.
+
+**Errores:** formato estándar (`code` / `message` / `details`) según `docs/api-conventions.md`.
+
+### Tests de integración HTTP
+
+```bash
+# El frontend tiene que estar subido (uploadfs) y la placa en WiFi.
+HOST=tamagotchi.local AUTH_USER=admin AUTH_PASS=tu_pass ./scripts/integration_test.sh
+
+# Si mDNS no resuelve, ataca por IP:
+HOST=192.168.x.x AUTH_USER=admin AUTH_PASS=tu_pass ./scripts/integration_test.sh
+```
+
+Cubre 27 escenarios: auth (401), happy path por endpoint (200 + `actionApplied`), validaciones (422 amount fuera de rango / tipo equivocado, 400 JSON malformado), 404 en rutas inexistentes y los assets estáticos del frontend.
+
+---
+
+## Verificación
 
 ### Tests automáticos
 ```bash
-pio test -e native   # 71/71 deben pasar (1 smoke + 32 stats + 22 persist + 16 lifefsm)
+pio test -e native   # 108/108 deben pasar
 ```
 
 ### Pruebas funcionales en hardware
@@ -131,6 +199,10 @@ pio test -e native   # 71/71 deben pasar (1 smoke + 32 stats + 22 persist + 16 l
 - [x] Click corto alterna IdleMain ↔ StatsView
 - [x] Pulsación larga: hambre baja 20, animación EAT 2.4s, persist on-action
 - [x] FPS estable a 5.00
+- [x] WiFi conecta a SSID configurado en `secrets.h` y aparece en `IdleMain` con icono
+- [x] OTA upload funciona (`OTA_PASSWORD="..." pio run -e esp12e_ota -t upload`)
+- [x] `tamagotchi.local` accesible desde móvil y sirve el frontend
+- [x] `scripts/integration_test.sh` 27/27 PASS
 - [ ] Ciclo completo de vida verificado con TURBO (~25 min wall-clock para llegar a DeadScreen)
 - [ ] Resurrección Dead→Egg tras 5 min wall-clock
 
@@ -168,15 +240,15 @@ Comprueba:
 ## Roadmap
 
 - **Fase 2.5** ✅ — sprites reales para EGG, KID, ADULT (variante base), OLD, DEAD + animación EAT por etapa + animaciones de transición (eclosión, evolve).
-- **Fase 3** — interfaz web servida por el ESP8266 + REST `/api/v1/*` para acciones secundarias (limpiar caca, curar, regañar, dormir, **jugar**).
+- **Fase 3** ✅ — WiFi STA + OTA + AsyncWebServer + REST `/api/v1/*` + frontend HTML/CSS/JS desde LittleFS.
 - **Fase 4** — gestión de energía (auto-dim/off del OLED, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
-- **OTA diferido** — cuando haga falta actualizar la placa sin USB.
 
 ### Backlog específico (no perder)
 
-- `applyPlay` — falta implementar en StatsEngine (única acción del Tamagotchi clásico pendiente). Sube felicidad con coste de hambre.
 - **ActionMenu en pantalla** — menú con iconos navegable con 1 botón. Permite ejecutar todas las acciones sin WiFi.
 - **Sprites faltantes** — Adult sad, Old happy/sad. Baja prioridad (placeholders idle son coherentes con los estados emocionales contenidos de adultos serios y ancianos lentos).
 - **AdultType variants** — sprites distintos según `attentionScore` (athletic / normal / obese / grumpy).
+- **`/api/v1/reset`** — endpoint para forzar resurrección (huevo nuevo) desde la web. Planeado pero no implementado en Fase 3.
+- **`actionApplied` de `sleep`** — actualmente reporta `amount: 1`/`0` en lugar de `value: true/false` (cosmético).
 
-Planes completos en `docs/fase-1-plan.md` y `docs/fase-2-plan.md`. Plan maestro en `docs/plan.md`.
+Planes completos en `docs/fase-1-plan.md`, `docs/fase-2-plan.md` y `docs/fase-3-plan.md`. Plan maestro en `docs/plan.md`.
