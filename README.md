@@ -1,6 +1,6 @@
-# Tamagochi ESP8266
+# Tamagotchi ESP8266
 
-Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OLED Module V3.2**. Firmware en C++/Arduino con PlatformIO. Stats con decay en tiempo real, persistencia entre apagados y arquitectura modular pensada para crecer hacia evoluciones por etapas, muerte permanente e interfaz web.
+Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OLED Module V3.2**. Firmware en C++/Arduino con PlatformIO. Ciclo de vida completo (huevo→bebé→niño→adulto→anciano→muerte→resurrección), 6 stats con decay en tiempo real, persistencia entre apagados y arquitectura modular pensada para crecer.
 
 ---
 
@@ -19,31 +19,38 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 
 ## Cómo se juega
 
-1. **Pantalla principal**: sprite del bebé BABY animado (2 frames cada 400 ms) + título "Tamagochi".
+1. **Pantalla principal**: sprite del Tamagotchi animado según etapa de vida + título "Tamagotchi" + mini-contador de edad ("9m" o "1h2m").
 2. **Click corto** (~200-300 ms) → cambia a la pantalla **STATS** y vuelve.
 3. **STATS**: 3 barras de progreso — Hambre, Animo, Salud.
-4. **Pulsación larga** (>600 ms) → alimentar (Hambre −20). Guarda el estado en flash inmediatamente.
-5. **Cada segundo** el firmware aplica decay (lento — el hambre tarda ~16 min en saturar).
-6. **Cada 5 minutos** autosave en LittleFS. El Tamagochi sobrevive a apagones y power cycles.
+4. **Pulsación larga** (>600 ms) → alimentar (Hambre −20) + animación EAT de 2.4s. Guarda inmediatamente.
+5. **Cada segundo** el firmware aplica decay (lento — el hambre tarda ~16 min en saturar). En `[env:esp12e_turbo]` el ciclo es ×60 (5 min real ≈ 5 h subjetivas).
+6. **Cada 5 minutos** autosave en LittleFS. El Tamagotchi sobrevive a apagones y power cycles.
+7. **Overlays asíncronos** sobre el sprite cuando aplique: Z dormido, calavera enfermo, gota hambre, caca (hasta 3 visibles).
+8. **Al morir** se muestra `DeadScreen` con causa de muerte y edad alcanzada. Tras 5 min wall-clock renace como huevo (no escala con turbo).
 
 > El botón GPIO0 tiene rebote mecánico. Para que se interprete como click corto pulsa entre 100-500 ms (como un botón físico estándar). Mantener >600 ms = pulsación larga.
 
 ---
 
-## Estado actual — Fase 1 completada
+## Estado actual — Fase 2 completada
 
-| Feature | Estado |
-|---|---|
-| Logger con niveles | ✅ |
-| EventBus pub/sub (sin allocación dinámica) | ✅ |
-| StatsEngine con decay + acciones | ✅ |
-| Persistence LittleFS rotativa con CRC32 + migrate() | ✅ |
-| InputHandler con OneButton calibrado | ✅ |
-| DisplayRenderer con IdleMain + StatsView | ✅ |
-| Sprite BABY real animado (escalado x2) | ✅ |
-| Persistencia entre reinicios y power cycles | ✅ |
-| Tests host-native (Unity) — **32 tests pasando** | ✅ |
-| OTA + WiFi STA | ⏸️ diferido — Fase 2 o posterior |
+| Capa | Feature | Estado |
+|---|---|---|
+| **core** | Logger con niveles | ✅ |
+| **core** | EventBus pub/sub (sin allocación dinámica) | ✅ |
+| **domain** | StatsEngine — 6 stats con decay + 7 acciones | ✅ |
+| **domain** | LifeFSM — 6 etapas + transiciones automáticas + muerte/resurrección | ✅ |
+| **domain** | Persistence LittleFS rotativa + CRC32 + migrate v1→v2 | ✅ |
+| **ui** | InputHandler con OneButton calibrado | ✅ |
+| **ui** | DisplayRenderer multi-sprite por etapa + DeadScreen | ✅ |
+| **ui** | Overlays asíncronos SICK / SLEEP_Z / HUNGRY / POOP | ✅ |
+| **ui** | Animaciones IDLE / HAPPY / SAD / EAT one-shot | ✅ |
+| **build** | TURBO_MODE ×60 (env `esp12e_turbo`) para QA | ✅ |
+| **build** | Tests host-native — **71 tests pasando** | ✅ |
+| **diferido** | Sprites EGG/KID/ADULT/OLD/DEAD reales | ⏸️ usando BABY como placeholder |
+| **diferido** | OTA + WiFi STA | ⏸️ Fase 3 o posterior |
+| **diferido** | Interfaz web | ⏸️ Fase 3 |
+| **diferido** | Gestión de energía (auto-dim, sleep) | ⏸️ Fase 4 |
 
 ---
 
@@ -52,8 +59,11 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 Requiere [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/index.html) o la extensión de VS Code.
 
 ```bash
-# Compilar el firmware
+# Compilar (modo producción)
 pio run -e esp12e
+
+# Compilar TURBO (ciclo de vida ×60 — solo para QA, NUNCA producción)
+pio run -e esp12e_turbo
 
 # Flashear (USB)
 pio run -e esp12e -t upload
@@ -66,77 +76,100 @@ pio test -e native
 ```
 
 > Si el flasheo da `Invalid head of packet` por hub USB, `upload_speed` está fijado a 460800 en `platformio.ini` (921600 falla a través de hub).
+>
+> Los binarios `esp12e` (`FIRMWARE_VERSION=0x0200`) y `esp12e_turbo` (`FIRMWARE_VERSION=0x02FE`) son **mutuamente excluyentes** vía `static_assert` para evitar mezclas.
 
 ---
 
 ## Estructura del proyecto
 
 ```
-Tamagochi/
+Tamagotchi/
 ├── platformio.ini
 ├── include/
-│   ├── config.h               ← pines, timings
-│   └── sprites_generated.h    ← assets BABY como arrays PROGMEM (auto-generado)
+│   ├── config.h               ← pines, timings, TURBO_FACTOR
+│   └── sprites_generated.h    ← assets como arrays PROGMEM (auto-generado)
 ├── lib/
 │   ├── core/
 │   │   ├── Logger/            ← macros LOG_INFO/WARN/ERROR/DEBUG
-│   │   └── EventBus/          ← pub/sub síncrono con function pointers planos
+│   │   └── EventBus/          ← pub/sub síncrono, function pointers planos
 │   ├── domain/                ← lógica pura, testeable host-native
-│   │   ├── StatsEngine/       ← decay, applyFeed/Play/Heal
-│   │   └── Persistence/       ← LittleFS rotativo + CRC32 + IStorage abstraction
+│   │   ├── StatsEngine/       ← 6 stats + decay + 7 acciones + RNG inyectable
+│   │   ├── LifeFSM/           ← 6 etapas + transiciones automáticas
+│   │   └── Persistence/       ← LittleFS rotativo + CRC32 + IStorage + migrate
 │   └── ui/
 │       ├── InputHandler/      ← wrapper OneButton → EventBus
-│       └── DisplayRenderer/   ← U8g2 + scenes (IdleMain, StatsView, OtaProgress)
+│       └── DisplayRenderer/   ← U8g2 + scenes + tabla sprites por etapa + overlays
 ├── src/main.cpp               ← orquestación: singletons + suscripciones + loop
 ├── test/
 │   ├── test_smoke/            ← canario del env native
-│   ├── test_stats_engine/     ← 14 tests
-│   └── test_persistence/      ← 17 tests con mock InMemoryStorage
+│   ├── test_stats_engine/     ← 32 tests (Fase 1+2)
+│   ├── test_persistence/      ← 22 tests (incluye migrate v1→v2)
+│   └── test_life_fsm/         ← 16 tests (transiciones de etapas)
 ├── assets/sprites/            ← PNGs fuente (1-bit, 32×32 y 16×16)
 ├── tools/
 │   ├── slice_sheet.py         ← trocea sprite sheets (Nano Banana)
-│   └── png_to_xbm.py          ← convierte PNGs → arrays C PROGMEM (--invert disponible)
+│   └── png_to_xbm.py          ← convierte PNGs → arrays C PROGMEM (--invert)
 └── docs/
     ├── fase-1-plan.md         ← plan vinculante de Fase 1 (referencia histórica)
+    ├── fase-2-plan.md         ← plan vinculante de Fase 2 (referencia histórica)
     └── sprites-plan.md        ← inventario y pipeline de sprites
 ```
 
 ---
 
-## Verificación de Fase 1
+## Verificación de Fase 2
 
 ### Tests automáticos
 ```bash
-pio test -e native   # 32/32 deben pasar
+pio test -e native   # 71/71 deben pasar (1 smoke + 32 stats + 22 persist + 16 lifefsm)
 ```
 
 ### Pruebas funcionales en hardware
-- [x] Boot muestra el bebé animado en pantalla principal
-- [x] Click corto alterna pantallas
-- [x] Pulsación larga baja hambre 20 puntos (visible en STATS)
-- [x] Tras RESET (botón S2) el firmware recupera el último estado guardado (log `Persist load: Ok (hunger=X happ=Y health=Z)`)
-- [x] FPS estable a 5.00 (log `[FPS] 5.00 fps`)
+- [x] Boot carga estado migrado de Fase 1 (log `Persist load: Ok ... stage=N age=M`)
+- [x] Pantalla principal muestra sprite + "Tamagotchi" + contador de edad
+- [x] Click corto alterna IdleMain ↔ StatsView
+- [x] Pulsación larga: hambre baja 20, animación EAT 2.4s, persist on-action
+- [x] FPS estable a 5.00
+- [ ] Ciclo completo de vida verificado con TURBO (~25 min wall-clock para llegar a DeadScreen)
+- [ ] Resurrección Dead→Egg tras 5 min wall-clock
 
 ### Endurance opcional (24h)
-Para validar que el firmware aguanta una sesión larga sin reinicios ni leaks:
-1. Conecta la placa al USB y `pio device monitor` con `tee` a un archivo de log:
+Igual que en Fase 1:
+```bash
+pio device monitor 2>&1 | tee tamagotchi-24h.log
+```
+Comprueba:
+- Sin `[ERROR]` en el log
+- `Boot Fase` aparece una sola vez (sin reinicios espontáneos)
+- Transiciones de etapa logueadas: `Life: stage -> N (subtype=M)`
+- Power cycle test (≥10×): cada arranque debe loguear `Persist load: Ok` con stage/age plausibles
+
+---
+
+## Diseño y pipeline de sprites
+
+1. **Generar el sprite sheet horizontal** con Nano Banana (u otra IA) — fondo blanco, sujeto negro.
+2. **Trocear en frames**:
    ```bash
-   pio device monitor 2>&1 | tee tamagochi-24h.log
+   python3 tools/slice_sheet.py assets/sprites/raw/baby_idle.png assets/sprites/ \
+       --name baby_idle --size 32
    ```
-2. Déjalo corriendo 24h sin tocar nada.
-3. Revisa el log:
-   - No debe haber `[ERROR]`
-   - No debe aparecer `Boot Fase 1` más de una vez (sin reinicios espontáneos)
-   - El decay debe haber llevado hambre/animo a valores extremos sin crash
-4. Power cycle test: desenchufa y vuelve a enchufar ≥10 veces. Cada arranque debe loguear `Persist load: Ok` con valores plausibles.
+3. **Convertir a arrays C PROGMEM** (los PNGs vienen con polaridad invertida — usar `--invert`):
+   ```bash
+   python3 tools/png_to_xbm.py --invert assets/sprites/ include/sprites_generated.h
+   ```
+4. **Compilar y flashear** — los sprites nuevos se ven en la próxima sesión.
+
+**Convención de nombres**: `baby_idle_0.png` → `kSpriteBabyIdle0`. Los sprites se mapean a `lifeStage × mood` en la tabla `kSpritesByStage` de `DisplayRenderer.cpp` — al añadir sprites EGG/KID/ADULT/OLD/DEAD basta con reemplazar las entradas placeholder.
 
 ---
 
 ## Roadmap
 
-- **Fase 2** — etapas de vida (EGG → BABY → KID → ADULT → OLD → DEAD), animaciones de feliz/triste/comer (sprites ya generados), overlays sleep/sick/poop/hungry, evoluciones por `attention_score`, muerte y resurrección.
-- **Fase 3** — interfaz web servida por el ESP8266 + REST `/api/v1/*` para acciones secundarias (limpiar caca, curar, etc).
+- **Fase 2.5** — sprites reales para EGG, KID, ADULT (4 variantes según AdultType), OLD, DEAD.
+- **Fase 3** — interfaz web servida por el ESP8266 + REST `/api/v1/*` para acciones secundarias (limpiar caca, curar, regañar, dormir).
 - **Fase 4** — gestión de energía (auto-dim/off del OLED, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
 - **OTA diferido** — cuando haga falta actualizar la placa sin USB (carcasa montada, ubicación fija).
 
-Plan completo en `docs/fase-1-plan.md` (Fase 1) y `docs/plan.md` (maestro).
+Planes completos en `docs/fase-1-plan.md` y `docs/fase-2-plan.md`. Plan maestro en `docs/plan.md`.

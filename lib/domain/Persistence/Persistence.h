@@ -16,28 +16,60 @@
 // =============================================================================
 
 // -----------------------------------------------------------------------------
-// PersistedState — 28 bytes exactos, layout documentado en fase-1-plan.md §4.1
+// LifeStage — etapa de vida del Tamagochi.
+// Valor uint8_t para ser POD y poder persistirse en PersistedState.lifeStage.
+// Compatibilidad con Fase 1: Baby=1 se mantiene.
+// -----------------------------------------------------------------------------
+enum LifeStage : uint8_t {
+    Egg   = 0,
+    Baby  = 1,   // valor heredado de Fase 1 — no cambiar
+    Kid   = 2,
+    Adult = 3,
+    Old   = 4,
+    Dead  = 5
+};
+
+// -----------------------------------------------------------------------------
+// PersistedState — 40 bytes exactos, layout documentado en fase-2-plan.md §3.1
 // -----------------------------------------------------------------------------
 struct PersistedState {
-    uint16_t magic;               // [0..2]  0xCAFE
-    uint16_t version;             // [2..4]  1 en Fase 1
-    uint32_t bornAtEpoch;         // [4..8]  0 hasta NTP (Fase 1.5)
+    // === Bloque heredado de v1 (idéntico layout, no tocar) ===
+    uint16_t magic;               // [0..2]   0xCAFE
+    uint16_t version;             // [2..4]   2 en Fase 2
+    uint32_t bornAtEpoch;         // [4..8]   0 hasta NTP (Fase 1.5)
     uint32_t lastSavedAtEpoch;    // [8..12]
     uint32_t ageMinutes;          // [12..16] contador local, independiente de NTP
-    uint8_t  lifeStage;           // [16]    Baby=1
-    uint8_t  hunger;              // [17]
-    uint8_t  happiness;           // [18]
-    uint8_t  health;              // [19]
+    uint8_t  lifeStage;           // [16]     LifeStage enum (Baby=1 heredado)
+    uint8_t  hunger;              // [17]     0-100
+    uint8_t  happiness;           // [18]     0-100
+    uint8_t  health;              // [19]     0-100
     uint16_t deathCount;          // [20..22] veces que ha muerto desde fábrica
-    uint16_t reserved;            // [22..24] padding, siempre 0
-    uint32_t crc32;               // [24..28] CRC32 sobre bytes [0..24]
+    uint16_t reserved;            // [22..24] padding v1 — en v2 sigue siendo 0
+
+    // === Bloque nuevo v2 (12 bytes) ===
+    uint8_t  discipline;          // [24]     0-100, 50 default (0=indisciplinado)
+    uint8_t  weight;              // [25]     0-100, 50 default (50=sano, 0=anoréxico, 100=obeso)
+    uint8_t  poopCount;           // [26]     número de cacas visibles, 0-9
+    uint8_t  flags;               // [27]     bit0=isSick, bit1=isSleeping, bit2..7 reservados
+    uint16_t attentionScore;      // [28..30] 0-1000, 500 default — métrica acumulada que dirige evolución
+    uint16_t deathSustainMs;      // [30..32] cuenta atrás de health=0 — persistido para no perderlo en power-loss
+    uint8_t  lastDeathCauseCode;  // [32]     0=none, 1=hunger, 2=sickness, 3=oldAge, 4=neglect, 5=unknown
+    uint8_t  adultType;           // [33]     0=normal, 1=athletic, 2=obese, 3=grumpy (antes reservedV2)
+    uint16_t reservedV2b;         // [34..36] padding, debe ser 0
+
+    // === CRC ===
+    uint32_t crc32;               // [36..40] CRC32 sobre bytes [0..36]
 };
-static_assert(sizeof(PersistedState) == 28, "PersistedState debe ser exactamente 28 bytes");
+static_assert(sizeof(PersistedState) == 40, "PersistedState v2 debe ser exactamente 40 bytes");
 
 // -----------------------------------------------------------------------------
 // IStorage — interfaz de almacenamiento inyectable por constructor.
 // LittleFsStorage implementa esta interfaz para el target esp12e.
 // InMemoryStorage la implementa para tests host-native.
+//
+// Semántica de read(): si el archivo existe pero es más corto que size,
+// se rellenan con 0 los bytes faltantes y se devuelve true.
+// Si el archivo no existe, devuelve false.
 // -----------------------------------------------------------------------------
 class IStorage {
 public:
@@ -66,12 +98,13 @@ class Persistence {
 public:
     static constexpr uint8_t  kSlotCount      = 4;
     static constexpr uint16_t kPersistMagic   = 0xCAFE;
-    static constexpr uint16_t kCurrentVersion = 1;
+    static constexpr uint16_t kCurrentVersion = 2;
 
     explicit Persistence(IStorage& storage);
 
     // Carga el slot más reciente válido.
     // Si ninguno es válido, rellena out con defaults y devuelve NoneFound o AllCorrupt.
+    // Aplica memset(&out, 0, sizeof(out)) al inicio — crítico para migración segura.
     LoadResult load(PersistedState& out);
 
     // Escribe en el siguiente slot rotativo (nextSlot_).
@@ -88,12 +121,16 @@ public:
     // Public static para que los tests lo ejerzan directamente.
     static uint32_t computeCrc32(const void* data, size_t size);
 
-    // Rellena state con el estado inicial de Fase 1: Baby recién nacido.
+    // Rellena state con el estado inicial de Fase 2: Egg recién nacido.
     static void fillDefaults(PersistedState& state);
 
 private:
     IStorage& storage_;
     uint8_t   nextSlot_ = 0;  // se recalcula al final de load()
+
+    // Migración específica v1 → v2. Rellena los 12 bytes nuevos con defaults.
+    // Premisa: los bytes [24..40] ya están a 0 por el memset en load().
+    static bool migrate_v1_to_v2_(PersistedState& state);
 
     // Devuelve el path de un slot dado. Buffer estático — no reentrant.
     static const char* slotPath_(uint8_t slot);
