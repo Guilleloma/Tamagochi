@@ -27,13 +27,18 @@ struct SpriteFrames {
 static const SpriteFrames kSpritesByStage[6][4] = {
 
     // -------------------------------------------------------------------------
-    // Egg (0) — PLACEHOLDER hasta tener sprites Egg
+    // Egg (0) — sprites reales (4 frames: quieto, leve vibración, vibración, grieta)
+    // El huevo no tiene moods narrativos (no come, no se entristece). Mapeo:
+    //   Idle  → frames 0+1 (huevo quieto + leve vibración)
+    //   Happy → frames 2+3 (vibración fuerte y grieta = "vivo, listo para eclosionar")
+    //   Sad   → frame 0 solo (huevo inerte)
+    //   Eat   → frames 0+1 (idem idle; el huevo no come, pero la API requiere algo)
     // -------------------------------------------------------------------------
     {
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Idle
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Happy  — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Sad    — placeholder
-        { {kSpriteBabyIdle0, kSpriteBabyIdle1, nullptr}, 2 },  // Eat    — n/a para Egg; placeholder
+        { {kSpriteEgg0, kSpriteEgg1, nullptr},     2 },  // Idle
+        { {kSpriteEgg2, kSpriteEgg3, nullptr},     2 },  // Happy
+        { {kSpriteEgg0, nullptr,     nullptr},     1 },  // Sad
+        { {kSpriteEgg0, kSpriteEgg1, nullptr},     2 },  // Eat
     },
 
     // -------------------------------------------------------------------------
