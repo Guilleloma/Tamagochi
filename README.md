@@ -12,7 +12,7 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 | Display | SSD1306 128×64 OLED integrado |
 | Pines OLED | **SW I2C**: SDA=GPIO12, SCL=GPIO14 (no HW I2C — confirmado V3.2) |
 | Orientación render | `U8G2_R1` → 64 wide × 128 tall (portrait, USB-C arriba) |
-| Botón | 1 botón onboard GPIO0 (FLASH) |
+| Botón | Touch capacitivo TTP223 en GPIO4 (D2) — VCC/GND/I/O |
 | Power | JST LiPo + TP4056 + AMS1117 3.3V / USB-C (CH340G) |
 
 ---
@@ -28,7 +28,7 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 7. **Overlays asíncronos** sobre el sprite cuando aplique: Z dormido, calavera enfermo, gota hambre, caca (hasta 3 visibles).
 8. **Al morir** se muestra `DeadScreen` con causa de muerte y edad alcanzada. Tras 5 min wall-clock renace como huevo (no escala con turbo).
 
-> El botón GPIO0 tiene rebote mecánico. Para que se interprete como click corto pulsa entre 100-500 ms (como un botón físico estándar). Mantener >600 ms = pulsación larga.
+> Touch capacitivo TTP223 en GPIO4: salida active-HIGH sin rebote. Toque breve (<600 ms) = click corto; mantener pulsado >600 ms = pulsación larga. El LED del módulo se enciende mientras detecta contacto.
 
 ---
 
