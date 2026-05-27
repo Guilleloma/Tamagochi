@@ -18,6 +18,7 @@
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
+#include <LittleFS.h>
 
 #include "config.h"
 #include "secrets.h"
@@ -136,6 +137,13 @@ void WebUI::mountRoutes_() {
     server_.on("/api/v1/medicate", HTTP_POST, [this](AsyncWebServerRequest* req) {
         handlePostMedicate_(req);
     });
+
+    // --- Archivos estáticos desde LittleFS (hito 7) ---
+    // Sirve /, /app.css, /app.js, /favicon.ico desde la carpeta raíz de LittleFS.
+    // index.html sin caché; CSS/JS/favicon con caché de 1 hora.
+    server_.serveStatic("/", LittleFS, "/")
+        .setDefaultFile("index.html")
+        .setCacheControl("no-cache");
 
     server_.onNotFound([this](AsyncWebServerRequest* req) {
         handleNotFound_(req);
