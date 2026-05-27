@@ -55,33 +55,33 @@ static const SpriteFrames kSpritesByStage[6][4] = {
     },
 
     // -------------------------------------------------------------------------
-    // Kid (2) — sprites reales: idle, happy, sad. Eat → reusa idle.
+    // Kid (2) — sprites reales: idle, happy, sad, eat.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteKidIdle0,  kSpriteKidIdle1,  nullptr},         2 },  // Idle
-        { {kSpriteKidHappy0, kSpriteKidHappy1, kSpriteKidHappy2}, 3 }, // Happy
-        { {kSpriteKidSad0,   kSpriteKidSad1,   nullptr},         2 },  // Sad
-        { {kSpriteKidIdle0,  kSpriteKidIdle1,  nullptr},         2 },  // Eat → reuse idle (no asset eat)
+        { {kSpriteKidIdle0,  kSpriteKidIdle1,  nullptr},          2 },  // Idle
+        { {kSpriteKidHappy0, kSpriteKidHappy1, kSpriteKidHappy2}, 3 },  // Happy
+        { {kSpriteKidSad0,   kSpriteKidSad1,   nullptr},          2 },  // Sad
+        { {kSpriteKidEat0,   kSpriteKidEat1,   kSpriteKidEat2},   3 },  // Eat
     },
 
     // -------------------------------------------------------------------------
-    // Adult (3) — sprites reales: idle, happy. Sad/Eat → reusan idle.
+    // Adult (3) — sprites reales: idle, happy, eat. Sad → reusa idle.
     // -------------------------------------------------------------------------
     {
-        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},          2 }, // Idle
+        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},            2 }, // Idle
         { {kSpriteAdultHappy0, kSpriteAdultHappy1, kSpriteAdultHappy2}, 3 }, // Happy
-        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},          2 }, // Sad → reuse idle
-        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},          2 }, // Eat → reuse idle
+        { {kSpriteAdultIdle0,  kSpriteAdultIdle1,  nullptr},            2 }, // Sad → reuse idle
+        { {kSpriteAdultEat0,   kSpriteAdultEat1,   kSpriteAdultEat2},   3 }, // Eat
     },
 
     // -------------------------------------------------------------------------
-    // Old (4) — sprites reales: idle. Resto reusan idle (los ancianos hacen poco).
+    // Old (4) — sprites reales: idle, eat. Happy/Sad → reusan idle (lentos).
     // -------------------------------------------------------------------------
     {
-        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr}, 2 },  // Idle
-        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr}, 2 },  // Happy → reuse idle
-        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr}, 2 },  // Sad   → reuse idle
-        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr}, 2 },  // Eat   → reuse idle
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr},        2 },  // Idle
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr},        2 },  // Happy → reuse idle
+        { {kSpriteOldIdle0, kSpriteOldIdle1, nullptr},        2 },  // Sad   → reuse idle
+        { {kSpriteOldEat0,  kSpriteOldEat1,  kSpriteOldEat2}, 3 },  // Eat
     },
 
     // -------------------------------------------------------------------------
