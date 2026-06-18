@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "colorKey": 63519,
+  "sprites": [
+    {
+      "id": "0e273289-be9b-4048-a2c3-acb89579dcdc",
+      "folder": "wiz",
+      "w": 48,
+      "h": 48,
+      "animations": {
+        "walk": {
+          "fps": 8,
+          "frames": [
+            "walk/0.bin",
+            "walk/1.bin",
+            "walk/2.bin",
+            "walk/3.bin",
+            "walk/4.bin",
+            "walk/5.bin",
+            "walk/6.bin",
+            "walk/7.bin"
+          ]
+        },
+        "eat": {
+          "fps": 8,
+          "frames": [
+            "eat/0.bin",
+            "eat/1.bin",
+            "eat/2.bin",
+            "eat/3.bin",
+            "eat/4.bin"
+          ]
+        },
+        "playing": {
+          "fps": 8,
+          "frames": [
+            "playing/0.bin",
+            "playing/1.bin",
+            "playing/2.bin",
+            "playing/3.bin",
+            "playing/4.bin"
+          ]
+        },
+        "sleep": {
+          "fps": 8,
+          "frames": [
+            "sleep/0.bin",
+            "sleep/1.bin",
+            "sleep/2.bin",
+            "sleep/3.bin"
+          ]
+        },
+        "happy": {
+          "fps": 8,
+          "frames": [
+            "happy/0.bin",
+            "happy/1.bin",
+            "happy/2.bin",
+            "happy/3.bin"
+          ]
+        },
+        "sick": {
+          "fps": 8,
+          "frames": [
+            "sick/0.bin",
+            "sick/1.bin",
+            "sick/2.bin",
+            "sick/3.bin"
+          ]
+        }
+      }
+    }
+  ]
+}
