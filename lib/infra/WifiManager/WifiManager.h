@@ -20,15 +20,12 @@
 // =============================================================================
 
 #include <stdint.h>
+// WifiState enum extraído a WifiState.h para que módulos que solo necesitan
+// el enum (DisplayRendererColor) puedan incluirlo sin arrastrar este header
+// completo, que en esp12e viene acompañado de <ESP8266WiFi.h>.
+#include "WifiState.h"  // reside en lib/core — siempre accesible
 
 class EventBus;
-
-enum class WifiState : uint8_t {
-    Disabled     = 0,   // SSID vacío en secrets.h — no intenta conectar
-    Connecting   = 1,   // WiFi.begin() lanzado, esperando asignación IP
-    Connected    = 2,   // WL_CONNECTED — IP asignada
-    Disconnected = 3    // hubo o intentó conexión, ahora sin red; reintenta con backoff
-};
 
 class WifiManager {
 public:
