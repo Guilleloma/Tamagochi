@@ -452,22 +452,19 @@ void DisplayRendererColor::drawSpriteScaled_(Arduino_GFX* display,
 // =============================================================================
 // drawHudTop_ — HUD superior: etapa de vida, edad, icono WiFi.
 //
-// Card redondeada en safe-area:
-//   x=kEdgeInset, y=kEdgeInset, w=kScreenW-2*kEdgeInset, h=kHudTopH, r=kCornerR
-//   Título (etapa, size 2)   en x=kSafeTextX, centrado vertically en la mitad superior
-//   Subtítulo (edad, size 1) en x=kSafeTextX, debajo del título
-//   Icono WiFi a cx≈kScreenW-kEdgeInset-14 para caer dentro de la card
+// Texto flotante sobre fondo azul (COL_BG), sin card de fondo.
+//   Título (etapa, size 2)   en x=kSafeTextX, y=kEdgeInset+6
+//   Subtítulo (edad, size 1) en x=kSafeTextX, y=kEdgeInset+28
+//   Icono WiFi a cx≈kScreenW-kEdgeInset-14, respetando safe-area
 // =============================================================================
 
 void DisplayRendererColor::drawHudTop_() {
-    // Card oscura redondeada — queda a kEdgeInset px de cada borde físico para
-    // evitar que el contenido sea recortado por la curvatura del cristal IPS.
-    canvas_.fillRoundRect(kEdgeInset, kEdgeInset,
-                          kScreenW - 2 * kEdgeInset, kHudTopH,
-                          kCornerR, COL_DARKGRAY);
+    // Sin card de fondo — el texto flota sobre el azul de COL_BG (pintado por
+    // drawIdleMain_ con fillScreen). kEdgeInset sigue marcando el límite seguro
+    // para no pegarse a la curvatura del cristal.
 
-    // Etapa de vida — título size 2 (12×16 px/char), posicionado en el tercio
-    // superior de la card para dejar espacio al subtítulo de edad debajo.
+    // Etapa de vida — título size 2 (12×16 px/char), posicionado respetando
+    // kEdgeInset en Y para quedar fuera de la zona curvada del borde superior.
     canvas_.setTextColor(COL_WHITE);
     canvas_.setTextSize(2);
     canvas_.setCursor(kSafeTextX, kEdgeInset + 6);
@@ -515,11 +512,12 @@ void DisplayRendererColor::drawWifiIcon_() {
 
     // Arco exterior (radio 6) — solo parte superior con fillCircle parcial
     canvas_.fillCircle(cx, cy, 7, color);
-    // "Hueco" interior dejando solo el contorno exterior
-    canvas_.fillCircle(cx, cy, 5, COL_DARKGRAY);
+    // "Hueco" interior dejando solo el contorno exterior — COL_BG porque el
+    // fondo ahora es azul (sin card gris debajo).
+    canvas_.fillCircle(cx, cy, 5, COL_BG);
     // Arco medio (radio 4)
     canvas_.fillCircle(cx, cy, 4, color);
-    canvas_.fillCircle(cx, cy, 2, COL_DARKGRAY);
+    canvas_.fillCircle(cx, cy, 2, COL_BG);
     // Arco pequeño (radio 1) — punto de señal
     canvas_.fillCircle(cx, cy, 1, color);
 
@@ -533,20 +531,15 @@ void DisplayRendererColor::drawWifiIcon_() {
 // =============================================================================
 // drawHudBottom_ — HUD inferior: acción activa (label + cursor dots).
 //
-// Card redondeada en safe-area:
-//   x=kEdgeInset, y=kScreenH-kEdgeInset-kHudBottomH, w=kScreenW-2*kEdgeInset, h=kHudBottomH
-//   Label centrado (size 2) en la mitad superior de la card.
-//   Cursor dots en la parte inferior de la card, separados del label.
+// Texto flotante sobre fondo azul (COL_BG), sin card de fondo.
+//   Label centrado (size 2) a cardY+8, respetando safe-area inferior.
+//   Cursor dots centrados en x, a 10 px del borde inferior de la zona.
 // =============================================================================
 
 void DisplayRendererColor::drawHudBottom_() {
-    // Origen Y de la card inferior: pegada al borde inferior con margen kEdgeInset.
+    // Origen Y de la zona HUD inferior — sin card de fondo; kEdgeInset marca
+    // el margen mínimo respecto a la curvatura del borde físico.
     const int16_t cardY = kScreenH - kEdgeInset - kHudBottomH;
-
-    // Card oscura redondeada — simétrica a la card superior.
-    canvas_.fillRoundRect(kEdgeInset, cardY,
-                          kScreenW - 2 * kEdgeInset, kHudBottomH,
-                          kCornerR, COL_DARKGRAY);
 
     if (visibleCount_ == 0) return;
 
@@ -836,7 +829,7 @@ void DisplayRendererColor::drawStatsView_() {
     rowY += rowH + 8;
 
     // Separador dentro de la safe-area
-    canvas_.drawFastHLine(kEdgeInset, rowY - 4, kScreenW - 2 * kEdgeInset, COL_DARKGRAY);
+    canvas_.drawFastHLine(kEdgeInset, rowY - 4, kScreenW - 2 * kEdgeInset, COL_GRAY);
 
     // Flags booleanos — a kSafeTextX para no tocar el borde físico
     canvas_.setTextColor(COL_WHITE);
