@@ -94,7 +94,18 @@ public:
     void setWifiState(WifiState state);
 
     // ── Triggers de animación one-shot ───────────────────────────────────────
-    void triggerEatAnimation();     // 5 frames × 125 ms ≈ 625 ms
+    // triggerActionAnimation: reproduce la animación asociada a la acción
+    // durante ~1000 ms y luego vuelve al mood calculado por computeMood_().
+    // Mapeo acción → MoodColor (con fallback a idle si la etapa no tiene ese mood):
+    //   Feed       → Eat   (come)
+    //   Play       → Happy (alegre)
+    //   Heal       → Happy
+    //   Medicate   → Happy
+    //   Clean      → Idle  (limpieza neutra; borra overlay caca visualmente)
+    //   Discipline → Sad   (consecuencia negativa)
+    //   Sleep/Stats→ sin one-shot (Sleep lo gestiona isSleeping)
+    void triggerActionAnimation(ActionKind action);
+
     void triggerHatchAnimation();   // reservado (Fase 3)
     void triggerEvolveAnimation();  // parpadeo 1200 ms (Fase 3)
 
@@ -129,14 +140,21 @@ private:
     WifiState  wifiState_      = WifiState::Disabled;
 
     // ── Animación ────────────────────────────────────────────────────────────
-    // animFrame_ avanza 1 cada render() — los drawers lo usan para calcular
-    // el frame del sprite y el parpadeo de overlays.
-    uint32_t animFrame_       = 0;
-    uint32_t animTickCount_   = 0;  // ticks para avance lento (cada 2 ticks = 1 frame)
+    // animFrame_ avanza según millis() y el fps declarado en el manifest
+    // (desacoplado del render FPS para que rendes más rápidos no aceleren el sprite).
+    uint32_t animFrame_        = 0;
+    uint32_t lastAnimTickMs_   = 0;  // millis() del último avance de animFrame_
 
-    // Timers de animaciones one-shot (ms restantes, decrementados por render).
-    // render() asume que se llama aproximadamente cada kRenderPeriodMs ms.
-    uint32_t eatAnimRemainingMs_    = 0;
+    // Timers de animaciones one-shot (ms restantes, decrementados con millis()).
+    // lastRenderMs_ se usa para calcular el delta entre renders y drenar los timers.
+    uint32_t lastRenderCallMs_      = 0;
+
+    // Timer unificado de acción one-shot (Feed/Play/Heal/Clean/Medicate/Discipline).
+    // Mientras actionAnimRemainingMs_ > 0, drawSprite_() usa actionAnimMood_ en lugar
+    // del mood calculado por computeMood_().
+    uint32_t  actionAnimRemainingMs_ = 0;
+    MoodColor actionAnimMood_        = MoodColor::Idle;
+
     uint32_t hatchAnimRemainingMs_  = 0;
     uint32_t evolveAnimRemainingMs_ = 0;
 
@@ -153,9 +171,10 @@ private:
     // Escala de renderizado: 48×48 × 4 = 192×192 px.
     static constexpr uint8_t kScale = 4;
 
-    // Período nominal entre renders (ms) — usado para decrementar timers.
-    // No es crítico: si el harness va más rápido, los timers sólo se drenan antes.
-    static constexpr uint32_t kRenderPeriodMs = 125;  // ~8 FPS
+    // Duración mínima de animación one-shot de acción (ms).
+    // ~1000 ms da tiempo a ver el ciclo de animación completo (~8 fps × 5 frames = 625 ms
+    // para eat; el resto son 4 frames, ~500 ms). Usamos 1200 ms con margen.
+    static constexpr uint32_t kActionAnimDurationMs = 1200;
 
     // ── Menú de acciones ─────────────────────────────────────────────────────
     ActionKind visibleActions_[kMaxActionMenuItems] = {};

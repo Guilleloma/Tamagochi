@@ -44,9 +44,16 @@
 // Timings del loop principal (Fase 0 — bring-up)
 // =============================================================================
 
-// 200 ms entre renders → 5 FPS objetivo.
-// El budget real se mide en el FPS report por serie cada FPS_REPORT_MS.
-#define RENDER_FRAME_MS  200
+// Período entre renders.
+// ESP32-S3: 66 ms → ~15 FPS objetivo (el flush 240×296 tarda ~40 ms vía SPI 27 MHz,
+//   dejando ~26 ms de margen. Si el panel no lo aguanta, bajar a 100 ms / 10 FPS).
+// ESP8266:  200 ms → 5 FPS (sin cambios — pantalla mono más lenta).
+// El FPS real se mide en el reporte serie cada FPS_REPORT_MS.
+#if defined(ARDUINO_ARCH_ESP32)
+  #define RENDER_FRAME_MS  66
+#else
+  #define RENDER_FRAME_MS  200
+#endif
 
 // El sprite BABY alterna entre frame 0 y frame 1 cada ANIM_FRAME_MS.
 // 400 ms da una animación suave visible sin ser frenética.

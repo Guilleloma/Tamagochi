@@ -155,21 +155,18 @@ static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const L
 // Deben ejecutarse en < 2 ms (EventBus síncrono — mismo budget que ESP8266).
 // =============================================================================
 
-// Publica el EventType de la acción HUD seleccionada y lanza animación si aplica.
-// DisplayRendererColor solo expone triggerEatAnimation / triggerHatchAnimation /
-// triggerEvolveAnimation — triggerActionAnimation es exclusivo del renderer mono.
-// Feed usa EAT (animación propia del personaje comiendo). El resto no tienen
-// animación one-shot en Fase 4; se reservan para Fase 6 con sprites de acción.
+// Publica el EventType de la acción HUD seleccionada y dispara la animación one-shot
+// correspondiente en el renderer. triggerActionAnimation() resuelve el mapeo
+// acción→MoodColor internamente (Feed→Eat, Play/Heal/Medicate→Happy, Discipline→Sad,
+// Clean→Idle) con fallback a idle si la etapa no tiene esa animación.
 static void executeSelectedAction_() {
     ActionKind action = renderer->currentSelectedAction();
     switch (action) {
         case ActionKind::Feed:
             bus.publish({EventType::ActionFeedRequested, 20});
-            renderer->triggerEatAnimation();   // animación EAT del sprite
             break;
         case ActionKind::Play:
             bus.publish({EventType::ActionPlayRequested, 20});
-            // Sin animación específica de Play en Fase 4 (Fase 6 añadirá sprite)
             break;
         case ActionKind::Clean:
             bus.publish({EventType::ActionCleanRequested, 0});
@@ -182,6 +179,8 @@ static void executeSelectedAction_() {
             break;
         case ActionKind::Sleep:
             // Toggle: si estaba durmiendo, despertar (0); si no, dormir (1).
+            // Sleep no dispara animación one-shot — el estado isSleeping activa
+            // la animación sleep de forma permanente en computeMood_().
             bus.publish({EventType::ActionSleepRequested,
                          statsEngine.stats().isSleeping ? 0 : 1});
             break;
@@ -192,6 +191,11 @@ static void executeSelectedAction_() {
             // Se maneja en onLongPress como transición de escena — no llega aquí.
             break;
     }
+
+    // Disparar animación one-shot para acciones que la tengan (Feed/Play/Heal/
+    // Clean/Medicate/Discipline). triggerActionAnimation es no-op para Sleep/Stats.
+    renderer->triggerActionAnimation(action);
+
     LOG_INFO("Action HUD: executed %u", static_cast<unsigned>(action));
 }
 

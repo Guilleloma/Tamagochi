@@ -145,14 +145,16 @@ DisplayRendererColor::DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus,
 // =============================================================================
 
 void DisplayRendererColor::begin() {
-    animFrame_            = 0;
-    animTickCount_        = 0;
-    eatAnimRemainingMs_   = 0;
-    hatchAnimRemainingMs_ = 0;
-    evolveAnimRemainingMs_= 0;
-    visibleCount_         = 0;
-    selectedIndex_        = 0;
-    spritesLoaded_        = loadSprites_();
+    animFrame_              = 0;
+    lastAnimTickMs_         = millis();
+    lastRenderCallMs_       = millis();
+    actionAnimRemainingMs_  = 0;
+    actionAnimMood_         = MoodColor::Idle;
+    hatchAnimRemainingMs_   = 0;
+    evolveAnimRemainingMs_  = 0;
+    visibleCount_           = 0;
+    selectedIndex_          = 0;
+    spritesLoaded_          = loadSprites_();
     if (!spritesLoaded_) {
         LOG_ERROR("DisplayRendererColor::begin() — no se pudieron cargar sprites");
     }
@@ -226,10 +228,40 @@ void DisplayRendererColor::setWifiState(WifiState state)      { wifiState_ = sta
 // Triggers de animación one-shot
 // =============================================================================
 
-void DisplayRendererColor::triggerEatAnimation() {
-    // eat tiene 5 frames a 8 fps → 5 × 125 ms = 625 ms.
-    // Usamos un timer un poco más largo (1500 ms) para que el ciclo se vea completo.
-    eatAnimRemainingMs_ = 1500;
+// Mapeo acción → MoodColor para la animación one-shot.
+// framesForMood_() aplicará el fallback a Idle si la etapa no tiene ese mood
+// (e.g. Egg/Ghost no tienen happy/sad/eat — muestran idle igualmente).
+void DisplayRendererColor::triggerActionAnimation(ActionKind action) {
+    MoodColor mood = MoodColor::Idle;
+    switch (action) {
+        case ActionKind::Feed:
+            mood = MoodColor::Eat;
+            break;
+        case ActionKind::Play:
+        case ActionKind::Heal:
+        case ActionKind::Medicate:
+            mood = MoodColor::Happy;
+            break;
+        case ActionKind::Discipline:
+            mood = MoodColor::Sad;
+            break;
+        case ActionKind::Clean:
+            // Idle: la animación neutral refleja la limpieza; el badge de caca
+            // desaparece porque poopCount ya fue reseteado por applyClean().
+            mood = MoodColor::Idle;
+            break;
+        case ActionKind::Sleep:
+        case ActionKind::Stats:
+            // Sleep lo gestiona isSleeping (permanente); Stats no es una acción.
+            return;
+    }
+
+    actionAnimMood_        = mood;
+    actionAnimRemainingMs_ = kActionAnimDurationMs;
+    LOG_INFO("[anim] triggerActionAnimation action=%u mood=%u dur=%ums",
+             static_cast<unsigned>(action),
+             static_cast<unsigned>(mood),
+             static_cast<unsigned>(kActionAnimDurationMs));
 }
 
 void DisplayRendererColor::triggerHatchAnimation() {
@@ -276,28 +308,45 @@ ActionKind DisplayRendererColor::currentSelectedAction() const {
 // =============================================================================
 
 void DisplayRendererColor::render() {
+    uint32_t now = millis();
+
+    // ── Delta desde el último render (para drenar timers one-shot) ──────────
+    // Usamos millis() real en lugar de kRenderPeriodMs fijo, así los timers
+    // no dependen de la cadencia del harness (correcto a 5, 10 o 15 FPS).
+    uint32_t dtMs = (lastRenderCallMs_ == 0) ? 0u : (now - lastRenderCallMs_);
+    lastRenderCallMs_ = now;
+
     // ── Decrementar timers one-shot ──────────────────────────────────────────
-    // Cada render() corresponde a kRenderPeriodMs ms de tiempo subjetivo.
-    // El harness puede llamar a render() a cualquier cadencia; la duración
-    // visual de las animaciones escala con ella.
-    if (eatAnimRemainingMs_ > 0) {
-        eatAnimRemainingMs_ = (eatAnimRemainingMs_ > kRenderPeriodMs)
-                            ? (eatAnimRemainingMs_ - kRenderPeriodMs) : 0u;
+    if (actionAnimRemainingMs_ > 0) {
+        actionAnimRemainingMs_ = (actionAnimRemainingMs_ > dtMs)
+                               ? (actionAnimRemainingMs_ - dtMs) : 0u;
     }
     if (hatchAnimRemainingMs_ > 0) {
-        hatchAnimRemainingMs_ = (hatchAnimRemainingMs_ > kRenderPeriodMs)
-                              ? (hatchAnimRemainingMs_ - kRenderPeriodMs) : 0u;
+        hatchAnimRemainingMs_ = (hatchAnimRemainingMs_ > dtMs)
+                              ? (hatchAnimRemainingMs_ - dtMs) : 0u;
     }
     if (evolveAnimRemainingMs_ > 0) {
-        evolveAnimRemainingMs_ = (evolveAnimRemainingMs_ > kRenderPeriodMs)
-                               ? (evolveAnimRemainingMs_ - kRenderPeriodMs) : 0u;
+        evolveAnimRemainingMs_ = (evolveAnimRemainingMs_ > dtMs)
+                               ? (evolveAnimRemainingMs_ - dtMs) : 0u;
     }
 
-    // ── Avanzar frame de animación cada 2 ticks ──────────────────────────────
-    // A 8 FPS, 2 ticks = 250 ms ≈ 4 cambios/s. Suficiente para animaciones fluidas.
-    animTickCount_++;
-    if (animTickCount_ >= 2) {
-        animTickCount_ = 0;
+    // ── Avanzar animFrame_ según fps del sprite activo (desacoplado del FPS de render) ─
+    // Determinar los fps de la animación activa. El manifest declara fps por animación
+    // (8 fps para la mayoría; 2 fps para el egg). Leemos el fps del ColorSpriteFrames
+    // actual para calcular cuántos ms deben pasar por frame.
+    // Si no hay sprites cargados, usamos 8 fps como defecto.
+    uint8_t spriteFps = 8;
+    {
+        MoodColor activeMood = (actionAnimRemainingMs_ > 0) ? actionAnimMood_ : computeMood_();
+        const ColorSpriteFrames* activeFrames = framesForMood_(lifeStage_, activeMood);
+        if (activeFrames != nullptr && activeFrames->fps > 0) {
+            spriteFps = activeFrames->fps;
+        }
+    }
+    uint32_t msPerFrame = 1000u / spriteFps;  // e.g. 8fps → 125ms, 2fps → 500ms
+
+    if (now - lastAnimTickMs_ >= msPerFrame) {
+        lastAnimTickMs_ = now;
         animFrame_++;
     }
 
@@ -307,10 +356,11 @@ void DisplayRendererColor::render() {
     }
 
     // ── Parpadeo durante animación de evolución ──────────────────────────────
-    // Cada 200 ms alterna visible/invisible. En los ticks "oscuros" pintamos
-    // fondo y hacemos flush, devolviendo sin dibujar el personaje.
+    // Alterna visible/invisible cada 200 ms (independiente del render FPS).
+    // En los slots "oscuros" pintamos fondo y hacemos flush sin dibujar el personaje.
+    static constexpr uint32_t kEvolveBlikPeriodMs = 200;
     if (evolveAnimRemainingMs_ > 0) {
-        uint32_t tickIdx = (evolveAnimRemainingMs_ / kRenderPeriodMs);
+        uint32_t tickIdx = (evolveAnimRemainingMs_ / kEvolveBlikPeriodMs);
         if ((tickIdx % 2) == 0) {
             canvas_.fillScreen(COL_BG);
             canvas_.flush();
@@ -329,12 +379,14 @@ void DisplayRendererColor::render() {
 }
 
 // =============================================================================
-// computeMood_ — prioridad: Eat > Sleep > Sad > Happy > Idle.
-// Sleep se pasa a framesForMood_() que aplica el fallback correcto por etapa.
+// computeMood_ — prioridad: Sleep > Sad > Happy > Idle.
+// La animación one-shot de acción (actionAnimRemainingMs_) se consulta en
+// drawSprite_() antes de llamar a computeMood_(), por lo que aquí no la
+// necesitamos. Sleep se pasa a framesForMood_() con fallback a idle si la
+// etapa no tiene animación propia de sueño.
 // =============================================================================
 
 MoodColor DisplayRendererColor::computeMood_() const {
-    if (eatAnimRemainingMs_ > 0)   return MoodColor::Eat;
     if (stats_.isSleeping)         return MoodColor::Sleep;
     if (stats_.happiness <= 20)    return MoodColor::Sad;
     if (stats_.happiness >= 80)    return MoodColor::Happy;
@@ -536,7 +588,10 @@ void DisplayRendererColor::drawSprite_() {
     const int16_t spriteX = (240 - 192) / 2;
     const int16_t spriteY = 40;
 
-    MoodColor mood = computeMood_();
+    // Prioridad de selección de mood:
+    //   1. Animación one-shot de acción activa (actionAnimRemainingMs_ > 0)
+    //   2. Mood calculado por computeMood_() (isSleeping → Sleep, etc.)
+    MoodColor mood = (actionAnimRemainingMs_ > 0) ? actionAnimMood_ : computeMood_();
     const ColorSpriteFrames* frames = framesForMood_(lifeStage_, mood);
     const int16_t spriteW = (frames && frames->w > 0) ? frames->w * kScale : 192;
     const int16_t spriteH = (frames && frames->h > 0) ? frames->h * kScale : 192;
