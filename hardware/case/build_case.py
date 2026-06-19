@@ -298,10 +298,15 @@ def build_front_bezel(P, D):
     blank = Part.makeBox(ex, bth, ez, App.Vector(-ex/2, 0, 0))
     # Lip ring: Y = [-lip_h .. 0]  (protrudes from inner face toward -Y)
     # Outer box: full ring cross-section, Z=[0..lip_od_z]
-    # Inner box: hollow centre,          Z=[lip_th..lip_od_z-lip_th] (leaves ring walls)
+    # Inner box: hollow centre.
+    #   Strategy: open-top hollow (no top cap) so the lip ring does not collide
+    #   with the TFT PCB, which spans Z=[~19, 68] and occupies the inner hollow in XY.
+    #   Inner cut: same Z as outer (lip_od_z), starting at Z=lip_th (keeps only bottom cap).
+    #   This leaves: bottom cap (Z=[0,lip_th]) + 4 side walls (|X|>lip_od_x/2-lip_th).
+    #   The PCB inner X=[-16.1,16.1] is entirely within the hollow (inner W/2=18mm > 16.1).
     lip_outer = Part.makeBox(lip_od_x, lip_h, lip_od_z,
                              App.Vector(-lip_od_x/2, -lip_h, 0))
-    lip_inner = Part.makeBox(lip_od_x - 2*lip_th, lip_h, lip_od_z - 2*lip_th,
+    lip_inner = Part.makeBox(lip_od_x - 2*lip_th, lip_h, lip_od_z - lip_th,
                              App.Vector(-(lip_od_x/2 - lip_th), -lip_h, lip_th))
     lip = lip_outer.cut(lip_inner)
 
@@ -688,6 +693,21 @@ def main():
         print("\nAll checks PASSED.")
 
     doc.recompute()
+
+    # Component mockups (optional — loads add_component_mockups module if present)
+    mockup_script = os.path.join(SCRIPT_DIR, "add_component_mockups.py")
+    if os.path.exists(mockup_script):
+        print("\n[5/5] Component mockups (add_component_mockups.py) ...")
+        try:
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location("add_component_mockups", mockup_script)
+            _mod  = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            _mod.main()
+        except Exception as _e:
+            print(f"  [SKIP] Could not run component mockups: {_e}")
+    else:
+        print(f"\n[INFO] {mockup_script} not found — skipping component mockups.")
 
 
 if __name__ == "__main__":
