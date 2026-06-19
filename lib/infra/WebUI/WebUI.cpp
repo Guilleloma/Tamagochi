@@ -17,7 +17,12 @@
 #include "WebUI.h"
 
 #include <Arduino.h>
-#include <ESP8266WiFi.h>
+// Platform-conditional WiFi header (same API surface: WiFi.RSSI, remoteIP, etc.)
+#if defined(ARDUINO_ARCH_ESP32)
+  #include <WiFi.h>
+#else
+  #include <ESP8266WiFi.h>
+#endif
 #include <LittleFS.h>
 
 #include "config.h"

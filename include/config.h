@@ -11,22 +11,49 @@
 #define OLED_SDA 12  // GPIO12 — D6 en numeración NodeMCU
 #define OLED_SCL 14  // GPIO14 — D5 en numeración NodeMCU
 
-// GPIO4 = sensor touch capacitivo TTP223 (módulo de 3 pines VCC/GND/I/O).
-// Salida push-pull active-HIGH: en reposo LOW, al tocar HIGH. No requiere
-// INPUT_PULLUP (la salida del chip ya impone el nivel) ni debounce externo
-// (el TTP223 entrega flanco limpio). InputHandler debe instanciarse con
-// activeLow=false y pullupActive=false — ver src/main.cpp.
-// GPIO0 sigue siendo el FLASH físico onboard, pero ya no lo lee la app:
-// queda exclusivamente como botón de programación para reflasheo manual.
-#define PIN_BUTTON 4
+// ── Configuración de botón — condicional por plataforma ─────────────────────
+//
+// ESP32-S3 Zero: GPIO0 es el botón BOOT físico de la placa.
+//   - Active-LOW con pull-up interno (INPUT_PULLUP).
+//   - AVISO STRAPPING: GPIO0 es pin de strapping del ESP32-S3. Si está LOW
+//     durante el ciclo de reset/arranque, el chip entra en bootloader USB/UART
+//     en lugar de arrancar el firmware. En runtime (después del boot) se puede
+//     leer y usar libremente. NO mantener pulsado el botón BOOT al alimentar
+//     la placa ni al pulsar RESET — si lo haces, entrará en bootloader y el
+//     firmware no arrancará hasta liberar el botón y resetear de nuevo.
+//   - activeLow=true, pullupActive=true.
+//
+// ESP8266 (TTP223 en GPIO4): sensor touch capacitivo.
+//   - Salida push-pull active-HIGH: en reposo LOW, al tocar HIGH.
+//   - No requiere INPUT_PULLUP (el chip impone el nivel).
+//   - InputHandler debe instanciarse con activeLow=false, pullupActive=false.
+
+#if defined(ARDUINO_ARCH_ESP32)
+  // BOOT / GPIO0 del ESP32-S3 Zero — active-LOW, pull-up interno.
+  #define PIN_BUTTON           0
+  #define BUTTON_ACTIVE_LOW    true
+  #define BUTTON_PULLUP_ACTIVE true
+#else
+  // TTP223 en GPIO4 del ESP8266 — active-HIGH, sin pull-up externo.
+  #define PIN_BUTTON           4
+  #define BUTTON_ACTIVE_LOW    false
+  #define BUTTON_PULLUP_ACTIVE false
+#endif
 
 // =============================================================================
 // Timings del loop principal (Fase 0 — bring-up)
 // =============================================================================
 
-// 200 ms entre renders → 5 FPS objetivo.
-// El budget real se mide en el FPS report por serie cada FPS_REPORT_MS.
-#define RENDER_FRAME_MS  200
+// Período entre renders.
+// ESP32-S3: 66 ms → ~15 FPS objetivo (el flush 240×296 tarda ~40 ms vía SPI 27 MHz,
+//   dejando ~26 ms de margen. Si el panel no lo aguanta, bajar a 100 ms / 10 FPS).
+// ESP8266:  200 ms → 5 FPS (sin cambios — pantalla mono más lenta).
+// El FPS real se mide en el reporte serie cada FPS_REPORT_MS.
+#if defined(ARDUINO_ARCH_ESP32)
+  #define RENDER_FRAME_MS  66
+#else
+  #define RENDER_FRAME_MS  200
+#endif
 
 // El sprite BABY alterna entre frame 0 y frame 1 cada ANIM_FRAME_MS.
 // 400 ms da una animación suave visible sin ser frenética.
@@ -50,13 +77,30 @@
 #endif
 
 // Versión de firmware codificada como 0xMMmm (mayor × 256 + menor).
-// 0x0200 = versión 2.0 (Fase 2 release).
-// 0x02FE = versión especial TURBO: valor que el static_assert de main.cpp
-//   verifica para garantizar que binarios turbo no se mezclen con producción.
-#ifdef TURBO_MODE
-  #define FIRMWARE_VERSION 0x02FE
+//
+// ESP8266 (Fase 2):
+//   0x0200 = versión 2.0 prod
+//   0x02FE = turbo (solo validación en hardware; no producción)
+//
+// ESP32-S3 (Fase 4):
+//   0x0300 = versión 3.0 prod
+//   0x03FE = turbo (solo validación en hardware; no producción)
+//
+// Los static_assert en main.cpp y main_esp32.cpp verifican el valor correcto
+// para cada plataforma en compile-time, previniendo mezcla de binarios.
+#if defined(ARDUINO_ARCH_ESP32)
+  #ifdef TURBO_MODE
+    #define FIRMWARE_VERSION 0x03FE
+  #else
+    #define FIRMWARE_VERSION 0x0300   // Fase 4 ESP32-S3 release
+  #endif
 #else
-  #define FIRMWARE_VERSION 0x0200  // Fase 2 release
+  // ESP8266 — valores heredados: no cambiar (compatibilidad con Persistence v2).
+  #ifdef TURBO_MODE
+    #define FIRMWARE_VERSION 0x02FE
+  #else
+    #define FIRMWARE_VERSION 0x0200  // Fase 2 release
+  #endif
 #endif
 
 // Escala de tiempo para la FSM de vida.
