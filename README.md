@@ -1,4 +1,17 @@
-# Tamagotchi ESP8266
+# Tamagotchi (ESP8266 mono + ESP32-S3 color)
+
+Este repositorio contiene **dos variantes de firmware** para el mismo Tamagotchi:
+
+| Variante | Placa | Display | Entrypoint |
+|---|---|---|---|
+| **ESP8266 mono** (original) | ideaspark ESP8266 0.96" OLED V3.2 | SSD1306 128×64 mono | `src/main.cpp` |
+| **ESP32-S3 color** (Furbygotchi) | Waveshare ESP32-S3 Zero | JD9853 240×296 IPS TFT | `src/main_esp32.cpp` |
+
+El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 108 tests `native` aplican a las dos.
+
+---
+
+## Variante ESP8266 mono
 
 Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OLED Module V3.2**. Firmware en C++/Arduino con PlatformIO. Ciclo de vida completo (huevo→bebé→niño→adulto→anciano→muerte→resurrección), 6 stats con decay en tiempo real, persistencia entre apagados y arquitectura modular pensada para crecer.
 
@@ -237,11 +250,90 @@ Comprueba:
 
 ---
 
+## Variante ESP32-S3 color (Furbygotchi)
+
+Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 108 tests `native` validan ambas variantes.
+
+### Hardware ESP32-S3
+
+| Componente | Detalle |
+|---|---|
+| MCU | Waveshare ESP32-S3 Zero (ESP32-S3FH4R2: 4 MB flash, 2 MB PSRAM) |
+| Display | TFT SPI JD9853 240×296 IPS color |
+| Librería display | Arduino_GFX v1.3.7 (fijada por compatibilidad con arduino-esp32 core 2.0.17 / IDF4) |
+| Botón | BOOT / GPIO0 (active-LOW — **no mantener pulsado en reset**: pin de strapping) |
+
+#### Cableado TFT JD9853
+
+| Pin TFT | GPIO ESP32-S3 |
+|---|---|
+| SCK | GPIO12 |
+| MOSI | GPIO11 |
+| RST | GPIO10 |
+| DC | GPIO9 |
+| CS | GPIO8 |
+| BL | GPIO7 |
+| VCC | 3V3 |
+| GND | GND |
+
+### Display y renderizado
+
+El JD9853 **no arranca con la secuencia de init ST7789 estándar** — requiere una subclase propia (`Arduino_JD9853`, declarada en `include/jd9853_panel.h`) con init nativa (unlock `0xDF {0x98, 0x53}`).
+
+El framebuffer usa `Arduino_Canvas` 240×296 en PSRAM (doble buffer) → sin parpadeo. Velocidad: **15 FPS**, SPI a **27 MHz**.
+
+### Sprites y sistema de assets
+
+Los sprites se generan con el proyecto **Pixel Sprites** (repo separado), se exportan a RGB565 (`.bin`, little-endian, 2 bytes/píxel) y se sirven desde LittleFS, cargándose a PSRAM por `lib/ui/SpriteStore/`.
+
+| Aspecto | Detalle |
+|---|---|
+| Descriptor | `data/sprites/manifest.json` — `version`, `colorKey`, `sprites[]` |
+| Color key | Magenta `0xF81F` (63519) — píxeles con alpha < 128 → transparente en firmware |
+| Longitud carpetas | Máximo 31 caracteres (límite LittleFS) → usar nombres cortos |
+| Etapas | `egg` / `baby` / `kid` / `adult` / `old` / `ghost` |
+| Animaciones | `idle` / `happy` / `sad` / `eat` / `sleep` (egg y ghost solo `idle`) |
+
+### Compilar y flashear — ESP32-S3
+
+```bash
+# Firmware (producción)
+pio run -e esp32s3 -t upload
+
+# Subir sprites + dashboard a LittleFS
+pio run -e esp32s3 -t uploadfs
+
+# Ciclo de vida ×60 (QA — NUNCA producción)
+pio run -e esp32s3_turbo -t upload
+
+# Flashear por WiFi (OTA)
+pio run -e esp32s3_ota -t upload
+
+# Tests host-native (aplican a ambas variantes)
+pio test -e native
+```
+
+### WiFi / OTA / WebUI — ESP32-S3
+
+Igual que en la variante ESP8266: crear `include/secrets.h` desde la plantilla antes del primer build.
+
+```bash
+cp include/secrets.h.example include/secrets.h
+# rellenar WIFI_SSID, WIFI_PASSWORD, OTA_PASSWORD, WEB_AUTH_USER, WEB_AUTH_PASSWORD
+```
+
+- **WIFI_SSID vacío** → arranca offline sin error.
+- Dashboard disponible en `http://tamagotchi.local` (HTTP Basic Auth).
+- OTA: `pio run -e esp32s3_ota -t upload` (requiere OTA_PASSWORD y placa en red).
+
+---
+
 ## Roadmap
 
 - **Fase 2.5** ✅ — sprites reales para EGG, KID, ADULT (variante base), OLD, DEAD + animación EAT por etapa + animaciones de transición (eclosión, evolve).
 - **Fase 3** ✅ — WiFi STA + OTA + AsyncWebServer + REST `/api/v1/*` + frontend HTML/CSS/JS desde LittleFS.
-- **Fase 4** — gestión de energía (auto-dim/off del OLED, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
+- **Fase 4 (ESP32-S3)** — Furbygotchi color: JD9853 + sprites RGB565 + LittleFS assets + evolución visual por etapa.
+- **Fase 5** — gestión de energía (auto-dim/off del OLED/TFT, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
 
 ### Backlog específico (no perder)
 
