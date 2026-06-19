@@ -85,6 +85,37 @@ public:
                    uint8_t co1, uint8_t ro1, uint8_t co2, uint8_t ro2)
         : Arduino_ST7789(bus, rst, r, ips, w, h, co1, ro1, co2, ro2) {}
 
+    /**
+     * clearNativePanel — limpia el área FÍSICA completa del panel (240×320)
+     * escribiendo directamente al GRAM sin offsets.
+     *
+     * Por qué es necesario: el panel físico tiene 320 líneas de GRAM, pero
+     * el canvas solo ocupa 296 px con row_offset=12 (filas 12-307 del GRAM).
+     * Las filas 0-11 y 308-319 nunca se escriben en operación normal y
+     * contienen basura aleatoria que asoma por las esquinas redondeadas del
+     * cristal. Llamar a este método UNA VEZ en setup(), tras tft->begin(),
+     * pone todo el GRAM al color de fondo y elimina el ruido visible.
+     *
+     * Se envían los comandos CASET/RASET/RAMWR directamente a través del bus
+     * (sin pasar por writeAddrWindow) para saltarse los offsets _xStart/_yStart
+     * que el driver suma automáticamente.
+     */
+    void clearNativePanel(uint16_t color) {
+        static constexpr uint16_t NATIVE_W = 240;
+        static constexpr uint16_t NATIVE_H = 320;
+
+        _bus->beginWrite();
+        // CASET (0x2A): columnas 0..239 del panel nativo
+        _bus->writeC8D16D16(0x2A, 0, NATIVE_W - 1);
+        // RASET (0x2B): filas 0..319 del panel nativo (incluye las muertas 0-11 y 308-319)
+        _bus->writeC8D16D16(0x2B, 0, NATIVE_H - 1);
+        // RAMWR (0x2C): iniciar escritura al GRAM
+        _bus->writeCommand(0x2C);
+        // Escribir NATIVE_W × NATIVE_H píxeles del color indicado
+        _bus->writeRepeat(color, static_cast<uint32_t>(NATIVE_W) * NATIVE_H);
+        _bus->endWrite();
+    }
+
 protected:
     void tftInit() override {
         // Reset hardware: HIGH → LOW → HIGH con los delays especificados en la datasheet.

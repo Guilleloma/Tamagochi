@@ -6,10 +6,12 @@
  * framesForMood_() resuelve (lifeStage_, mood) a la animación correcta,
  * con fallback a idle de la etapa si el mood no tiene animación propia.
  *
- * Layout portrait 240×296:
- *   HUD top       y=0..39   : nombre/etapa + edad + icono WiFi
- *   Personaje     y=40..231  : sprite 48×48 escalado ×4 = 192×192, centrado en x
- *   HUD inferior  y=232..295 : acción seleccionada (icono + label)
+ * Layout portrait 240×296 (safe-area con cards redondeadas):
+ *   Margen físico   kEdgeInset=8 px por todos los bordes (curva del cristal IPS)
+ *   Corner safe     kCornerSafe=28 px: clearance diagonal para esquinas del cristal
+ *   HUD top         texto flotante h=52: BABY en (28,28), edad en (28,46), WiFi en (212,28)
+ *   Personaje       y=(8+52)..(296-8-60) : sprite 48×48 × 4 = 192×192, centrado
+ *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : label acción (size 2) + cursor dots
  *
  * Constructor: DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus, SpriteStore& sprites)
  * render()    : compone frame completo y llama canvas.flush().
@@ -170,6 +172,40 @@ private:
 
     // Escala de renderizado: 48×48 × 4 = 192×192 px.
     static constexpr uint8_t kScale = 4;
+
+    // ── Safe-area: márgenes para respetar las esquinas físicas redondeadas ───
+    // El cristal IPS 240×296 tiene esquinas redondeadas que recortan el contenido
+    // si se pinta a sangre. Estas constantes definen el layout de cards para que
+    // ningún texto ni elemento quede oculto por la curvatura del panel.
+
+    // Dimensiones visibles del panel (el GRAM nativo es 240×320 con row_offset=12).
+    static constexpr int16_t kScreenW = 240;
+    static constexpr int16_t kScreenH = 296;
+
+    // Margen desde el borde físico hasta el borde exterior de cualquier card.
+    // 8 px da margen suficiente para la curvatura de esquina del cristal IPS.
+    static constexpr int16_t kEdgeInset = 8;
+
+    // Radio de esquinas de las cards (coincide visualmente con la curvatura del panel).
+    static constexpr int16_t kCornerR = 10;
+
+    // Clearance diagonal para elementos en las esquinas del cristal IPS.
+    // El panel físico tiene un radio de curvatura real de ~30 px; 28 px de margen
+    // desde cada borde garantiza que texto e iconos queden fuera del cuarto de
+    // círculo recortado. Afinable en placa si el radio real difiere.
+    static constexpr int16_t kCornerSafe = 28;
+
+    // Sangrado de texto dentro de la card: kEdgeInset + margen interior de 8 px.
+    static constexpr int16_t kSafeTextX = kEdgeInset + 8;
+
+    // Altura de la card del HUD superior (etapa + edad).
+    // Aumentada a 52 px para acomodar la fila de texto desplazada hacia kCornerSafe
+    // (BABY en y=28, edad en y=46 → texto termina en ~54; HUD top delimita zoneTop
+    // en kEdgeInset + kHudTopH = 60, dejando ~6 px de gap con el sprite centrado).
+    static constexpr int16_t kHudTopH = 52;
+
+    // Altura de la card del HUD inferior (label de acción + cursor dots).
+    static constexpr int16_t kHudBottomH = 60;
 
     // Duración mínima de animación one-shot de acción (ms).
     // ~1000 ms da tiempo a ver el ciclo de animación completo (~8 fps × 5 frames = 625 ms

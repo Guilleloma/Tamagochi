@@ -452,23 +452,29 @@ void DisplayRendererColor::drawSpriteScaled_(Arduino_GFX* display,
 // =============================================================================
 // drawHudTop_ — HUD superior: etapa de vida, edad, icono WiFi.
 //
-// Layout y=0..39 (40 px):
-//   x=4   y=15   "BABY" o "KID" etc. (etapa) — fuente size 2 (12×16 px por char)
-//   x=4   y=35   "Xh Ym" o "Zm" (edad)       — fuente size 1 (6×8 px)
-//   icono WiFi esquina derecha (x=224, y=4)
+// Texto flotante sobre fondo azul (COL_BG), sin card de fondo.
+//   Título (etapa, size 2)   en x=kCornerSafe, y=kCornerSafe
+//   Subtítulo (edad, size 1) en x=kCornerSafe, y=kCornerSafe+18
+//   Icono WiFi centrado en cx=kScreenW-kCornerSafe, cy=kCornerSafe
+//
+// kCornerSafe desplaza ambos elementos (texto e icono) lo suficiente para
+// quedar fuera del cuarto de círculo recortado por la curvatura del cristal.
 // =============================================================================
 
 void DisplayRendererColor::drawHudTop_() {
-    // Fondo del HUD top — banda oscura para separar del personaje
-    canvas_.fillRect(0, 0, 240, 40, COL_DARKGRAY);
+    // Sin card de fondo — el texto flota sobre el azul de COL_BG (pintado por
+    // drawIdleMain_ con fillScreen).
 
-    // Etapa de vida
+    // Etapa de vida — título size 2 (12×16 px/char).
+    // kCornerSafe en x e y garantiza que ningún píxel quede dentro de la
+    // zona curvada de la esquina superior-izquierda del cristal.
     canvas_.setTextColor(COL_WHITE);
     canvas_.setTextSize(2);
-    canvas_.setCursor(4, 6);
+    canvas_.setCursor(kCornerSafe, kCornerSafe);
     canvas_.print(lifeStageLabel(lifeStage_));
 
-    // Edad
+    // Edad — subtítulo size 1 (6×8 px), a 18 px bajo el baseline del título
+    // (1 línea size 2 = 16 px alto; 2 px de gap).
     char ageBuf[12];
     if (ageMinutes_ < 60) {
         snprintf(ageBuf, sizeof(ageBuf), "%um", static_cast<unsigned>(ageMinutes_));
@@ -479,18 +485,20 @@ void DisplayRendererColor::drawHudTop_() {
         snprintf(ageBuf, sizeof(ageBuf), "%uh%um",
                  static_cast<unsigned>(h), static_cast<unsigned>(m));
     }
+    canvas_.setTextColor(COL_GRAY);
     canvas_.setTextSize(1);
-    canvas_.setCursor(4, 28);
+    canvas_.setCursor(kCornerSafe, kCornerSafe + 18);
     canvas_.print(ageBuf);
 
     drawWifiIcon_();
 }
 
 // =============================================================================
-// drawWifiIcon_ — icono WiFi 16×12 px en esquina superior derecha.
+// drawWifiIcon_ — icono WiFi en esquina superior derecha.
 //
-// Dibuja 3 arcos concéntricos con primitivas Arduino_GFX (drawArc no disponible
-// en todos los drivers; usamos rectángulos y círculos rellenos).
+// Centro en (kScreenW-kCornerSafe, kCornerSafe) para quedar fuera del cuarto
+// de círculo recortado por el cristal. Dibuja 3 arcos concéntricos mediante
+// círculos rellenos superpuestos (drawArc no disponible en todos los drivers).
 // =============================================================================
 
 void DisplayRendererColor::drawWifiIcon_() {
@@ -502,17 +510,20 @@ void DisplayRendererColor::drawWifiIcon_() {
 
     uint16_t color = (wifiState_ == WifiState::Connected) ? COL_GREEN : COL_AMBER;
 
-    // Icono simplificado: 3 píxeles superpuestos centrales + punto
-    // usando fillCircle con radios 6, 4, 2, 1 a x=226, y=8
-    const int16_t cx = 226, cy = 16;
+    // Centro del icono desplazado kCornerSafe desde cada borde para quedar
+    // fuera del cuarto de círculo de la esquina superior-derecha del cristal.
+    // Los radios de los fillCircle son relativos a (cx, cy), por lo que basta
+    // con mover el centro; no hay que ajustar los radios.
+    const int16_t cx = kScreenW - kCornerSafe, cy = kCornerSafe;
 
     // Arco exterior (radio 6) — solo parte superior con fillCircle parcial
     canvas_.fillCircle(cx, cy, 7, color);
-    // "Hueco" interior dejando solo el contorno exterior
-    canvas_.fillCircle(cx, cy, 5, COL_DARKGRAY);
+    // "Hueco" interior dejando solo el contorno exterior — COL_BG porque el
+    // fondo ahora es azul (sin card gris debajo).
+    canvas_.fillCircle(cx, cy, 5, COL_BG);
     // Arco medio (radio 4)
     canvas_.fillCircle(cx, cy, 4, color);
-    canvas_.fillCircle(cx, cy, 2, COL_DARKGRAY);
+    canvas_.fillCircle(cx, cy, 2, COL_BG);
     // Arco pequeño (radio 1) — punto de señal
     canvas_.fillCircle(cx, cy, 1, color);
 
@@ -526,42 +537,41 @@ void DisplayRendererColor::drawWifiIcon_() {
 // =============================================================================
 // drawHudBottom_ — HUD inferior: acción activa (label + cursor dots).
 //
-// Layout y=240..295 (56 px):
-//   Fondo oscuro
-//   Label de la acción en el cursor — fuente size 2, centrado.
-//   Indicadores de cursor: pequeños cuadrados para cada acción visible,
-//   el seleccionado relleno, los demás vacíos.
+// Texto flotante sobre fondo azul (COL_BG), sin card de fondo.
+//   Label centrado (size 2) a cardY+8, respetando safe-area inferior.
+//   Cursor dots centrados en x, a 10 px del borde inferior de la zona.
 // =============================================================================
 
 void DisplayRendererColor::drawHudBottom_() {
-    // Fondo del HUD inferior
-    canvas_.fillRect(0, 240, 240, 56, COL_DARKGRAY);
-
-    // Línea separadora
-    canvas_.drawFastHLine(0, 241, 240, COL_GRAY);
+    // Origen Y de la zona HUD inferior — sin card de fondo; kEdgeInset marca
+    // el margen mínimo respecto a la curvatura del borde físico.
+    const int16_t cardY = kScreenH - kEdgeInset - kHudBottomH;
 
     if (visibleCount_ == 0) return;
 
     uint8_t cursor = (selectedIndex_ < visibleCount_) ? selectedIndex_ : 0u;
     ActionKind action = visibleActions_[cursor];
 
-    // Label de la acción seleccionada, centrado
+    // Label de la acción seleccionada — size 2 (12×16 px/char), centrado en x.
+    // El clamp mínimo usa kSafeTextX para no salir de la card.
     const char* label = actionLabelColor(action, stats_.isSleeping);
     canvas_.setTextColor(COL_WHITE);
     canvas_.setTextSize(2);
-    int16_t labelX = (240 - static_cast<int16_t>(strlen(label)) * 12) / 2;
-    if (labelX < 4) labelX = 4;
-    canvas_.setCursor(labelX, 248);
+    int16_t labelX = (kScreenW - static_cast<int16_t>(strlen(label)) * 12) / 2;
+    if (labelX < kSafeTextX) labelX = kSafeTextX;
+    // Y del label: tercio superior de la card (cardY + 8 px de margen interno)
+    canvas_.setCursor(labelX, cardY + 8);
     canvas_.print(label);
 
-    // Indicadores de posición de cursor: puntos cuadrados de 6×6 px centrados
-    // Máximo 8 items → total width 8*(6+2) = 64 px, centrados en 240 → x_start=88
+    // Cursor dots — cuadrados 6×6 px centrados en x, en la parte baja de la card.
+    // Se sitúan a 10 px del borde inferior de la card para quedar bien dentro.
     if (visibleCount_ > 1) {
         const int16_t dotSize = 6;
         const int16_t dotGap  = 3;
-        int16_t totalW  = visibleCount_ * (dotSize + dotGap) - dotGap;
-        int16_t startX  = (240 - totalW) / 2;
-        int16_t dotY    = 282;
+        int16_t totalW = visibleCount_ * (dotSize + dotGap) - dotGap;
+        int16_t startX = (kScreenW - totalW) / 2;
+        // dotY: borde inferior de la card menos margen interno (10 px) menos tamaño dot
+        int16_t dotY   = cardY + kHudBottomH - 10 - dotSize;
 
         for (uint8_t i = 0; i < visibleCount_; i++) {
             int16_t dotX = startX + i * (dotSize + dotGap);
@@ -583,10 +593,18 @@ void DisplayRendererColor::drawHudBottom_() {
 // =============================================================================
 
 void DisplayRendererColor::drawSprite_() {
-    // Sprite 48×48 × 4 = 192×192 px centrado en 240×192
-    // Dimensiones se infieren del idle de la etapa actual (siempre 48×48)
-    const int16_t spriteX = (240 - 192) / 2;
-    const int16_t spriteY = 40;
+    // Zona de personaje: entre el borde inferior de la card top y el borde superior
+    // de la card bottom, ambas dentro de la safe-area.
+    //   Top card termina en: kEdgeInset + kHudTopH
+    //   Bottom card empieza en: kScreenH - kEdgeInset - kHudBottomH
+    //   Gap total disponible: (kScreenH - kEdgeInset - kHudBottomH) - (kEdgeInset + kHudTopH)
+    // El sprite 192×192 se centra verticalmente en ese gap.
+    const int16_t zoneTop    = kEdgeInset + kHudTopH;
+    const int16_t zoneBottom = kScreenH - kEdgeInset - kHudBottomH;
+    const int16_t zoneH      = zoneBottom - zoneTop;
+    // Centrado horizontal en 240 px y vertical en la zona libre.
+    const int16_t spriteX = (kScreenW - 192) / 2;
+    const int16_t spriteY = zoneTop + (zoneH - 192) / 2;
 
     // Prioridad de selección de mood:
     //   1. Animación one-shot de acción activa (actionAnimRemainingMs_ > 0)
@@ -633,8 +651,11 @@ void DisplayRendererColor::drawSprite_() {
 // =============================================================================
 
 void DisplayRendererColor::drawOverlayBadges_() {
-    int16_t badgeX = 200;  // esquina derecha de la zona personaje
-    int16_t badgeY = 48;   // primera posición y
+    // badgeX: suficientemente a la izquierda del borde derecho para quedar
+    // dentro del safe-area (kScreenW - kEdgeInset - 30 da 202 con inset=8).
+    int16_t badgeX = kScreenW - kEdgeInset - 30;
+    // badgeY: justo bajo la card superior (kEdgeInset + kHudTopH + gap)
+    int16_t badgeY = kEdgeInset + kHudTopH + 8;
     const int16_t badgeStep = 26;
 
     if (stats_.isSick) {
@@ -767,11 +788,11 @@ void DisplayRendererColor::drawIdleMain_() {
 // =============================================================================
 // drawStatsView_ — vista densa con las stats.
 //
-// Layout portrait 240×296:
-//   y=0..39    HUD top (reutilizado)
-//   y=48..     filas de stats: label + barra color + valor
-//   y=210..    flags booleanos (sick, sleeping, poop)
-//   y=270..    footer "→ STATS"
+// Layout portrait 240×296 (safe-area):
+//   HUD top card (reutilizado — ya respeta safe-area)
+//   Título "STATS" a kSafeTextX, bajo la card top
+//   Barras de stats a kSafeTextX con ancho ajustado al safe-area
+//   Flags booleanos, edad y deathCount también a kSafeTextX
 // =============================================================================
 
 void DisplayRendererColor::drawStatsView_() {
@@ -779,20 +800,22 @@ void DisplayRendererColor::drawStatsView_() {
 
     drawHudTop_();
 
-    // Título
+    // Título — respeta la safe-area en X y arranca bajo la card superior
+    const int16_t contentStartY = kEdgeInset + kHudTopH + 8;
     canvas_.setTextColor(COL_YELLOW);
     canvas_.setTextSize(2);
-    canvas_.setCursor(4, 48);
+    canvas_.setCursor(kSafeTextX, contentStartY);
     canvas_.print("STATS");
-    canvas_.drawFastHLine(0, 66, 240, COL_GRAY);
+    // Línea separadora dentro de la safe-area horizontal
+    canvas_.drawFastHLine(kEdgeInset, contentStartY + 18, kScreenW - 2 * kEdgeInset, COL_GRAY);
 
-    // Barras de stats
-    // Nota: hunger se invierte (100-hunger) para que "lleno" = barra llena.
-    // barW = 140 px, x = 4 → barra va de x=34 a x=174, valor a x=177
-    const int16_t barW = 140;
+    // Barras de stats — ancho ajustado para caber en safe-area.
+    // barW ocupa desde (kSafeTextX + 30) hasta (kScreenW - kEdgeInset - 30):
+    // con kSafeTextX=16 y kEdgeInset=8 → barra de ~156 px.
+    const int16_t barW = kScreenW - kSafeTextX - 30 - kEdgeInset - 30;
     const int16_t barH = 8;
-    const int16_t x0   = 4;
-    int16_t       rowY = 82;
+    const int16_t x0   = kSafeTextX;
+    int16_t       rowY = contentStartY + 34;
     const int16_t rowH = 20;
 
     drawStatBar_(x0, rowY, barW, barH,
@@ -811,10 +834,10 @@ void DisplayRendererColor::drawStatsView_() {
                  stats_.attentionScore / 10, 100, "Aten");
     rowY += rowH + 8;
 
-    // Separador
-    canvas_.drawFastHLine(0, rowY - 4, 240, COL_DARKGRAY);
+    // Separador dentro de la safe-area
+    canvas_.drawFastHLine(kEdgeInset, rowY - 4, kScreenW - 2 * kEdgeInset, COL_GRAY);
 
-    // Flags booleanos
+    // Flags booleanos — a kSafeTextX para no tocar el borde físico
     canvas_.setTextColor(COL_WHITE);
     canvas_.setTextSize(1);
     char flagBuf[40];
@@ -822,7 +845,7 @@ void DisplayRendererColor::drawStatsView_() {
              stats_.isSick     ? 'Y' : 'N',
              stats_.isSleeping ? 'Y' : 'N',
              static_cast<unsigned>(stats_.poopCount));
-    canvas_.setCursor(4, rowY);
+    canvas_.setCursor(kSafeTextX, rowY);
     canvas_.print(flagBuf);
 
     // Edad
@@ -836,44 +859,57 @@ void DisplayRendererColor::drawStatsView_() {
         snprintf(ageBuf, sizeof(ageBuf), "Edad: %um",
                  static_cast<unsigned>(ageMinutes_));
     }
-    canvas_.setCursor(4, rowY);
+    canvas_.setCursor(kSafeTextX, rowY);
     canvas_.print(ageBuf);
 
-    // DeathCount
+    // DeathCount — clampado para no salir de la safe-area inferior
     rowY += 16;
-    char ripBuf[20];
-    snprintf(ripBuf, sizeof(ripBuf), "RIPs: %u", static_cast<unsigned>(deathCount_));
-    canvas_.setCursor(4, rowY);
-    canvas_.print(ripBuf);
+    if (rowY < kScreenH - kEdgeInset - 8) {
+        char ripBuf[20];
+        snprintf(ripBuf, sizeof(ripBuf), "RIPs: %u", static_cast<unsigned>(deathCount_));
+        canvas_.setCursor(kSafeTextX, rowY);
+        canvas_.print(ripBuf);
+    }
 
     canvas_.flush();
 }
 
 // =============================================================================
-// drawOtaProgress_ — barra de progreso OTA (placeholder Fase 2).
+// drawOtaProgress_ — barra de progreso OTA.
+//
+// Safe-area: título y barra respetan kEdgeInset para no tocar el borde físico.
 // =============================================================================
 
 void DisplayRendererColor::drawOtaProgress_() {
     canvas_.fillScreen(COL_BLACK);
 
+    // Título centrado horizontalmente, posicionado en el tercio superior
     canvas_.setTextColor(COL_WHITE);
     canvas_.setTextSize(2);
-    canvas_.setCursor(20, 80);
+    // "Updating..." = 11 chars × 12 px = 132 px
+    const int16_t titleX = (kScreenW - 132) / 2;
+    canvas_.setCursor(titleX, kScreenH / 4);
     canvas_.print("Updating...");
 
-    // Porcentaje
+    // Porcentaje — tamaño 3, centrado
     char pctBuf[8];
     snprintf(pctBuf, sizeof(pctBuf), "%u%%", static_cast<unsigned>(otaProgress_));
     canvas_.setTextSize(3);
-    int16_t pctX = (240 - static_cast<int16_t>(strlen(pctBuf)) * 18) / 2;
-    canvas_.setCursor(pctX, 130);
+    // Fuente size 3: 18 px por char
+    int16_t pctX = (kScreenW - static_cast<int16_t>(strlen(pctBuf)) * 18) / 2;
+    canvas_.setCursor(pctX, kScreenH / 4 + 40);
     canvas_.print(pctBuf);
 
-    // Barra de progreso: x=10..229, y=170, height=20
-    canvas_.drawRect(10, 170, 220, 20, COL_WHITE);
-    int fillW = (static_cast<int>(otaProgress_) * 218) / 100;
+    // Barra de progreso dentro de la safe-area:
+    // x=kEdgeInset, w=kScreenW-2*kEdgeInset, height=20, centrada verticalmente
+    const int16_t barX = kEdgeInset;
+    const int16_t barY = kScreenH / 2 + 10;
+    const int16_t barW = kScreenW - 2 * kEdgeInset;
+    const int16_t barH = 20;
+    canvas_.drawRect(barX, barY, barW, barH, COL_WHITE);
+    int fillW = (static_cast<int>(otaProgress_) * (barW - 2)) / 100;
     if (fillW > 0) {
-        canvas_.fillRect(11, 171, fillW, 18, COL_GREEN);
+        canvas_.fillRect(barX + 1, barY + 1, fillW, barH - 2, COL_GREEN);
     }
 
     canvas_.flush();
@@ -882,24 +918,23 @@ void DisplayRendererColor::drawOtaProgress_() {
 // =============================================================================
 // drawDeadScreen_ — pantalla RIP con causa, edad y contador de muertes.
 //
-// Layout portrait 240×296:
-//   y=0..39     HUD top (usa espacio del personaje para texto grande)
-//   y=50..90    Sprite personaje (muerto → animSad_) escalado ×2 (96×96 px)
-//               Centrado en x.
-//   y=100       "RIP" grande centrado — fuente size 3 (18×24 px/char)
-//   y=140       Causa de muerte
-//   y=170       Edad formateada
-//   y=195       Contador de muertes totales
+// Layout portrait 240×296 (safe-area):
+//   HUD top card (reutilizado — etapa "DEAD" + edad)
+//   Ghost sprite escalado ×2 (96×96 px) centrado en zona libre
+//   "RIP" grande centrado en x
+//   Causa, edad y RIPs a kSafeTextX (fuera del borde físico)
 // =============================================================================
 
 void DisplayRendererColor::drawDeadScreen_() {
     canvas_.fillScreen(COL_BLACK);
 
-    // HUD top — mantiene el nombre de etapa "DEAD" y la edad
+    // HUD top — mantiene el nombre de etapa "DEAD" y la edad (ya usa safe-area)
     drawHudTop_();
 
-    // Sprite ghost escalado ×2 (96×96 px) centrado, dejando espacio para texto.
-    // Dead stage tiene idle del ghost cargado en spritesByStage_[Dead].frames[Idle].
+    // Zona libre bajo la card top: arrancar en kEdgeInset + kHudTopH
+    const int16_t ghostZoneTop = kEdgeInset + kHudTopH + 4;
+
+    // Sprite ghost escalado ×2 (96×96 px) centrado horizontalmente.
     const ColorSpriteFrames* ghostFrames =
         framesForMood_(LifeStage::Dead, MoodColor::Idle);
 
@@ -907,38 +942,42 @@ void DisplayRendererColor::drawDeadScreen_() {
         uint8_t frameIdx = static_cast<uint8_t>(animFrame_ % ghostFrames->count);
         const uint16_t* pixels = ghostFrames->frames[frameIdx];
         if (pixels != nullptr) {
-            const int16_t dX = (240 - static_cast<int16_t>(ghostFrames->w) * 2) / 2;
-            drawSpriteScaled_(&canvas_, dX, 50,
+            const int16_t dX = (kScreenW - static_cast<int16_t>(ghostFrames->w) * 2) / 2;
+            drawSpriteScaled_(&canvas_, dX, ghostZoneTop,
                               ghostFrames->w, ghostFrames->h,
                               pixels, 2, kKeyColor);
         }
     } else {
         // Fallback: calavera con primitivas si el ghost no se cargó
-        canvas_.fillCircle(120, 80, 30, COL_GRAY);
-        canvas_.fillRect(100, 90, 40, 20, COL_GRAY);
-        canvas_.fillCircle(109, 78, 6, COL_BLACK);  // ojo izq
-        canvas_.fillCircle(131, 78, 6, COL_BLACK);  // ojo der
+        const int16_t skullCX = kScreenW / 2;
+        const int16_t skullCY = ghostZoneTop + 30;
+        canvas_.fillCircle(skullCX, skullCY, 30, COL_GRAY);
+        canvas_.fillRect(skullCX - 20, skullCY + 10, 40, 20, COL_GRAY);
+        canvas_.fillCircle(skullCX - 11, skullCY - 2, 6, COL_BLACK);  // ojo izq
+        canvas_.fillCircle(skullCX + 11, skullCY - 2, 6, COL_BLACK);  // ojo der
     }
 
     // "RIP" grande centrado — fuente size 4 (24×32 px/char), 3 chars = 72 px
+    // Se coloca tras el sprite (~96 px de alto desde ghostZoneTop)
+    const int16_t ripY = ghostZoneTop + 100;
     canvas_.setTextColor(COL_RED);
     canvas_.setTextSize(4);
-    canvas_.setCursor((240 - 72) / 2, 160);
+    canvas_.setCursor((kScreenW - 72) / 2, ripY);
     canvas_.print("RIP");
 
-    // Causa de muerte
+    // Causa de muerte — a kSafeTextX para no tocar el borde físico
     const char* causeText;
     switch (lastDeathCause_) {
-        case 1:  causeText = "De hambre";  break;
-        case 2:  causeText = "Enfermo";    break;
-        case 3:  causeText = "Vejez";      break;
-        case 4:  causeText = "Tristeza";   break;
+        case 1:  causeText = "De hambre";   break;
+        case 2:  causeText = "Enfermo";     break;
+        case 3:  causeText = "Vejez";       break;
+        case 4:  causeText = "Tristeza";    break;
         case 5:  causeText = "Desconocida"; break;
-        default: causeText = "Causa N/A";  break;
+        default: causeText = "Causa N/A";   break;
     }
     canvas_.setTextColor(COL_WHITE);
     canvas_.setTextSize(1);
-    canvas_.setCursor(4, 210);
+    canvas_.setCursor(kSafeTextX, ripY + 40);
     canvas_.print(causeText);
 
     // Edad
@@ -951,13 +990,13 @@ void DisplayRendererColor::drawDeadScreen_() {
         snprintf(ageBuf, sizeof(ageBuf), "Vivio: %um",
                  static_cast<unsigned>(ageMinutes_));
     }
-    canvas_.setCursor(4, 230);
+    canvas_.setCursor(kSafeTextX, ripY + 56);
     canvas_.print(ageBuf);
 
-    // Contador
+    // Contador de muertes totales
     char ripBuf[20];
     snprintf(ripBuf, sizeof(ripBuf), "Total RIPs: %u", static_cast<unsigned>(deathCount_));
-    canvas_.setCursor(4, 250);
+    canvas_.setCursor(kSafeTextX, ripY + 72);
     canvas_.print(ripBuf);
 
     canvas_.flush();
