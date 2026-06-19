@@ -69,11 +69,15 @@ void OTAManager::loop() {
 
 // -----------------------------------------------------------------------------
 // end — detiene OTA cuando WiFi se cae.
-// ArduinoOTA no expone un end() en la API pública del SDK de ESP8266Arduino;
-// marcar ready_ = false impide que loop() siga llamando a handle().
+// ESP32: ArduinoOTA.end() existe y detiene el servidor mDNS-SD + UDP socket.
+// ESP8266: ArduinoOTA no expone end() en la API pública; marcar ready_=false
+//          es suficiente para que loop() deje de llamar a handle().
 // -----------------------------------------------------------------------------
 void OTAManager::end() {
     if (!ready_) return;
+#if defined(ARDUINO_ARCH_ESP32)
+    ArduinoOTA.end();
+#endif
     ready_    = false;
     updating_ = false;
     LOG_INFO("[ota] stopped (WiFi down)");

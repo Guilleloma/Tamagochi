@@ -22,7 +22,13 @@
 #include "WifiManager.h"
 #include "EventBus.h"
 #include "Logger.h"
-#include <ESP8266WiFi.h>
+// Platform-conditional WiFi header: ESP32 uses <WiFi.h>, ESP8266 uses <ESP8266WiFi.h>.
+// Both expose the same WiFi API surface used here (WiFi.mode/begin/status/localIP/RSSI).
+#if defined(ARDUINO_ARCH_ESP32)
+  #include <WiFi.h>
+#else
+  #include <ESP8266WiFi.h>
+#endif
 #include <Arduino.h>
 
 WifiManager::WifiManager(EventBus& bus)

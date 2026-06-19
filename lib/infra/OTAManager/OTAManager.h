@@ -24,6 +24,7 @@
 #include <stdint.h>
 // OTAManager es un módulo Arduino-only (excluido de env:native en platformio.ini).
 // Incluir ArduinoOTA.h aquí es seguro — este header nunca llega a env:native.
+// arduino-esp32 y Arduino-ESP8266 ambos proveen <ArduinoOTA.h>.
 #include <ArduinoOTA.h>
 
 class EventBus;

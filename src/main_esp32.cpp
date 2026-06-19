@@ -1,15 +1,15 @@
 // =============================================================================
-// main_esp32.cpp — FASE 4: loop de juego REAL del Tamagochi en ESP32-S3.
+// main_esp32.cpp — FASE 5: WiFi + OTA + WebUI (dashboard REST) en ESP32-S3.
 //
-// Porta src/main.cpp (ESP8266) al ESP32-S3 con las siguientes diferencias:
-//   - SIN red: WiFi / OTA / WebUI excluidos (Fase 5).
+// Porta src/main.cpp (ESP8266) al ESP32-S3. Diferencias respecto a Fase 4:
+//   - Red: WifiManager (STA no bloqueante), OTAManager, WebUI + mDNS.
 //   - Display: JD9853 240×296 color vía DisplayRendererColor (no U8g2/SSD1306).
 //   - Canvas framebuffer en PSRAM; sprites desde LittleFS → SpriteStore.
 //   - LittleFS.begin(true) compartido: SpriteStore + Persistence usan el mismo FS.
 //   - RNG de StatsEngine: semillado con esp_random() al boot.
 //   - Versión firmware: 0x0300 (prod) / 0x03FE (turbo).
 //
-// Comportamiento idéntico al main ESP8266 (sin red):
+// Comportamiento:
 //   - Boot       → carga PersistedState v2 → aplica a StatsEngine/LifeFSM
 //   - Schedulers → decay, envejecimiento, render, autosave (no-bloqueante)
 //   - Botón      → short click=moveCursor, long press=acción HUD
@@ -17,20 +17,29 @@
 //   - Animaciones → EAT, Evolve, Hatch
 //   - Muerte/Resurrección → DeadScreen → nuevo Egg tras kResurrectionMs
 //   - Persistencia automática tras cada acción crítica y cada 5 min
+//   - WiFi STA no bloqueante → WifiManager publica WifiStateChanged
+//   - OTA ArduinoOTA con password (secrets.h) → activa al conectar WiFi
+//   - WebUI REST API /api/v1/* → activa al conectar WiFi
+//   - mDNS tamagotchi.local → activa al conectar WiFi (sin MDNS.update())
+//   - Offline con WIFI_SSID vacío → icono WiFi Disabled, juego normal
 //
 // COMPILAR:  pio run -e esp32s3
 // FLASHEAR:  pio run -e esp32s3 -t upload
+//            pio run -e esp32s3 -t uploadfs  (dashboard web data/)
 // TURBO:     pio run -e esp32s3_turbo -t upload
+// OTA:       pio run -e esp32s3_ota -t upload  (requiere WiFi activo en secrets.h)
 // =============================================================================
 
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <esp_random.h>      // esp_random() — TRNG del ESP32-S3 (hardware)
 #include <Arduino_GFX_Library.h>
+#include <ESPmDNS.h>         // mDNS en ESP32 (sin MDNS.update() — no es necesario)
 
 #include "jd9853_panel.h"    // Arduino_JD9853, makeTftBus(), makeJD9853()
 
 #include "config.h"
+#include "secrets.h"         // WIFI_SSID, OTA_PASSWORD, WEB_AUTH_* (gitignored)
 #include "Logger.h"
 #include "EventBus.h"
 #include "StatsEngine.h"
@@ -40,6 +49,9 @@
 #include "InputHandler.h"
 #include "DisplayRendererColor.h"
 #include "SpriteStore.h"
+#include "WifiManager.h"
+#include "OTAManager.h"
+#include "WebUI.h"
 
 // =============================================================================
 // Verificación de versión de firmware en compile-time.
@@ -78,6 +90,18 @@ static SpriteStore     spriteStore;
 // evitar problemas de orden de inicialización de globales en ESP-IDF.
 static InputHandler*          inputHandler = nullptr;
 static DisplayRendererColor*  renderer     = nullptr;
+
+// Módulos de red — Fase 5.
+// WifiManager: STA no bloqueante; publica WifiStateChanged al bus.
+// OTAManager: actualización OTA; se activa solo cuando WiFi Connected.
+// WebUI: servidor REST; se activa solo cuando WiFi Connected.
+// Con WIFI_SSID vacío en secrets.h, todos los módulos de red se auto-desactivan
+// y el juego funciona completamente offline sin intentar conectar.
+static WifiManager wifi(bus);
+static OTAManager  ota(bus);
+// WebUI se construye en heap en setup() para acceder a renderer/engine ya inicializados.
+// Declaramos un puntero aquí; la instancia se crea en setup().
+static WebUI*      webUI = nullptr;
 
 // =============================================================================
 // Estado de escena — accesible a los handlers estáticos del EventBus.
@@ -260,13 +284,66 @@ static void onPersistRequested(const Event&) {
     }
 }
 
-// Fase 5: sin red → pásamos WifiState::Disabled al renderer y no hacemos nada más.
-// Handler registrado para completitud del contrato EventBus (por si algún módulo
-// futuro lo publica en esta fase accidentalmente).
+// WifiStateChanged: sincroniza el icono WiFi en el renderer e inicia/detiene OTA,
+// WebUI y mDNS según el estado de la conexión.
+// Con WIFI_SSID vacío este handler nunca llega a Connected (WifiManager permanece
+// en Disabled y no publica el evento).
 static void onWifiStateChanged(const Event& e) {
     WifiState ws = static_cast<WifiState>(e.payload & 0xFF);
-    renderer->setWifiState(ws);
-    LOG_INFO("[wifi] state -> %u (Fase 5: sin red, ignorado)", static_cast<unsigned>(ws));
+    LOG_INFO("[wifi] state -> %u", static_cast<unsigned>(ws));
+
+    // Siempre sincronizar el icono WiFi en el renderer.
+    if (renderer) renderer->setWifiState(ws);
+
+    if (ws == WifiState::Connected) {
+        // Activar OTA — requiere WiFi con IP asignada.
+        ota.begin();
+
+        // Activar WebUI — servidor HTTP en puerto 80 con endpoints REST.
+        if (webUI && !webUI->isRunning()) webUI->begin();
+
+        // mDNS: anunciar hostname + servicio HTTP.
+        // ESP32: MDNS.begin() es suficiente; no hay que llamar MDNS.update() en el loop.
+        if (MDNS.begin(OTA_HOSTNAME)) {
+            MDNS.addService("http", "tcp", 80);
+            LOG_INFO("[mdns] hostname=%s.local  http service registered", OTA_HOSTNAME);
+        } else {
+            LOG_WARN("[mdns] begin failed — continuando sin mDNS");
+        }
+    } else {
+        // Cualquier estado distinto de Connected: detener OTA y WebUI si estaban activos.
+        if (ota.isReady()) ota.end();
+        if (webUI && webUI->isRunning()) webUI->end();
+        // mDNS: en ESP32 no hay MDNS.end() estándar; se reinicia con begin() al reconectar.
+    }
+}
+
+// OtaStarted: cambiar a pantalla de progreso OTA (misma lógica que ESP8266).
+static void onOtaStarted(const Event&) {
+    LOG_INFO("[ota] update started — switching to OtaProgress scene");
+    if (renderer) {
+        renderer->setScene(SceneColor::OtaProgress);
+        renderer->setOtaProgress(0);
+    }
+    currentScene = SceneColor::OtaProgress;
+}
+
+// OtaProgress: actualizar la barra de progreso en la pantalla TFT.
+static void onOtaProgress(const Event& ev) {
+    uint8_t pct = static_cast<uint8_t>(ev.payload & 0xFF);
+    if (renderer) renderer->setOtaProgress(pct);
+}
+
+// OtaEnded: el ESP32 reinicia automáticamente tras este evento.
+static void onOtaEnded(const Event&) {
+    LOG_INFO("[ota] update ended — reboot imminent");
+}
+
+// OtaError: restaurar escena anterior y loguear el código de error.
+static void onOtaError(const Event& ev) {
+    LOG_ERROR("[ota] error code=%d", static_cast<int>(ev.payload));
+    if (renderer) renderer->setScene(SceneColor::IdleMain);
+    currentScene = SceneColor::IdleMain;
 }
 
 // Acciones publicadas por el HUD → aplicar a StatsEngine + persistir.
@@ -383,7 +460,7 @@ static void onLifeStateChanged(const Event& e) {
 void setup() {
     Serial.begin(115200);
     Serial.println();
-    LOG_INFO("Boot ESP32-S3 Fase 4 — version=0x%04X", FIRMWARE_VERSION);
+    LOG_INFO("Boot ESP32-S3 Fase 5 (WiFi+OTA+WebUI) — version=0x%04X", FIRMWARE_VERSION);
 
 #ifdef TURBO_MODE
     LOG_WARN("=================================================");
@@ -492,7 +569,9 @@ void setup() {
     renderer->setLastDeathCause(loaded.lastDeathCauseCode);
     renderer->setAgeMinutes(loaded.ageMinutes);
     renderer->setDeathCount(loaded.deathCount);
-    // Sin WiFi en Fase 4: siempre Disabled para que el icono no parpadee.
+    // WiFi Fase 5: estado inicial Disabled hasta que WifiManager::begin() conecte.
+    // Si WIFI_SSID está vacío en secrets.h, WifiManager permanece Disabled y
+    // nunca publica WifiStateChanged, por lo que el icono muestra Disabled offline.
     renderer->setWifiState(WifiState::Disabled);
 
     // Inicializar escena según el estado cargado.
@@ -521,6 +600,11 @@ void setup() {
              BUTTON_ACTIVE_LOW    ? "true" : "false",
              BUTTON_PULLUP_ACTIVE ? "true" : "false");
 
+    // ── WebUI — construir en heap tras renderer y bus para inyectar dependencias ─
+    // WebUI publica eventos al bus; los handlers de acción en main los procesan.
+    // Se activa solo cuando WiFi Connected (en onWifiStateChanged).
+    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi);
+
     // ── Suscripciones EventBus ────────────────────────────────────────────────
     // Llamar en setup(), nunca en loop() — EventBus no es thread-safe.
     bus.subscribe(EventType::ButtonShortClick,        onShortClick);
@@ -529,7 +613,12 @@ void setup() {
     bus.subscribe(EventType::PersistRequested,         onPersistRequested);
     bus.subscribe(EventType::LifeStateChanged,         onLifeStateChanged);
     bus.subscribe(EventType::WifiStateChanged,         onWifiStateChanged);
-    // Acciones HUD (mismas que main.cpp ESP8266 — sin WebUI en esta fase)
+    // OTA events — Fase 5
+    bus.subscribe(EventType::OtaStarted,              onOtaStarted);
+    bus.subscribe(EventType::OtaProgress,             onOtaProgress);
+    bus.subscribe(EventType::OtaEnded,                onOtaEnded);
+    bus.subscribe(EventType::OtaError,                onOtaError);
+    // Acciones HUD y WebUI (mismas que main.cpp ESP8266)
     bus.subscribe(EventType::ActionFeedRequested,      onActionFeed);
     bus.subscribe(EventType::ActionPlayRequested,      onActionPlay);
     bus.subscribe(EventType::ActionHealRequested,      onActionHeal);
@@ -538,6 +627,11 @@ void setup() {
     bus.subscribe(EventType::ActionDisciplineRequested, onActionDiscipline);
     bus.subscribe(EventType::ActionSleepRequested,     onActionSleep);
 
+    // ── WiFi no bloqueante — Fase 5 ───────────────────────────────────────────
+    // begin() devuelve en < 5 ms. Si WIFI_SSID está vacío en secrets.h, marca
+    // Disabled y no hace nada más. El juego sigue funcionando offline.
+    wifi.begin();
+
     // ── Schedulers: inicializar todos a now para evitar ticks espurios al boot ─
     uint32_t now = millis();
     lastStatsTickMs = now;
@@ -545,17 +639,28 @@ void setup() {
     lastSaveMs      = now;   // evita un save espurio en el primer tick de autosave
     lastFpsReportMs = now;
 
-    LOG_INFO("Setup done (stage=%u ageMin=%u heap=%u psram=%u)",
+    LOG_INFO("Setup done (stage=%u ageMin=%u heap=%u psram=%u wifi=%s)",
              static_cast<unsigned>(lifeFSM.stage()),
              lifeFSM.ageMinutes(),
              ESP.getFreeHeap(),
-             ESP.getFreePsram());
+             ESP.getFreePsram(),
+             (strlen(WIFI_SSID) == 0) ? "disabled" : "connecting");
 }
 
 // =============================================================================
 // loop
 // =============================================================================
 void loop() {
+    // ── Red: WiFi poll + OTA + WebUI ─────────────────────────────────────────
+    // Guard internos en cada módulo: coste < 1 µs cuando no hay actividad.
+    // Con WIFI_SSID vacío, wifi.loop() retorna inmediatamente (state==Disabled).
+    wifi.loop();
+    ota.loop();
+    // AsyncWebServer es event-driven; webUI->loop() es actualmente un no-op
+    // (reservado para extensiones futuras como WebSockets).
+    if (webUI) webUI->loop();
+    // En ESP32 NO llamar MDNS.update() — no existe / no es necesario.
+
     // OneButton necesita tick() en cada iteración para detectar gestos.
     // Los handlers onShortClick/onLongPress se invocan síncronamente desde aquí.
     if (inputHandler) {
