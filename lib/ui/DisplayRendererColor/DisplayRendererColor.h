@@ -1,18 +1,10 @@
 /**
  * DisplayRendererColor.h — renderer a color para ESP32-S3 + TFT JD9853 240×296.
  *
- * FASE 2: harness con estado falso. No conecta dominio real (Persistence/LifeFSM).
- * El caller (main_phase2.cpp) inyecta estado vía setters y llama render() en bucle.
- *
- * Archivos nuevos (no toca DisplayRenderer.h / DisplayRenderer.cpp del mono):
- *   lib/ui/DisplayRendererColor/DisplayRendererColor.h   ← este archivo
- *   lib/ui/DisplayRendererColor/DisplayRendererColor.cpp
- *
- * Adaptaciones U8g2 → Arduino_GFX color:
- *   - drawXBMx2/x4  →  drawSpriteScaled (RGB565 nearest-neighbor, color key)
- *   - clearBuffer/sendBuffer  →  fillScreen + canvas.flush()
- *   - Fuentes bitmap de U8g2 → setTextSize(N) con la fuente GFX incorporada
- *   - Colores booleanos OLED  →  RGB565: verde, ámbar, rojo por umbral de stat
+ * FASE 6: sprites reales por etapa de vida (egg/baby/kid/adult/old/ghost).
+ * Todas las etapas se precargan en PSRAM al boot (~478 KB).
+ * framesForMood_() resuelve (lifeStage_, mood) a la animación correcta,
+ * con fallback a idle de la etapa si el mood no tiene animación propia.
  *
  * Layout portrait 240×296:
  *   HUD top       y=0..39   : nombre/etapa + edad + icono WiFi
@@ -34,14 +26,18 @@
 #include "SpriteStore.h"    // ColorSpriteFrames
 
 // =============================================================================
-// Mood — estado emocional visible. Misma semántica que en el renderer mono.
+// MoodColor — estado emocional visible. Misma semántica que en el renderer mono.
 // =============================================================================
 enum class MoodColor : uint8_t {
     Idle  = 0,
     Happy = 1,
     Sad   = 2,
-    Eat   = 3
+    Eat   = 3,
+    Sleep = 4   // overlay de dormido — precede a todos los moods
 };
+
+// Número de moods posibles (tamaño del eje mood en StageSprites).
+static constexpr uint8_t kMoodCount = 5;
 
 // =============================================================================
 // SceneColor — escena activa en el display color.
@@ -58,7 +54,17 @@ enum class SceneColor : uint8_t {
 // =============================================================================
 struct SpriteMapping {
     const char* spriteId;    // campo "id" del manifest
-    const char* animation;   // nombre de animación ("walk", "eat", etc.)
+    const char* animation;   // nombre de animación ("idle", "eat", etc.)
+};
+
+// =============================================================================
+// StageSprites — buffers PSRAM de todas las animaciones de una etapa de vida.
+//
+// Indexados por MoodColor: frames[Idle]=0, Happy=1, Sad=2, Eat=3, Sleep=4.
+// Los moods sin animación propia dejan count=0; framesForMood_() cae a idle.
+// =============================================================================
+struct StageSprites {
+    ColorSpriteFrames frames[kMoodCount];  // one per MoodColor value
 };
 
 // =============================================================================
@@ -134,19 +140,12 @@ private:
     uint32_t hatchAnimRemainingMs_  = 0;
     uint32_t evolveAnimRemainingMs_ = 0;
 
-    // ── Cache de animaciones cargadas en PSRAM ───────────────────────────────
-    // Cargamos las 4 animaciones relevantes del único sprite disponible ("wiz")
-    // al iniciar, y las mantenemos para evitar re-leer LittleFS en cada frame.
-    // En Fase 6 esto se amplía a una caché indexada por (LifeStage, Mood).
-    ColorSpriteFrames animWalk_;    // Mood::Idle  → "walk"
-    ColorSpriteFrames animHappy_;   // Mood::Happy → "happy"
-    ColorSpriteFrames animSick_;    // Mood::Sad   → "sick"
-    ColorSpriteFrames animEat_;     // Mood::Eat   → "eat"
-    ColorSpriteFrames animSleep_;   // overlay: isSleeping
+    // ── Cache de animaciones por etapa — precargadas en PSRAM al boot ───────
+    // spritesByStage_[stage] contiene los ColorSpriteFrames de todos los moods
+    // de esa etapa. Precargamos las 6 etapas al boot (~478 KB en PSRAM).
+    // El acceso en render() es O(1) sin lecturas LittleFS.
+    StageSprites spritesByStage_[6];   // índice = LifeStage enum value (0-5)
     bool spritesLoaded_ = false;
-
-    // ID del sprite disponible en LittleFS (solo "wiz" en Fase 2).
-    static constexpr const char* kSpriteId = "0e273289-be9b-4048-a2c3-acb89579dcdc";
 
     // Color key de transparencia (0xF81F = magenta en RGB565).
     static constexpr uint16_t kKeyColor = 0xF81F;
@@ -167,9 +166,10 @@ private:
     MoodColor computeMood_() const;
     bool      loadSprites_();
 
-    // Devuelve el puntero al ColorSpriteFrames del mood actual.
-    // Si los sprites no están cargados, devuelve nullptr.
-    const ColorSpriteFrames* framesForMood_(MoodColor mood) const;
+    // Devuelve el puntero al ColorSpriteFrames correcto para (stage, mood).
+    // Fallback a idle de la etapa si el mood no tiene frames cargados.
+    // Devuelve nullptr si los sprites no están cargados.
+    const ColorSpriteFrames* framesForMood_(LifeStage stage, MoodColor mood) const;
 
     void drawIdleMain_();
     void drawStatsView_();

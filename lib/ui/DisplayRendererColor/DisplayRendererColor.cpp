@@ -1,37 +1,29 @@
 /**
  * DisplayRendererColor.cpp — renderer a color para ESP32-S3 + TFT JD9853.
  *
+ * FASE 6: sprites reales por etapa de vida.
+ *
  * Decisiones de diseño:
  *
- * 1. Archivos nuevos en lib/ui/DisplayRendererColor/ — no toca DisplayRenderer.(h|cpp).
- *    Razón: el mono sigue compilando en esp12e sin cambios. Evitar ifdef platform
- *    que contaminarían ambos renderers.
+ * 1. Archivos en lib/ui/DisplayRendererColor/ — no toca DisplayRenderer.(h|cpp).
+ *    El mono (esp12e) sigue compilando sin cambios.
  *
- * 2. WifiState se incluye desde WifiManager.h directamente. El .h es portable
- *    (sin ESP8266WiFi.h); solo el .cpp arrastra WiFi. WifiManager está en lib_ignore
- *    para el build esp32s3, así que el .cpp no se compila. El .h sí es accesible
- *    porque lib_extra_dirs incluye lib/infra.
+ * 2. kSpriteLoad[]: tabla estática con UUID, folder y animaciones a cargar
+ *    por etapa. loadSprites_() itera sobre ella y popula spritesByStage_[].
  *
- * 3. Persistence.h solo aporta el enum LifeStage — también portable. Su .cpp
- *    incluye LittleFsStorage que usa <LittleFS.h>. En esp32s3 LittleFS está
- *    disponible como dependencia, así que sacar Persistence de lib_ignore.
- *    LittleFsStorage.cpp se compila solo si LittleFS existe en target — ok para esp32s3.
+ * 3. Precarga de 6 etapas al boot:
+ *      egg   × 1 anim (idle×6)      =  27 KB
+ *      baby  × 5 anims              = 106 KB
+ *      kid   × 5 anims              = 106 KB
+ *      adult × 5 anims              = 106 KB
+ *      old   × 5 anims              = 106 KB
+ *      ghost × 1 anim (idle×6)      =  27 KB
+ *      Total                        ≈ 478 KB  (de ~1.9 MB PSRAM disponible)
  *
- * 4. EventBus y StatsEngine son puramente portables (no incluyen Arduino.h).
- *    Se eliminan de lib_ignore en esp32s3.
+ * 4. framesForMood_(stage, mood): O(1), sin LittleFS. Fallback a idle de la
+ *    etapa si el mood no tiene frames (e.g. egg/ghost solo tienen idle).
  *
- * 5. LifeFSM depende de Persistence.h (portátil) y EventBus (portátil).
- *    Sin dependencias ESP8266. Se puede sacar de lib_ignore también.
- *
- * 6. Logger.h es header-only con guard #ifdef ARDUINO → Serial / printf. Portable.
- *    Se saca de lib_ignore.
- *
- * 7. Tabla de sprites kSpritesByStageColor: todas las etapas apuntan a "wiz"
- *    (único sprite disponible en Fase 2). Documentado como placeholder hasta Fase 6.
- *
- * 8. render() tick period: el renderer asume kRenderPeriodMs para decrementar
- *    timers de animación. Si el harness corre a fps diferente, los timers se
- *    agotan a ritmo distinto — aceptable para Fase 2.
+ * 5. drawDeadScreen_(): usa spritesByStage_[Dead].frames[Idle] (ghost real).
  */
 
 #include "DisplayRendererColor.h"
@@ -58,67 +50,54 @@ static constexpr uint16_t COL_PURPLE   = 0x780F;
 // Fondo de pantalla — azul oscuro, más agradable que negro puro.
 static constexpr uint16_t COL_BG = 0x0010;
 
-// ─── Tabla de mapeo sprites por (LifeStage, Mood) ────────────────────────────
+// ─── Tabla de carga de sprites por etapa ──────────────────────────────────────
 //
-// FASE 2 PLACEHOLDER: todas las etapas apuntan al único sprite disponible "wiz".
-// Animaciones reales por etapa se añaden en Fase 6 cuando lleguen los assets.
+// Fase 6: cada etapa tiene su propio sprite real (folder corto ≤31 chars).
+// El campo "id" es el UUID del manifest (búsqueda en SpriteStore).
+// El campo "anims" lista las animaciones a cargar en orden MoodColor:
+//   índice 0 = Idle, 1 = Happy, 2 = Sad, 3 = Eat, 4 = Sleep.
+// nullptr en un slot = sin animación propia → framesForMood_() cae a Idle.
 //
-// Mapeado de moods a animaciones disponibles en "wiz":
-//   Idle   → "walk"    (no hay idle dedicado; walk transmite movimiento)
-//   Happy  → "happy"
-//   Sad    → "sick"    (sick visualmente comunica tristeza/malestar)
-//   Eat    → "eat"
-//
-// Los overlays de estado (isSleeping → "sleep") se gestionan aparte en
-// drawOverlayBadges_ + drawSprite_ (la animación sleep sustituye al personaje
-// cuando isSleeping está activo).
-//
-// Orden de filas: Egg(0), Baby(1), Kid(2), Adult(3), Old(4), Dead(5)
-// Orden de cols:  Idle(0), Happy(1), Sad(2), Eat(3)
+// Egg  y Ghost solo tienen "idle"; el resto tienen 5 animaciones completas.
 // ─────────────────────────────────────────────────────────────────────────────
 
-static const SpriteMapping kSpritesByStageColor[6][4] = {
-    // Egg — usa walk/sick como placeholder hasta tener sprite de huevo
+struct StageLoadSpec {
+    LifeStage   stage;
+    const char* spriteId;
+    // Animación por MoodColor index (nullptr = no cargar, usar idle como fallback)
+    const char* animForMood[kMoodCount];  // [Idle, Happy, Sad, Eat, Sleep]
+};
+
+static const StageLoadSpec kSpriteLoad[] = {
     {
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "walk" },  // Idle
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "walk" },  // Happy
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "sick" },  // Sad
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "eat"  },  // Eat
+        LifeStage::Egg,
+        "b89aa51e-e6d1-4208-b282-48c9b1b1f991",
+        { "idle", nullptr, nullptr, nullptr, nullptr }
     },
-    // Baby (1)
     {
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "walk"  },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "happy" },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "sick"  },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "eat"   },
+        LifeStage::Baby,
+        "797ec06d-c81f-4f02-882a-df63976879b6",
+        { "idle", "happy", "sad", "eat", "sleep" }
     },
-    // Kid (2)
     {
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "walk"  },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "happy" },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "sick"  },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "eat"   },
+        LifeStage::Kid,
+        "0be78b1f-d025-4c87-a246-d12303f79200",
+        { "idle", "happy", "sad", "eat", "sleep" }
     },
-    // Adult (3)
     {
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "walk"  },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "happy" },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "sick"  },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "eat"   },
+        LifeStage::Adult,
+        "3d94524d-e9f3-4e4f-a2ae-ae7ac2683a87",
+        { "idle", "happy", "sad", "eat", "sleep" }
     },
-    // Old (4)
     {
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "walk"  },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "walk"  },  // Happy → walk (viejo cansado)
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "sick"  },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "eat"   },
+        LifeStage::Old,
+        "a115f4d7-e98e-4692-afd5-85264c646cd1",
+        { "idle", "happy", "sad", "eat", "sleep" }
     },
-    // Dead (5) — usa sick como proxy visual de estado muerto hasta tener ghost sprite
     {
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "sick" },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "sick" },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "sick" },
-        { "0e273289-be9b-4048-a2c3-acb89579dcdc", "sick" },
+        LifeStage::Dead,
+        "f5f69423-d2ea-48bd-9845-23672bffa540",
+        { "idle", nullptr, nullptr, nullptr, nullptr }
     },
 };
 
@@ -158,11 +137,7 @@ DisplayRendererColor::DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus,
                                            SpriteStore& sprites)
     : canvas_(canvas), bus_(bus), sprites_(sprites)
 {
-    memset(&animWalk_,  0, sizeof(animWalk_));
-    memset(&animHappy_, 0, sizeof(animHappy_));
-    memset(&animSick_,  0, sizeof(animSick_));
-    memset(&animEat_,   0, sizeof(animEat_));
-    memset(&animSleep_, 0, sizeof(animSleep_));
+    memset(spritesByStage_, 0, sizeof(spritesByStage_));
 }
 
 // =============================================================================
@@ -184,34 +159,53 @@ void DisplayRendererColor::begin() {
 }
 
 // =============================================================================
-// loadSprites_ — carga las 5 animaciones del sprite "wiz" en PSRAM.
+// loadSprites_ — precarga los sprites de las 6 etapas de vida en PSRAM.
 //
-// Todas las animaciones se cargan una vez en begin() y se mantienen en PSRAM
-// durante todo el ciclo de vida del renderer. Coste estimado:
-//   walk:    8 frames × 48×48×2 = 36 864 B  ≈ 36 KB
-//   happy:   4 frames × 48×48×2 = 18 432 B  ≈ 18 KB
-//   sick:    4 frames × 48×48×2 = 18 432 B  ≈ 18 KB
-//   eat:     5 frames × 48×48×2 = 23 040 B  ≈ 22 KB
-//   sleep:   4 frames × 48×48×2 = 18 432 B  ≈ 18 KB
-//   Total ≈ 114 KB — cabe holgadamente en los ~1.9 MB de PSRAM disponibles.
+// Etapa      Anims  Frames  Bytes
+// egg        1      6       27 648
+// baby       5      23     106 368
+// kid        5      23     106 368
+// adult      5      23     106 368
+// old        5      23     106 368
+// ghost      1      6       27 648
+// Total      22     104    480 768  ≈ 470 KB
+//
+// Con ~1.9 MB de PSRAM disponible, caben con margen amplio.
+// Los slots sin animación propia (nullptr) se dejan a count=0;
+// framesForMood_() cae a Idle de la misma etapa como fallback.
 // =============================================================================
 
 bool DisplayRendererColor::loadSprites_() {
-    bool ok = true;
+    bool allOk = true;
+    static constexpr size_t kNumStages =
+        sizeof(kSpriteLoad) / sizeof(kSpriteLoad[0]);
 
-    ok &= sprites_.loadAnimation(kSpriteId, "walk",  animWalk_);
-    ok &= sprites_.loadAnimation(kSpriteId, "happy", animHappy_);
-    ok &= sprites_.loadAnimation(kSpriteId, "sick",  animSick_);
-    ok &= sprites_.loadAnimation(kSpriteId, "eat",   animEat_);
-    ok &= sprites_.loadAnimation(kSpriteId, "sleep", animSleep_);
+    for (size_t si = 0; si < kNumStages; si++) {
+        const StageLoadSpec& spec = kSpriteLoad[si];
+        uint8_t stageIdx = static_cast<uint8_t>(spec.stage);
+        StageSprites& dst = spritesByStage_[stageIdx];
 
-    if (ok) {
-        LOG_INFO("DisplayRendererColor: sprites cargados OK. PSRAM libre: %u B",
-                 ESP.getFreePsram());
-    } else {
-        LOG_ERROR("DisplayRendererColor: fallo al cargar uno o mas sprites");
+        LOG_INFO("Cargando etapa %u (id=%.8s...)", stageIdx, spec.spriteId);
+
+        for (uint8_t mi = 0; mi < kMoodCount; mi++) {
+            const char* animName = spec.animForMood[mi];
+            if (animName == nullptr) {
+                // Sin animación propia — framesForMood_() usará idle como fallback
+                continue;
+            }
+            bool ok = sprites_.loadAnimation(spec.spriteId, animName,
+                                             dst.frames[mi]);
+            if (!ok) {
+                LOG_ERROR("Fallo cargando stage=%u mood=%u anim=%s",
+                          stageIdx, mi, animName);
+                allOk = false;
+            }
+        }
     }
-    return ok;
+
+    LOG_INFO("DisplayRendererColor: precarga completa. PSRAM libre: %u B",
+             ESP.getFreePsram());
+    return allOk;
 }
 
 // =============================================================================
@@ -335,37 +329,45 @@ void DisplayRendererColor::render() {
 }
 
 // =============================================================================
-// computeMood_ — prioridad: Eat > Sleeping (→ Idle) > Sad > Happy > Idle.
+// computeMood_ — prioridad: Eat > Sleep > Sad > Happy > Idle.
+// Sleep se pasa a framesForMood_() que aplica el fallback correcto por etapa.
 // =============================================================================
 
 MoodColor DisplayRendererColor::computeMood_() const {
     if (eatAnimRemainingMs_ > 0)   return MoodColor::Eat;
-    if (stats_.isSleeping)         return MoodColor::Idle;
+    if (stats_.isSleeping)         return MoodColor::Sleep;
     if (stats_.happiness <= 20)    return MoodColor::Sad;
     if (stats_.happiness >= 80)    return MoodColor::Happy;
     return MoodColor::Idle;
 }
 
 // =============================================================================
-// framesForMood_ — devuelve el puntero al buffer de animación apropiado.
+// framesForMood_ — devuelve el buffer de animación para (stage, mood).
 //
-// Si isSleeping está activo, devuelve animSleep_ independientemente del mood
-// (el personaje duerme aunque el mood computado sea Idle por otras razones).
+// Prioridad:
+//   1. isSleeping → Sleep (índice 4); si count==0, cae a Idle de la etapa.
+//   2. mood recibido (Idle/Happy/Sad/Eat).
+//   3. Fallback: Idle de la misma etapa (siempre debe existir).
 // =============================================================================
 
-const ColorSpriteFrames* DisplayRendererColor::framesForMood_(MoodColor mood) const {
+const ColorSpriteFrames* DisplayRendererColor::framesForMood_(LifeStage stage,
+                                                               MoodColor mood) const {
     if (!spritesLoaded_) return nullptr;
 
-    // Sleeping tiene precedencia visual sobre cualquier mood
-    if (stats_.isSleeping) return &animSleep_;
+    uint8_t stageIdx = static_cast<uint8_t>(stage);
+    if (stageIdx >= 6) stageIdx = static_cast<uint8_t>(LifeStage::Baby);
 
-    switch (mood) {
-        case MoodColor::Idle:  return &animWalk_;
-        case MoodColor::Happy: return &animHappy_;
-        case MoodColor::Sad:   return &animSick_;
-        case MoodColor::Eat:   return &animEat_;
+    const StageSprites& ss = spritesByStage_[stageIdx];
+    uint8_t moodIdx = static_cast<uint8_t>(mood);
+
+    // Try the requested mood animation; fall back to Idle of same stage.
+    if (moodIdx < kMoodCount) {
+        const ColorSpriteFrames* candidate = &ss.frames[moodIdx];
+        if (candidate->count > 0) return candidate;
     }
-    return &animWalk_;
+
+    // Fallback: idle de la etapa (siempre presente para las 6 etapas)
+    return &ss.frames[static_cast<uint8_t>(MoodColor::Idle)];
 }
 
 // =============================================================================
@@ -530,13 +532,14 @@ void DisplayRendererColor::drawHudBottom_() {
 
 void DisplayRendererColor::drawSprite_() {
     // Sprite 48×48 × 4 = 192×192 px centrado en 240×192
-    const int16_t spriteW = animWalk_.w > 0 ? animWalk_.w * kScale : 192;
-    const int16_t spriteH = animWalk_.h > 0 ? animWalk_.h * kScale : 192;
-    const int16_t spriteX = (240 - spriteW) / 2;
+    // Dimensiones se infieren del idle de la etapa actual (siempre 48×48)
+    const int16_t spriteX = (240 - 192) / 2;
     const int16_t spriteY = 40;
 
     MoodColor mood = computeMood_();
-    const ColorSpriteFrames* frames = framesForMood_(mood);
+    const ColorSpriteFrames* frames = framesForMood_(lifeStage_, mood);
+    const int16_t spriteW = (frames && frames->w > 0) ? frames->w * kScale : 192;
+    const int16_t spriteH = (frames && frames->h > 0) ? frames->h * kScale : 192;
 
     if (frames != nullptr && frames->count > 0 && frames->w > 0) {
         uint8_t frameIdx = static_cast<uint8_t>(animFrame_ % frames->count);
@@ -826,7 +829,7 @@ void DisplayRendererColor::drawOtaProgress_() {
 //
 // Layout portrait 240×296:
 //   y=0..39     HUD top (usa espacio del personaje para texto grande)
-//   y=50..90    Sprite personaje (muerto → animSick_) escalado ×2 (96×96 px)
+//   y=50..90    Sprite personaje (muerto → animSad_) escalado ×2 (96×96 px)
 //               Centrado en x.
 //   y=100       "RIP" grande centrado — fuente size 3 (18×24 px/char)
 //   y=140       Causa de muerte
@@ -840,21 +843,22 @@ void DisplayRendererColor::drawDeadScreen_() {
     // HUD top — mantiene el nombre de etapa "DEAD" y la edad
     drawHudTop_();
 
-    // Sprite del muerto: usamos animSick_ escalado ×2 (no ×4) para que quede
-    // arriba y deje espacio para el texto. 48×48 ×2 = 96×96 px.
-    if (spritesLoaded_ && animSick_.count > 0 && animSick_.w > 0) {
-        uint8_t frameIdx = static_cast<uint8_t>(animFrame_ % animSick_.count);
-        const uint16_t* pixels = animSick_.frames[frameIdx];
+    // Sprite ghost escalado ×2 (96×96 px) centrado, dejando espacio para texto.
+    // Dead stage tiene idle del ghost cargado en spritesByStage_[Dead].frames[Idle].
+    const ColorSpriteFrames* ghostFrames =
+        framesForMood_(LifeStage::Dead, MoodColor::Idle);
+
+    if (ghostFrames != nullptr && ghostFrames->count > 0 && ghostFrames->w > 0) {
+        uint8_t frameIdx = static_cast<uint8_t>(animFrame_ % ghostFrames->count);
+        const uint16_t* pixels = ghostFrames->frames[frameIdx];
         if (pixels != nullptr) {
-            const int16_t dW = animSick_.w * 2;
-            const int16_t dH = animSick_.h * 2;
-            const int16_t dX = (240 - dW) / 2;
+            const int16_t dX = (240 - static_cast<int16_t>(ghostFrames->w) * 2) / 2;
             drawSpriteScaled_(&canvas_, dX, 50,
-                              animSick_.w, animSick_.h,
+                              ghostFrames->w, ghostFrames->h,
                               pixels, 2, kKeyColor);
         }
     } else {
-        // Placeholder: calavera con primitivas
+        // Fallback: calavera con primitivas si el ghost no se cargó
         canvas_.fillCircle(120, 80, 30, COL_GRAY);
         canvas_.fillRect(100, 90, 40, 20, COL_GRAY);
         canvas_.fillCircle(109, 78, 6, COL_BLACK);  // ojo izq
