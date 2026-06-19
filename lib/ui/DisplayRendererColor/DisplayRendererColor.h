@@ -6,10 +6,11 @@
  * framesForMood_() resuelve (lifeStage_, mood) a la animación correcta,
  * con fallback a idle de la etapa si el mood no tiene animación propia.
  *
- * Layout portrait 240×296:
- *   HUD top       y=0..39   : nombre/etapa + edad + icono WiFi
- *   Personaje     y=40..231  : sprite 48×48 escalado ×4 = 192×192, centrado en x
- *   HUD inferior  y=232..295 : acción seleccionada (icono + label)
+ * Layout portrait 240×296 (safe-area con cards redondeadas):
+ *   Margen físico   kEdgeInset=8 px por todos los bordes (curva del cristal IPS)
+ *   HUD top card    x=8, y=8, w=224, h=44, r=10  : etapa (size 2) + edad (size 1) + WiFi
+ *   Personaje       y=(8+44+8)..(296-8-60-8)      : sprite 48×48 × 4 = 192×192, centrado
+ *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : label acción (size 2) + cursor dots
  *
  * Constructor: DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus, SpriteStore& sprites)
  * render()    : compone frame completo y llama canvas.flush().
@@ -170,6 +171,31 @@ private:
 
     // Escala de renderizado: 48×48 × 4 = 192×192 px.
     static constexpr uint8_t kScale = 4;
+
+    // ── Safe-area: márgenes para respetar las esquinas físicas redondeadas ───
+    // El cristal IPS 240×296 tiene esquinas redondeadas que recortan el contenido
+    // si se pinta a sangre. Estas constantes definen el layout de cards para que
+    // ningún texto ni elemento quede oculto por la curvatura del panel.
+
+    // Dimensiones visibles del panel (el GRAM nativo es 240×320 con row_offset=12).
+    static constexpr int16_t kScreenW = 240;
+    static constexpr int16_t kScreenH = 296;
+
+    // Margen desde el borde físico hasta el borde exterior de cualquier card.
+    // 8 px da margen suficiente para la curvatura de esquina del cristal IPS.
+    static constexpr int16_t kEdgeInset = 8;
+
+    // Radio de esquinas de las cards (coincide visualmente con la curvatura del panel).
+    static constexpr int16_t kCornerR = 10;
+
+    // Sangrado de texto dentro de la card: kEdgeInset + margen interior de 8 px.
+    static constexpr int16_t kSafeTextX = kEdgeInset + 8;
+
+    // Altura de la card del HUD superior (etapa + edad).
+    static constexpr int16_t kHudTopH = 44;
+
+    // Altura de la card del HUD inferior (label de acción + cursor dots).
+    static constexpr int16_t kHudBottomH = 60;
 
     // Duración mínima de animación one-shot de acción (ms).
     // ~1000 ms da tiempo a ver el ciclo de animación completo (~8 fps × 5 frames = 625 ms
