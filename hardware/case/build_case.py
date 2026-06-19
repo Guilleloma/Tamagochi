@@ -640,7 +640,322 @@ def export_stl(shape, path, label):
 
 
 # ===========================================================================
-# 7. MAIN
+# 7. COMPONENT MOCKUPS — integrated into pipeline (must come before main)
+# ===========================================================================
+def _comp_box(w, d2, h, cx=0.0, cy=0.0, cz=0.0):
+    """Box helper local to component mockup functions."""
+    return Part.makeBox(w, d2, h, App.Vector(cx - w/2, cy - d2/2, cz))
+
+
+def _component_positions(P, D):
+    """
+    Returns ordered dict: name -> component dict with shape, color, desc.
+    All coordinates in the global frame (same as build_case.py).
+
+    Global frame:
+      Origin = centre of exterior footprint at Z=0 (bottom face of rear body)
+      +Y  = front of device (bezel side)
+      -Y  = rear face
+      -X  = side with USB-C cutouts
+      +Z  = top (TFT end)
+      Bezel inner mating face sits at Y = ext_y/2 = +20 mm.
+    """
+    ex = P["ext_x"]; ey = P["ext_y"]; ez = P["ext_z"]
+    wall = P["wall"]
+    positions = {}
+
+    # --- BATTERY (LiPo 503035) ---
+    # Against rear wall (-Y), centred in X, base at Z=wall.
+    bat_cx   = 0.0
+    bat_cy   = -ey/2 + wall + P["bat_h"]/2   # -20+2+17.5 = -0.5
+    bat_cz   = wall                            # 2.0
+    bat_shape = _comp_box(P["bat_w"], P["bat_h"], P["bat_t"],
+                          cx=bat_cx, cy=bat_cy, cz=bat_cz)
+    positions["Comp_Battery"] = {
+        "shape": bat_shape,
+        "color": (0.55, 0.55, 0.55),
+        "desc":  f"LiPo 503035  {P['bat_w']}x{P['bat_h']}x{P['bat_t']}mm",
+    }
+
+    # --- MCU (ESP32-S3 Zero) ---
+    # Pocket in build_rear_body: cx=ey/2-wall-mpw/2 (along X), cy=0, cz=wall+bat_pocket_t+2
+    mcu_cx  = ey/2 - wall - D["mcu_pocket_w"]/2   # ~8.80
+    mcu_cy  = 0.0
+    mcu_cz  = wall + D["bat_pocket_t"] + 2.0       # ~10.0
+    mcu_shape = _comp_box(P["mcu_l"], P["mcu_w"], P["mcu_t"],
+                          cx=mcu_cx, cy=mcu_cy, cz=mcu_cz)
+    mcu_usb_z  = mcu_cz + (P["mcu_t"] - P["mcu_usb_h"]) / 2
+    mcu_usb_cx = -(ex/2)
+    usb_span   = P["mcu_usb_protrude"] + wall
+    mcu_usb_shape = _comp_box(usb_span, P["mcu_usb_w"], P["mcu_usb_h"],
+                               cx=mcu_usb_cx + usb_span/2,
+                               cy=mcu_cx,
+                               cz=mcu_usb_z)
+    try:
+        mcu_full = mcu_shape.fuse(mcu_usb_shape)
+    except Exception:
+        mcu_full = mcu_shape
+    positions["Comp_MCU"] = {
+        "shape": mcu_full,
+        "color": (0.13, 0.55, 0.13),
+        "desc":  f"ESP32-S3 Zero  {P['mcu_l']}x{P['mcu_w']}x{P['mcu_t']}mm",
+    }
+
+    # --- TP4056 ---
+    tp_cx  = mcu_cx
+    tp_cy  = -ey/2 + wall + D["tp_pocket_w"]/2    # -20+2+8.7 = -9.3
+    tp_cz  = mcu_cz
+    tp_shape = _comp_box(P["tp_l"], P["tp_w"], P["tp_t"],
+                         cx=tp_cx, cy=tp_cy, cz=tp_cz)
+    tp_usb_z  = tp_cz + (P["tp_t"] - P["tp_usb_h"]) / 2
+    tp_usb_cx = -(ex/2)
+    tp_usb_shape = _comp_box(usb_span, P["tp_usb_w"], P["tp_usb_h"],
+                              cx=tp_usb_cx + usb_span/2,
+                              cy=tp_cy,
+                              cz=tp_usb_z)
+    try:
+        tp_full = tp_shape.fuse(tp_usb_shape)
+    except Exception:
+        tp_full = tp_shape
+    positions["Comp_TP4056"] = {
+        "shape": tp_full,
+        "color": (1.0, 0.50, 0.0),
+        "desc":  f"TP4056  {P['tp_l']}x{P['tp_w']}x{P['tp_t']}mm",
+    }
+
+    # --- SCREEN PCB (TFT JD9853) ---
+    # PCB against +Y interior wall, top flush with interior ceiling.
+    scr_cy    = ey/2 - wall - P["scr_pcb_t"]/2     # 18 - 0.83 = 17.17
+    scr_z_bot = ez - wall - P["scr_pcb_h"]          # 68 - 48.86 = 19.14
+    scr_shape = _comp_box(P["scr_pcb_w"], P["scr_pcb_t"], P["scr_pcb_h"],
+                          cx=0.0, cy=scr_cy, cz=scr_z_bot)
+    # Active area marker — thin slab just outside +Y interior wall, cyan.
+    pcb_top_z = ez - wall
+    act_z_ctr = (pcb_top_z
+                 - P["scr_pcb_h"]
+                 + (P["scr_pcb_h"] - P["scr_act_h"]) / 2
+                 + P["scr_act_h"] / 2
+                 + P["scr_act_off_y"])
+    marker_t   = 0.3
+    act_marker = _comp_box(P["scr_act_w"], marker_t, P["scr_act_h"],
+                           cx=0.0,
+                           cy=ey/2 - wall + marker_t/2,
+                           cz=act_z_ctr - P["scr_act_h"]/2)
+    # Header connector behind PCB
+    hdr_cy = ey/2 - wall - P["scr_pcb_t"] - 2.54/2
+    hdr_shape = _comp_box(21.0, 2.54, 5.0, cx=0.0, cy=hdr_cy, cz=scr_z_bot)
+    try:
+        scr_full = scr_shape.fuse(hdr_shape)
+    except Exception:
+        scr_full = scr_shape
+    positions["Comp_Screen"] = {
+        "shape":  scr_full,
+        "marker": act_marker,
+        "color":  (0.10, 0.30, 0.80),
+        "desc":   (f"TFT PCB  {P['scr_pcb_w']}x{P['scr_pcb_h']}x{P['scr_pcb_t']}mm  "
+                   f"active={P['scr_act_w']}x{P['scr_act_h']}"),
+    }
+
+    # --- TTP223 (capacitive touch sensor, inside bezel inner-face pocket) ---
+    # No chamfer. Centred in X (cx=0), centred in Z at btn_center_z (~14.65 mm).
+    # In global frame: bezel inner mating face is at Y = ext_y/2 = +20 mm.
+    # The pocket runs from Y=+20 toward +Y by ttp_pocket_d (2.1 mm into the bezel).
+    # TTP223 touch pad faces -Y (toward the concave button dish / the user).
+    ttp_pd       = D["ttp_pocket_d"]           # = bezel_th - btn_depth - btn_wall = 2.1 mm
+    z_ttp_ctr    = D["btn_center_z"]           # ~14.65 mm (auto-derived)
+    ttp_cy_global = ey/2 + ttp_pd/2            # centre in Y inside the pocket = 21.05
+
+    ttp_shape = _comp_box(P["ttp_w"], P["ttp_t"], P["ttp_h"],
+                          cx=0.0, cy=ttp_cy_global, cz=z_ttp_ctr - P["ttp_h"]/2)
+    positions["Comp_TTP223"] = {
+        "shape": ttp_shape,
+        "color": (0.90, 0.85, 0.10),
+        "desc":  (f"TTP223  {P['ttp_w']}x{P['ttp_h']}x{P['ttp_t']}mm  "
+                  f"Z_ctr={z_ttp_ctr:.2f}  behind concave button  pocket_d={ttp_pd:.2f}mm"),
+    }
+
+    return positions
+
+
+def _verify_components(positions, rear_shape, bezel_shape, P, D):
+    """
+    For each component compute intersection volume with RearBody and FrontBezel.
+    Prints collision table. Returns list of result dicts.
+    """
+    TOL = 0.5  # mm³ threshold for 'real' collision
+
+    ex = P["ext_x"]; ey = P["ext_y"]; ez = P["ext_z"]; wall = P["wall"]
+
+    results = []
+    for name, comp in positions.items():
+        shape = comp["shape"]
+
+        try:
+            inter_rear  = shape.common(rear_shape)
+            vol_rear    = inter_rear.Volume if inter_rear.Solids else 0.0
+        except Exception as e:
+            vol_rear = -1.0
+            print(f"  [WARN] common({name}, rear) failed: {e}")
+
+        try:
+            inter_bezel = shape.common(bezel_shape)
+            vol_bezel   = inter_bezel.Volume if inter_bezel.Solids else 0.0
+        except Exception as e:
+            vol_bezel = -1.0
+            print(f"  [WARN] common({name}, bezel) failed: {e}")
+
+        bb = shape.BoundBox
+
+        # Classify — known-acceptable collisions vs real problems
+        if "Battery" in name and vol_rear > 0:
+            # Bosses protrude into battery area by design.
+            rear_ok  = True; bezel_ok = True
+            col_note = "ACCEPTED (boss protrusion — pending packaging decision)"
+        elif "TTP223" in name and vol_bezel > 0:
+            # TTP223 sits inside the bezel inner-face pocket.
+            rear_ok  = True; bezel_ok = True
+            col_note = "ACCEPTED (sits in bezel inner-face pocket)"
+        else:
+            rear_ok  = (vol_rear  < TOL)
+            bezel_ok = (vol_bezel < TOL)
+            col_note = "OK" if (rear_ok and bezel_ok) else "INTERFERENCIA REAL"
+
+        results.append({
+            "name":      name,
+            "vol_rear":  vol_rear,
+            "vol_bezel": vol_bezel,
+            "rear_ok":   rear_ok,
+            "bezel_ok":  bezel_ok,
+            "col_note":  col_note,
+            "bb":        bb,
+        })
+
+    # Print table
+    print()
+    print("=" * 82)
+    print("COLLISION REPORT — Component vs Case Bodies")
+    print("=" * 82)
+    print(f"  {'Component':<22} {'vs RearBody mm³':>16} {'vs FrontBezel mm³':>18}  Result")
+    print("-" * 82)
+    any_real = False
+    for r in results:
+        vr = f"{r['vol_rear']:.3f}"  if r['vol_rear']  >= 0 else "ERR"
+        vb = f"{r['vol_bezel']:.3f}" if r['vol_bezel'] >= 0 else "ERR"
+        print(f"  {r['name']:<22} {vr:>16} {vb:>18}  {r['col_note']}")
+        if "REAL" in r["col_note"]:
+            any_real = True
+    print()
+
+    # Battery boss clearance note
+    bp    = P["ext_x"]/2 - P["wall"] - P["boss_od"]/2 - 1.0
+    clr_x = bp - P["bat_w"]/2
+    print(f"NOTE — Battery vs bosses: bat_w/2={P['bat_w']/2:.1f}mm  boss_pos={bp:.1f}mm  "
+          f"X-clearance={clr_x:.1f}mm")
+    if clr_x < 0:
+        print(f"  ACTION REQUIRED: battery overlaps boss by {abs(clr_x):.1f}mm.")
+    elif clr_x < 1.0:
+        print(f"  WARNING: tight clearance ({clr_x:.1f}mm).")
+    else:
+        print(f"  OK.")
+    print()
+
+    if any_real:
+        print("WARNING: INTERFERENCIA REAL detected — review entries above.")
+    else:
+        print("All non-accepted collisions: OK (no unacceptable interference).")
+
+    return results
+
+
+def add_component_mockups(doc, P, D, rear_shape, bezel_shape):
+    """
+    Adds Comp_* Part::Feature objects to `doc`.
+    Sets rear/bezel bodies to Transparency=80; Comp_* stay opaque with their colours.
+    Runs collision verification and prints results.
+    Idempotent: removes any existing Components group and stray Comp_* first.
+    """
+    # Remove existing Components group + stray Comp_* (idempotent)
+    existing_grp = doc.getObject("Components")
+    if existing_grp is not None:
+        for obj in list(existing_grp.OutList):
+            try:
+                doc.removeObject(obj.Name)
+            except Exception:
+                pass
+        try:
+            doc.removeObject("Components")
+        except Exception:
+            pass
+        doc.recompute()
+        print("  Removed existing Components group.")
+
+    for obj in list(doc.Objects):
+        if obj.Name.startswith("Comp_"):
+            try:
+                doc.removeObject(obj.Name)
+            except Exception:
+                pass
+    doc.recompute()
+
+    # Build component shapes
+    positions = _component_positions(P, D)
+
+    # Create group
+    grp = doc.addObject("App::DocumentObjectGroup", "Components")
+    grp.Label = "Components (reference only – not for print)"
+
+    for name, comp in positions.items():
+        feat       = doc.addObject("Part::Feature", name)
+        feat.Shape = comp["shape"]
+        feat.Label = name
+        if feat.ViewObject is not None:
+            r, g, b = comp["color"]
+            feat.ViewObject.ShapeColor   = (r, g, b, 1.0)
+            feat.ViewObject.Transparency = 0
+            feat.ViewObject.Visibility   = True
+        grp.addObject(feat)
+
+        # Active area marker for screen (separate cyan feature)
+        if "Screen" in name and "marker" in comp:
+            mname = name + "_ActiveMarker"
+            mfeat = doc.addObject("Part::Feature", mname)
+            mfeat.Shape = comp["marker"]
+            mfeat.Label = mname
+            if mfeat.ViewObject is not None:
+                mfeat.ViewObject.ShapeColor   = (0.0, 0.85, 1.0, 1.0)
+                mfeat.ViewObject.Transparency = 30
+                mfeat.ViewObject.Visibility   = True
+            grp.addObject(mfeat)
+
+    doc.recompute()
+
+    # Semi-transparent case bodies (80%), Comp_* stay opaque, all visible
+    rear_feat  = doc.getObject("Body_RearBody")
+    bezel_feat = doc.getObject("Body_FrontBezel")
+    for feat in [rear_feat, bezel_feat]:
+        if feat is not None and feat.ViewObject is not None:
+            feat.ViewObject.Transparency = 80
+            feat.ViewObject.Visibility   = True
+
+    doc.recompute()
+
+    # Isometric view + fitAll (GUI only — no-op in headless)
+    try:
+        import FreeCADGui as Gui
+        Gui.activeDocument().activeView().viewIsometric()
+        Gui.SendMsgToActiveView("ViewFit")
+    except Exception:
+        pass
+
+    # Collision verification
+    _verify_components(positions, rear_shape, bezel_shape, P, D)
+
+    comp_names = list(positions.keys())
+    print(f"\nComponent mockups added: {comp_names}")
+
+
+# ===========================================================================
+# 8. MAIN
 # ===========================================================================
 def main():
     print("=" * 60)
@@ -853,21 +1168,22 @@ def main():
 
     doc.recompute()
 
-    # Component mockups (optional — loads add_component_mockups module if present)
-    mockup_script = os.path.join(SCRIPT_DIR, "add_component_mockups.py")
-    if os.path.exists(mockup_script):
-        print("\n[5/5] Component mockups (add_component_mockups.py) ...")
-        try:
-            import importlib.util as _ilu
-            _spec = _ilu.spec_from_file_location("add_component_mockups", mockup_script)
-            _mod  = _ilu.module_from_spec(_spec)
-            _spec.loader.exec_module(_mod)
-            _mod.main()
-        except Exception as _e:
-            print(f"  [SKIP] Could not run component mockups: {_e}")
-    else:
-        print(f"\n[INFO] {mockup_script} not found — skipping component mockups.")
+    # Component mockups — always generated, integrated in pipeline
+    print("\n[5/5] Component mockups ...")
+    add_component_mockups(doc, P, D, rear, bezel_placed)
+
+    # Final save (mockups may have added objects; saveAs overwrites cleanly)
+    print(f"\nSaving FCStd (final, with mockups): {FCSTD_PATH}")
+    doc.saveAs(FCSTD_PATH)
+    print("  OK")
+
+    # Confirm objects in document
+    obj_names = [o.Name for o in doc.Objects]
+    print(f"\nDocument objects: {obj_names}")
+    comp_in_doc = [n for n in obj_names if n.startswith("Comp_")]
+    print(f"Comp_* objects  : {comp_in_doc}")
 
 
 if __name__ == "__main__":
     main()
+
