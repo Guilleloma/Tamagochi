@@ -8,8 +8,9 @@
  *
  * Layout portrait 240×296 (safe-area con cards redondeadas):
  *   Margen físico   kEdgeInset=8 px por todos los bordes (curva del cristal IPS)
- *   HUD top card    x=8, y=8, w=224, h=44, r=10  : etapa (size 2) + edad (size 1) + WiFi
- *   Personaje       y=(8+44+8)..(296-8-60-8)      : sprite 48×48 × 4 = 192×192, centrado
+ *   Corner safe     kCornerSafe=28 px: clearance diagonal para esquinas del cristal
+ *   HUD top         texto flotante h=52: BABY en (28,28), edad en (28,46), WiFi en (212,28)
+ *   Personaje       y=(8+52)..(296-8-60) : sprite 48×48 × 4 = 192×192, centrado
  *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : label acción (size 2) + cursor dots
  *
  * Constructor: DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus, SpriteStore& sprites)
@@ -188,11 +189,20 @@ private:
     // Radio de esquinas de las cards (coincide visualmente con la curvatura del panel).
     static constexpr int16_t kCornerR = 10;
 
+    // Clearance diagonal para elementos en las esquinas del cristal IPS.
+    // El panel físico tiene un radio de curvatura real de ~30 px; 28 px de margen
+    // desde cada borde garantiza que texto e iconos queden fuera del cuarto de
+    // círculo recortado. Afinable en placa si el radio real difiere.
+    static constexpr int16_t kCornerSafe = 28;
+
     // Sangrado de texto dentro de la card: kEdgeInset + margen interior de 8 px.
     static constexpr int16_t kSafeTextX = kEdgeInset + 8;
 
     // Altura de la card del HUD superior (etapa + edad).
-    static constexpr int16_t kHudTopH = 44;
+    // Aumentada a 52 px para acomodar la fila de texto desplazada hacia kCornerSafe
+    // (BABY en y=28, edad en y=46 → texto termina en ~54; HUD top delimita zoneTop
+    // en kEdgeInset + kHudTopH = 60, dejando ~6 px de gap con el sprite centrado).
+    static constexpr int16_t kHudTopH = 52;
 
     // Altura de la card del HUD inferior (label de acción + cursor dots).
     static constexpr int16_t kHudBottomH = 60;

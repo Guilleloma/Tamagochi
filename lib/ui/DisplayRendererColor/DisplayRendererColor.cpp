@@ -453,24 +453,28 @@ void DisplayRendererColor::drawSpriteScaled_(Arduino_GFX* display,
 // drawHudTop_ — HUD superior: etapa de vida, edad, icono WiFi.
 //
 // Texto flotante sobre fondo azul (COL_BG), sin card de fondo.
-//   Título (etapa, size 2)   en x=kSafeTextX, y=kEdgeInset+6
-//   Subtítulo (edad, size 1) en x=kSafeTextX, y=kEdgeInset+28
-//   Icono WiFi a cx≈kScreenW-kEdgeInset-14, respetando safe-area
+//   Título (etapa, size 2)   en x=kCornerSafe, y=kCornerSafe
+//   Subtítulo (edad, size 1) en x=kCornerSafe, y=kCornerSafe+18
+//   Icono WiFi centrado en cx=kScreenW-kCornerSafe, cy=kCornerSafe
+//
+// kCornerSafe desplaza ambos elementos (texto e icono) lo suficiente para
+// quedar fuera del cuarto de círculo recortado por la curvatura del cristal.
 // =============================================================================
 
 void DisplayRendererColor::drawHudTop_() {
     // Sin card de fondo — el texto flota sobre el azul de COL_BG (pintado por
-    // drawIdleMain_ con fillScreen). kEdgeInset sigue marcando el límite seguro
-    // para no pegarse a la curvatura del cristal.
+    // drawIdleMain_ con fillScreen).
 
-    // Etapa de vida — título size 2 (12×16 px/char), posicionado respetando
-    // kEdgeInset en Y para quedar fuera de la zona curvada del borde superior.
+    // Etapa de vida — título size 2 (12×16 px/char).
+    // kCornerSafe en x e y garantiza que ningún píxel quede dentro de la
+    // zona curvada de la esquina superior-izquierda del cristal.
     canvas_.setTextColor(COL_WHITE);
     canvas_.setTextSize(2);
-    canvas_.setCursor(kSafeTextX, kEdgeInset + 6);
+    canvas_.setCursor(kCornerSafe, kCornerSafe);
     canvas_.print(lifeStageLabel(lifeStage_));
 
-    // Edad — subtítulo size 1 (6×8 px), separado 18 px del título (1 línea size 2).
+    // Edad — subtítulo size 1 (6×8 px), a 18 px bajo el baseline del título
+    // (1 línea size 2 = 16 px alto; 2 px de gap).
     char ageBuf[12];
     if (ageMinutes_ < 60) {
         snprintf(ageBuf, sizeof(ageBuf), "%um", static_cast<unsigned>(ageMinutes_));
@@ -483,17 +487,18 @@ void DisplayRendererColor::drawHudTop_() {
     }
     canvas_.setTextColor(COL_GRAY);
     canvas_.setTextSize(1);
-    canvas_.setCursor(kSafeTextX, kEdgeInset + 28);
+    canvas_.setCursor(kCornerSafe, kCornerSafe + 18);
     canvas_.print(ageBuf);
 
     drawWifiIcon_();
 }
 
 // =============================================================================
-// drawWifiIcon_ — icono WiFi 16×12 px en esquina superior derecha.
+// drawWifiIcon_ — icono WiFi en esquina superior derecha.
 //
-// Dibuja 3 arcos concéntricos con primitivas Arduino_GFX (drawArc no disponible
-// en todos los drivers; usamos rectángulos y círculos rellenos).
+// Centro en (kScreenW-kCornerSafe, kCornerSafe) para quedar fuera del cuarto
+// de círculo recortado por el cristal. Dibuja 3 arcos concéntricos mediante
+// círculos rellenos superpuestos (drawArc no disponible en todos los drivers).
 // =============================================================================
 
 void DisplayRendererColor::drawWifiIcon_() {
@@ -505,10 +510,11 @@ void DisplayRendererColor::drawWifiIcon_() {
 
     uint16_t color = (wifiState_ == WifiState::Connected) ? COL_GREEN : COL_AMBER;
 
-    // Icono simplificado: 3 píxeles superpuestos centrales + punto.
-    // cx se sitúa a kEdgeInset+14 px del borde derecho para caer dentro de la card
-    // y no sobre la curvatura del cristal.
-    const int16_t cx = kScreenW - kEdgeInset - 14, cy = kEdgeInset + 16;
+    // Centro del icono desplazado kCornerSafe desde cada borde para quedar
+    // fuera del cuarto de círculo de la esquina superior-derecha del cristal.
+    // Los radios de los fillCircle son relativos a (cx, cy), por lo que basta
+    // con mover el centro; no hay que ajustar los radios.
+    const int16_t cx = kScreenW - kCornerSafe, cy = kCornerSafe;
 
     // Arco exterior (radio 6) — solo parte superior con fillCircle parcial
     canvas_.fillCircle(cx, cy, 7, color);
