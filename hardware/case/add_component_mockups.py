@@ -36,16 +36,14 @@ P = {
     "ext_y":           40.0,
     "ext_z":           70.0,
     "wall":             2.0,
-    "wall_chamfer":     1.6,
+    # Note: wall_chamfer / chamfer_h / chamfer_ang / chamfer_top_off REMOVED.
+    # The chamfer has been eliminated. Bezel is now a plain rectangular plate.
     "wall_front":       2.0,
     "fillet_ext":       4.0,
     "fillet_edge":      1.5,
     "clr_fit":          0.20,
     "clr_slide":        0.15,
     "clr_z":            0.30,
-    "chamfer_h":        10.0,
-    "chamfer_ang":      35.0,
-    "chamfer_top_off":   6.0,
     "scr_pcb_w":        32.26,
     "scr_pcb_h":        48.86,
     "scr_pcb_t":         1.66,
@@ -53,9 +51,14 @@ P = {
     "scr_act_h":        34.93,
     "scr_act_off_y":     0.0,
     "bezel_lip":         1.2,
-    "bezel_th":          8.0,
+    "bezel_th":          5.0,   # reduced from 8 mm (chamfer no longer forces it up)
     "pcb_clip_h":        2.0,
     "header_clr":        6.0,
+    # Capacitive button (Home-style concave dish)
+    "btn_dia":          15.0,
+    "btn_depth":         1.5,
+    "btn_wall":          1.4,
+    "btn_center_z":      0.0,   # 0 = auto-derive
     "mcu_w":            18.0,
     "mcu_l":            23.5,
     "mcu_t":             1.2,
@@ -94,7 +97,34 @@ def derive(P):
     d["mcu_pocket_w"] = P["mcu_w"] + 2*P["clr_fit"]
     d["mcu_pocket_l"] = P["mcu_l"] + 2*P["clr_fit"]
     d["tp_pocket_w"]  = P["tp_w"]  + 2*P["clr_fit"]
-    d["chamfer_depth"] = math.tan(math.radians(P["chamfer_ang"])) * P["chamfer_h"]
+    # No chamfer_depth — chamfer eliminated.
+
+    # Screen window Z centre (mirrors build_case.py derive())
+    ez = P["ext_z"]; wall = P["wall"]
+    scr_pcb_h = P["scr_pcb_h"]; scr_act_h = P["scr_act_h"]
+    pcb_top_z = ez - wall
+    win_z_raw = (pcb_top_z
+                 - scr_pcb_h
+                 + (scr_pcb_h - scr_act_h) / 2
+                 + scr_act_h / 2
+                 + P["scr_act_off_y"])
+    win_h = scr_act_h - 2 * P["bezel_lip"]
+    win_z_max_top   = ez - 6.0 - win_h / 2
+    win_z_min_bottom = 22.0 + win_h / 2
+    d["win_z_ctr"] = max(win_z_min_bottom, min(win_z_max_top, win_z_raw))
+    d["scr_win_h"] = win_h
+    d["ttp_pocket_w"] = P["ttp_w"] + 2 * P["clr_fit"]
+    d["ttp_pocket_h"] = P["ttp_h"] + 2 * P["clr_fit"]
+    d["ttp_pocket_d"] = P["bezel_th"] - P["btn_depth"] - P["btn_wall"]
+    d["boss_pos"]  = P["ext_x"]/2 - P["wall"] - P["boss_od"]/2 - 1.0
+
+    # Button Z centre
+    win_z_bot = d["win_z_ctr"] - win_h / 2
+    btn_strip_top = win_z_bot - 2.0
+    btn_strip_bot = 4.0
+    btn_z_auto = (btn_strip_top + btn_strip_bot) / 2
+    d["btn_center_z"] = P["btn_center_z"] if P["btn_center_z"] != 0.0 else btn_z_auto
+
     return d
 
 D = derive(P)
@@ -234,29 +264,32 @@ def component_positions(P, D):
                 f"active={P['scr_act_w']}x{P['scr_act_h']}"
     }
 
-    # --- TTP223 (in bezel, chamfer zone) ---
+    # --- TTP223 (in bezel, inner face pocket behind concave button) ---
+    # The chamfer has been eliminated. The TTP223 now sits in a pocket
+    # on the INNER face of the bezel (Y=0 side in bezel local frame),
+    # centred in X and at Z = btn_center_z, directly behind the concave button.
+    #
+    # In the global frame the bezel inner face is at Y = ext_y/2 (= 20).
+    # The pocket runs from Y=20 inward (toward +Y) by ttp_pocket_d.
+    # The TTP223 PCB sits inside this pocket with its touch pad facing -Y
+    # (toward the button dish, across the btn_wall of material).
     bth = P["bezel_th"]
-    ch_h  = P["chamfer_h"]
-    ch_off = P["chamfer_top_off"]
-    wc = P["wall_chamfer"]
-    ch_depth_used = min(D["chamfer_depth"], bth - wc)
-    z_top_ch = ez - ch_off                        # 64
-    z_bot_ch = ez - ch_off - ch_h                 # 54
-    z_ttp_ctr = (z_top_ch + z_bot_ch) / 2         # 59
-    y_face_ttp = bth - ch_depth_used * (z_top_ch - z_ttp_ctr) / ch_h
-    # Bezel is placed at +Y = ext_y/2 (global frame) in build_case.py
-    # TTP sits in the chamfer recess; face is at global Y = ext_y/2 + y_face_ttp
-    ttp_face_y_global = ey/2 + y_face_ttp         # = 20 + 4.8 = 24.8
-    ttp_cy = ttp_face_y_global - P["ttp_t"]/2
+    z_ttp_ctr  = D["btn_center_z"]
+    ttp_pd     = D["ttp_pocket_d"]           # pocket depth from inner face = 2.1 mm
+
+    # Centre of TTP223 in global Y: bezel inner face at ey/2, pocket from ey/2 to ey/2 + ttp_pd
+    ttp_cy_global = ey/2 + ttp_pd/2
+
     ttp_shape = box(P["ttp_w"], P["ttp_t"], P["ttp_h"],
-                    cx=0.0, cy=ttp_cy, cz=z_ttp_ctr - P["ttp_h"]/2)
+                    cx=0.0, cy=ttp_cy_global, cz=z_ttp_ctr - P["ttp_h"]/2)
     positions["Comp_TTP223"] = {
         "shape": ttp_shape,
-        "cx": 0.0, "cy": ttp_cy, "cz_base": z_ttp_ctr - P["ttp_h"]/2,
+        "cx": 0.0, "cy": ttp_cy_global, "cz_base": z_ttp_ctr - P["ttp_h"]/2,
         "w": P["ttp_w"], "h": P["ttp_h"], "t": P["ttp_t"],
-        "face_y_global": ttp_face_y_global,
+        "face_y_global": ey/2,   # bezel inner face (TTP pad faces this direction)
         "color": (0.90, 0.85, 0.10),   # yellow
-        "desc": f"TTP223  {P['ttp_w']}x{P['ttp_h']}x{P['ttp_t']}mm  Z={z_ttp_ctr:.1f}"
+        "desc": (f"TTP223  {P['ttp_w']}x{P['ttp_h']}x{P['ttp_t']}mm  "
+                 f"Z={z_ttp_ctr:.1f}  behind concave button  pocket_d={ttp_pd:.2f}mm")
     }
 
     return positions
@@ -361,7 +394,7 @@ def verify_components(positions, rear_shape, bezel_shape, P, D):
         elif "TTP223" in name and vol_bezel > 0:
             rear_ok   = True
             bezel_ok  = True
-            col_note  = "ACCEPTED (in bezel pocket)"
+            col_note  = "ACCEPTED (in bezel inner-face pocket, behind button)"
         else:
             rear_ok   = (vol_rear  < COLLISION_TOL_DEFAULT)
             bezel_ok  = (vol_bezel < COLLISION_TOL_DEFAULT)
@@ -618,6 +651,10 @@ def main():
     print("Semi-transparent case: RearBody + FrontBezel at 75%.")
     print("Coloured solids: Battery(grey), MCU(green), TP4056(orange),")
     print("                 Screen(blue), TTP223(yellow).")
+    print()
+    print("TTP223 position: inner face of bezel, behind concave button dish.")
+    print("  Pocket depth from inner face =", P["bezel_th"] - P["btn_depth"] - P["btn_wall"], "mm")
+    print("  btn_wall (capacitive coupling wall) =", P["btn_wall"], "mm  (target <= 1.6 mm)")
 
 
 if __name__ == "__main__":
