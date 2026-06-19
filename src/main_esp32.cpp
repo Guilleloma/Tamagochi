@@ -485,6 +485,12 @@ void setup() {
     }
     LOG_INFO("TFT begin OK");
 
+    // Limpiar el GRAM nativo completo (240×320) antes de montar el canvas.
+    // El panel físico tiene 320 líneas de GRAM, pero el canvas solo usa 296 con
+    // row_offset=12 → las filas 0-11 y 308-319 nunca se escriben y muestran
+    // basura aleatoria que asoma por las esquinas redondeadas del cristal.
+    static_cast<Arduino_JD9853*>(tft)->clearNativePanel(0x0000);
+
     // ── Canvas framebuffer en PSRAM ───────────────────────────────────────────
     if (!canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) {
         LOG_ERROR("canvas->begin() fallo — PSRAM no disponible");
