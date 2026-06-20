@@ -43,8 +43,8 @@ import Part
 # 1. PARAMETERS — single source of truth, all values live here
 # ===========================================================================
 P = {
-    # Envelope
-    "ext_x":           40.0,
+    # Envelope  — SET B (44 mm wide, architect approved 2026-06-20)
+    "ext_x":           44.0,   # widened from 40 → interior X now 40 mm
     "ext_y":           40.0,
     "ext_z":           70.0,
     "wall":             2.0,
@@ -102,10 +102,16 @@ P = {
     "mcu_usb_h":         3.6,
     "mcu_usb_protrude":  1.0,
 
-    # Battery (LiPo 503035)
-    "bat_t":             5.0,
-    "bat_w":            30.0,
-    "bat_h":            35.0,
+    # Battery — real LiPo 505070 (50×35×7 mm):  architect SET B / esquema D
+    # Orientation: lying flat against rear wall (−Y), grosor = Y-axis.
+    #   bat_t  = thickness in Y  (7 mm, against −Y wall)
+    #   bat_w  = width    in X  (35 mm, across body)
+    #   bat_h  = height   in Z  (50 mm, along body axis)
+    # bat_z0 = Z of battery bottom edge above cavity floor (derived, keeps battery
+    #          above inferior bosses so bosses stay clear of battery footprint).
+    "bat_t":             7.0,
+    "bat_w":            35.0,
+    "bat_h":            50.0,
     "bat_swell":         0.8,
 
     # Charger TP4056
@@ -121,10 +127,21 @@ P = {
     "ttp_t":             1.6,
     "ttp_standoff":      1.0,
 
-    # Boss / screws
+    # Boss / screws — esquema D (4× M2, 2 inferior + 2 superior, clear of battery Z range)
+    # boss_z_bot  : Z base of inferior boss pair (sits on cavity floor, below battery)
+    # boss_z_top  : Z base of superior boss pair (above battery, top flush with cavity ceiling)
+    # boss_h      : height of each boss cylinder
+    # Geometry (with bat_h=50, cav_z=66, ez-wall=68):
+    #   inf boss: base=2 (wall), top=2+5=7 → bat_z0=8.5 → Z-gap=1.5mm
+    #   sup boss: base=63, top=63+5=68=ez-wall → touching interior ceiling → Z-gap=4.5mm above bat_z_top=58.5
+    # boss_off_x (derived): ext_x/2 − wall − boss_r − clr_fit = 22−2−2.5−0.2 = 17.3 mm
+    # X 2D-overlap with bat_w/2=17.5 exists (0.2mm) but Z ranges never coincide → NO 3D collision.
+    # Superior bosses base at ez−wall−boss_h: boss top touches interior ceiling → fuses cleanly.
     "boss_od":           5.0,
     "boss_id":           1.6,
-    "boss_h":            8.0,
+    "boss_h":            5.0,   # boss height; superior pair top=ez-wall (flush with interior ceiling)
+    "boss_z_bot":        2.0,   # inferior pair base: on cavity floor (Z=wall)
+    "boss_z_top":       63.0,   # superior pair base: top=63+5=68=ez-wall (touching interior ceiling)
     "screw_head_d":      4.0,
     "screw_clear_d":     2.4,
     "n_screws":          4,
@@ -148,9 +165,10 @@ def derive(P):
     d["scr_win_w"]    = P["scr_act_w"] - 2*P["bezel_lip"]
     d["scr_win_h"]    = P["scr_act_h"] - 2*P["bezel_lip"]
 
-    d["bat_pocket_t"] = P["bat_t"] + P["bat_swell"] + P["clr_fit"]
-    d["bat_pocket_w"] = P["bat_w"] + 2*P["clr_fit"]
-    d["bat_pocket_h"] = P["bat_h"] + 2*P["clr_fit"]
+    # Battery pocket — bat_t=Y (thickness against rear wall), bat_w=X, bat_h=Z
+    d["bat_pocket_t"] = P["bat_t"] + P["bat_swell"] + P["clr_fit"]  # pocket depth in Y
+    d["bat_pocket_w"] = P["bat_w"] + 2*P["clr_fit"]                 # pocket width  in X
+    d["bat_pocket_h"] = P["bat_h"] + 2*P["clr_fit"]                 # pocket height in Z
 
     d["mcu_pocket_w"] = P["mcu_w"] + 2*P["clr_fit"]
     d["mcu_pocket_l"] = P["mcu_l"] + 2*P["clr_fit"]
@@ -161,7 +179,29 @@ def derive(P):
     d["ttp_pocket_w"] = P["ttp_w"] + 2*P["clr_fit"]
     d["ttp_pocket_h"] = P["ttp_h"] + 2*P["clr_fit"]
 
-    d["boss_pos"]  = P["ext_x"]/2 - P["wall"] - P["boss_od"]/2 - 1.0
+    # -------------------------------------------------------------------------
+    # Boss positions — esquema D:
+    # boss_off_x: X offset of boss centres from body centreline.
+    #   boss_off_x = ext_x/2 − wall − boss_r − clr_fit
+    #   With ext_x=44: 22 − 2 − 2.5 − 0.2 = 17.3 mm
+    # boss_z_bot / boss_z_top come directly from primary params (tunable).
+    # bat_z0: Z of battery bottom edge, placed so battery clears inferior bosses.
+    #   bat_z0 = boss_z_bot + boss_r + 1.5 mm margin
+    # -------------------------------------------------------------------------
+    boss_r = P["boss_od"] / 2.0
+    # boss_off_x: boss centre position in X so the boss outer face is flush with the
+    # exterior wall (boss right edge = ext_x/2). This guarantees the boss cylinder
+    # overlaps the shell wall material → OCC Boolean fuse produces a single solid.
+    # boss_off_x = ext_x/2 − boss_r = 22 − 2.5 = 19.5 mm
+    d["boss_off_x"]  = P["ext_x"]/2 - boss_r
+    d["boss_z_bot"]  = P["boss_z_bot"]
+    d["boss_z_top"]  = P["boss_z_top"]
+    # bat_z0: battery base sits ABOVE inferior boss top with 1.5mm margin.
+    # bat_z0 = boss_z_bot + boss_h + 1.5 = 2+5+1.5 = 8.5 mm above cavity floor.
+    d["bat_z0"]      = P["boss_z_bot"] + P["boss_h"] + 1.5
+
+    # Legacy alias kept so any existing reference still works
+    d["boss_pos"]    = d["boss_off_x"]
 
     # -------------------------------------------------------------------------
     # Screen window vertical position
@@ -260,11 +300,20 @@ def build_rear_body(P, D):
                     cx=0, cy=0, cz=ez - lip_h)
     shell = shell.cut(ledge_cut)
 
-    # 2.4 Battery pocket (against rear wall, 3-side open for swell)
-    bpw = D["bat_pocket_w"]; bph = D["bat_pocket_h"]; bpt = D["bat_pocket_t"]
-    # Extra +15 in D ensures pocket opens fully toward front (+Y)
-    bat_pocket = box(bpw, bph + 15, bpt + 0.1,
-                     cx=0, cy=(-ey/2 + wall + bph/2), cz=wall)
+    # 2.4 Battery pocket (lying flat against rear wall −Y)
+    # Orientation: bat_t = grosor in Y, bat_w = width in X, bat_h = height in Z.
+    # Pocket: bpw(X) × (bpt_y + extra)(Y) × bph(Z)
+    # bat_z0 = Z bottom edge, placed above inferior bosses (see derive).
+    bpw  = D["bat_pocket_w"]   # X: bat_w + 2*clr_fit = 35.4 mm
+    bph  = D["bat_pocket_h"]   # Z: bat_h + 2*clr_fit = 50.4 mm
+    bpt  = D["bat_pocket_t"]   # Y: bat_t + swell + clr_fit = 8.0 mm
+    bat_z0 = D["bat_z0"]       # Z bottom of pocket above cavity floor
+    # Pocket open toward +Y (front): extra depth ensures full clearance for swell.
+    bat_pocket_depth = bpt + 15  # generous Y-depth, stops at interior (cavity is open)
+    bat_pocket = box(bpw, bat_pocket_depth, bph,
+                     cx=0,
+                     cy=-ey/2 + wall + bat_pocket_depth/2,
+                     cz=wall + bat_z0)
     shell = shell.cut(bat_pocket)
 
     # 2.5 MCU pocket (ESP32-S3 Zero)
@@ -315,12 +364,24 @@ def build_rear_body(P, D):
                   cz=ez - wall - P["scr_pcb_h"] - clip_h)
         shell = shell.fuse(rib)
 
-    # 2.10 Bosses (4× M2 self-tapping)
+    # 2.10 Bosses (4× M2, esquema D) — 2 inferior (below battery) + 2 superior (above battery)
+    # Position in XY-plane: X = ±boss_off_x, boss sits on cavity floor (cz=wall).
+    # Z position: boss_z_bot (inferior pair) and boss_z_top (superior pair).
+    # All 4 bosses land OUTSIDE the battery footprint in Z (bat_z0..bat_z0+bat_h).
     boss_od = P["boss_od"]; boss_id = P["boss_id"]; boss_h = P["boss_h"]
-    bp = D["boss_pos"]
-    for bx, by in [(bp, bp), (-bp, bp), (bp, -bp), (-bp, -bp)]:
-        shell = shell.fuse(cyl(boss_od/2, boss_h, cx=bx, cy=by, cz=wall))
-        shell = shell.cut(cyl(boss_id/2, boss_h, cx=bx, cy=by, cz=wall))
+    bx_off  = D["boss_off_x"]   # ±17.3 mm from centre in X
+    # Interior Y of the body — bosses run from cavity floor up, centred in interior Y
+    # (originally bosses were at ±boss_pos in both X and Y, using body-centre Y= ±bp).
+    # Now they sit at Y=0 (body X-Z plane), protruding from cavity floor.
+    boss_pairs = [
+        (bx_off,  0.0, P["boss_z_bot"]),   # inferior right
+        (-bx_off, 0.0, P["boss_z_bot"]),   # inferior left
+        (bx_off,  0.0, P["boss_z_top"]),   # superior right
+        (-bx_off, 0.0, P["boss_z_top"]),   # superior left
+    ]
+    for bx, by, bz in boss_pairs:
+        shell = shell.fuse(cyl(boss_od/2, boss_h, cx=bx, cy=by, cz=bz))
+        shell = shell.cut(cyl(boss_id/2, boss_h, cx=bx, cy=by, cz=bz))
 
     # 2.11 Cable channel (5×5 mm vertical, one corner)
     chan_sz = 5.0
@@ -467,11 +528,18 @@ def build_front_bezel(P, D):
                          cx=0, cy=ttp_pd / 2, cz=btn_cz - ttp_ph / 2)
         bezel = bezel.cut(ttp_recess)
 
-    # 3.6 Screw through-holes + counterbores
-    bp = D["boss_pos"]
-    sc_cl = P["screw_clear_d"]; sc_hd = P["screw_head_d"]
+    # 3.6 Screw through-holes + counterbores — esquema D positions
+    # boss_off_x = ±bx_off in X; Z = boss_z_bot (inferior) and boss_z_top (superior).
+    bx_off = D["boss_off_x"]
+    sc_cl  = P["screw_clear_d"]; sc_hd = P["screw_head_d"]
     total_y_extent = bth + lip_h + 1.0   # full Y span of bezel+lip
-    for bx, bz in [(bp, bp), (-bp, bp), (bp, -bp), (-bp, -bp)]:
+    bezel_boss_pairs = [
+        (bx_off,  P["boss_z_bot"]),   # inferior right
+        (-bx_off, P["boss_z_bot"]),   # inferior left
+        (bx_off,  P["boss_z_top"]),   # superior right
+        (-bx_off, P["boss_z_top"]),   # superior left
+    ]
+    for bx, bz in bezel_boss_pairs:
         bezel = bezel.cut(cyl(sc_cl/2, total_y_extent, cx=bx, cy=-lip_h, cz=bz))
         bezel = bezel.cut(cyl(sc_hd/2, 2.5, cx=bx, cy=bth - 2.5, cz=bz))
 
@@ -530,10 +598,10 @@ def build_spreadsheet(doc, P, D):
         ("mcu_usb_w",        P["mcu_usb_w"],         "MCU USB-C port width"),
         ("mcu_usb_h",        P["mcu_usb_h"],         "MCU USB-C port height"),
         ("mcu_usb_protrude", P["mcu_usb_protrude"],  "MCU USB protrusion from PCB"),
-        # Battery
-        ("bat_t",            P["bat_t"],             "Battery thickness"),
-        ("bat_w",            P["bat_w"],             "Battery width"),
-        ("bat_h",            P["bat_h"],             "Battery height"),
+        # Battery — real LiPo 50x35x7 mm (tumbada plana, grosor en Y)
+        ("bat_t",            P["bat_t"],             "Battery thickness in Y (against rear wall)"),
+        ("bat_w",            P["bat_w"],             "Battery width in X"),
+        ("bat_h",            P["bat_h"],             "Battery height in Z"),
         ("bat_swell",        P["bat_swell"],         "Battery swell allowance"),
         # TP4056
         ("tp_w",             P["tp_w"],              "TP4056 width"),
@@ -546,10 +614,12 @@ def build_spreadsheet(doc, P, D):
         ("ttp_h",            P["ttp_h"],             "TTP223 height"),
         ("ttp_t",            P["ttp_t"],             "TTP223 thickness"),
         ("ttp_standoff",     P["ttp_standoff"],      "TTP223 standoff pin height"),
-        # Bosses / screws
+        # Bosses / screws — esquema D
         ("boss_od",          P["boss_od"],           "Boss outer diameter"),
         ("boss_id",          P["boss_id"],           "Boss drill diameter (M2)"),
         ("boss_h",           P["boss_h"],            "Boss height"),
+        ("boss_z_bot",       P["boss_z_bot"],        "Z centre of inferior boss pair (below battery)"),
+        ("boss_z_top",       P["boss_z_top"],        "Z base of superior boss pair (top=boss_z_top+boss_h=ez-wall, touching ceiling)"),
         ("screw_head_d",     P["screw_head_d"],      "Screw head counterbore dia"),
         ("screw_clear_d",    P["screw_clear_d"],     "Screw clearance hole dia"),
         ("n_screws",         P["n_screws"],          "Number of fasteners"),
@@ -572,7 +642,9 @@ def build_spreadsheet(doc, P, D):
         ("tp_pocket_l",      D["tp_pocket_l"],       "= tp_l + 2*clr_fit"),
         ("ttp_pocket_w",     D["ttp_pocket_w"],      "= ttp_w + 2*clr_fit"),
         ("ttp_pocket_h",     D["ttp_pocket_h"],      "= ttp_h + 2*clr_fit"),
-        ("boss_pos",         D["boss_pos"],          "= ext_x/2 - wall - boss_od/2 - 1"),
+        ("boss_off_x",       D["boss_off_x"],        "= ext_x/2 - boss_r (boss outer face flush with exterior wall)"),
+        ("bat_z0",           D["bat_z0"],            "= boss_z_bot + boss_r + 1.5 (battery bottom Z above cavity floor)"),
+        ("boss_pos",         D["boss_pos"],          "= boss_off_x (legacy alias)"),
         ("win_z_ctr",        D["win_z_ctr"],         "Screen window Z centre (derived)"),
         ("btn_center_z_drv", D["btn_center_z"],      "Button Z centre (derived)"),
         ("btn_sphere_r",     D["btn_sphere_r"],      "Sphere radius for concave dish"),
@@ -591,10 +663,10 @@ def build_spreadsheet(doc, P, D):
 
 
 # ===========================================================================
-# 5. PARAMETRIC VALIDATION (bat_w 30 → 34, then restore)
+# 5. PARAMETRIC VALIDATION (bat_w 35 → 34, then restore)
 # ===========================================================================
 def validate_parametric(P_orig):
-    print("\n--- Parametric validation: bat_w 30 -> 34 ---")
+    print("\n--- Parametric validation: bat_w 35 -> 34 ---")
     P_mod = dict(P_orig)
     P_mod["bat_w"] = 34.0
     D_mod = derive(P_mod)
@@ -602,7 +674,7 @@ def validate_parametric(P_orig):
         shape = build_rear_body(P_mod, D_mod)
         bb  = shape.BoundBox
         vol = shape.Volume
-        print(f"  bat_pocket_w: {D['bat_pocket_w']:.2f} -> {D_mod['bat_pocket_w']:.2f}")
+        print(f"  bat_pocket_w: {D_mod['bat_pocket_w']:.2f} (was {P_orig['bat_w']+2*P_orig['clr_fit']:.2f})")
         print(f"  BoundBox: {bb.XLength:.2f} x {bb.YLength:.2f} x {bb.ZLength:.2f}")
         print(f"  Valid={shape.isValid()}  Volume={vol:.0f} mm3")
         print("  PASS")
@@ -664,17 +736,21 @@ def _component_positions(P, D):
     wall = P["wall"]
     positions = {}
 
-    # --- BATTERY (LiPo 503035) ---
-    # Against rear wall (-Y), centred in X, base at Z=wall.
-    bat_cx   = 0.0
-    bat_cy   = -ey/2 + wall + P["bat_h"]/2   # -20+2+17.5 = -0.5
-    bat_cz   = wall                            # 2.0
-    bat_shape = _comp_box(P["bat_w"], P["bat_h"], P["bat_t"],
+    # --- BATTERY (LiPo real 50×35×7 mm) ---
+    # Tumbada plana contra pared trasera (−Y).
+    # bat_t = grosor in Y (7 mm), bat_w = width in X (35 mm), bat_h = height in Z (50 mm).
+    # bat_z0 (derived) = Z bottom of battery above cavity floor, clear of inferior bosses.
+    bat_z0  = D["bat_z0"]          # ~9.0 mm
+    bat_cx  = 0.0
+    bat_cy  = -ey/2 + wall + P["bat_t"]/2   # centre Y: against rear wall + half-thickness
+    bat_cz  = wall + bat_z0                  # Z base of battery in global frame
+    bat_shape = _comp_box(P["bat_w"], P["bat_t"], P["bat_h"],
                           cx=bat_cx, cy=bat_cy, cz=bat_cz)
     positions["Comp_Battery"] = {
         "shape": bat_shape,
         "color": (0.55, 0.55, 0.55),
-        "desc":  f"LiPo 503035  {P['bat_w']}x{P['bat_h']}x{P['bat_t']}mm",
+        "desc":  (f"LiPo 505070  {P['bat_w']}x{P['bat_h']}x{P['bat_t']}mm  "
+                  f"bat_z0={bat_z0:.1f}  bat_z_top={bat_cz+P['bat_h']:.1f}"),
     }
 
     # --- MCU (ESP32-S3 Zero) ---
@@ -808,9 +884,10 @@ def _verify_components(positions, rear_shape, bezel_shape, P, D):
 
         # Classify — known-acceptable collisions vs real problems
         if "Battery" in name and vol_rear > 0:
-            # Bosses protrude into battery area by design.
-            rear_ok  = True; bezel_ok = True
-            col_note = "ACCEPTED (boss protrusion — pending packaging decision)"
+            # Esquema D: bosses should NOT overlap battery. Flag as real interference.
+            rear_ok  = (vol_rear < TOL)
+            bezel_ok = True
+            col_note = "OK" if rear_ok else "INTERFERENCIA REAL (bat vs bosses — check esquema D)"
         elif "TTP223" in name and vol_bezel > 0:
             # TTP223 sits inside the bezel inner-face pocket.
             rear_ok  = True; bezel_ok = True
@@ -846,17 +923,34 @@ def _verify_components(positions, rear_shape, bezel_shape, P, D):
             any_real = True
     print()
 
-    # Battery boss clearance note
-    bp    = P["ext_x"]/2 - P["wall"] - P["boss_od"]/2 - 1.0
-    clr_x = bp - P["bat_w"]/2
-    print(f"NOTE — Battery vs bosses: bat_w/2={P['bat_w']/2:.1f}mm  boss_pos={bp:.1f}mm  "
-          f"X-clearance={clr_x:.1f}mm")
-    if clr_x < 0:
-        print(f"  ACTION REQUIRED: battery overlaps boss by {abs(clr_x):.1f}mm.")
-    elif clr_x < 1.0:
-        print(f"  WARNING: tight clearance ({clr_x:.1f}mm).")
+    # Battery vs boss clearance — esquema D (3D check: X AND Z must both overlap)
+    boss_r   = P["boss_od"] / 2.0
+    bx_off   = D["boss_off_x"]
+    bat_z0_v  = D["bat_z0"]
+    bat_z_top_v = bat_z0_v + P["bat_h"]
+
+    x_inner_edge = bx_off - boss_r
+    x_bat_half   = P["bat_w"] / 2.0
+    x_overlap_2d = x_inner_edge < x_bat_half
+
+    inf_z_top  = P["boss_z_bot"] + P["boss_h"]
+    sup_z_bot  = P["boss_z_top"]
+    sup_z_top  = P["boss_z_top"] + P["boss_h"]   # should equal ez-wall (ceiling)
+    z_gap_inf  = bat_z0_v - inf_z_top
+    z_gap_sup  = sup_z_bot - bat_z_top_v
+
+    col_3d_inf = x_overlap_2d and (z_gap_inf <= 0)
+    col_3d_sup = x_overlap_2d and (z_gap_sup <= 0)
+
+    print(f"NOTE — Battery vs bosses (esquema D, 3D check):")
+    print(f"  X inner edge={x_inner_edge:.2f}mm  bat_w/2={x_bat_half:.1f}mm  X-2D-overlap={x_overlap_2d}")
+    print(f"  inf boss Z=[{P['boss_z_bot']:.1f}..{inf_z_top:.1f}]  bat_z0={bat_z0_v:.1f}  Z-gap={z_gap_inf:.2f}mm")
+    print(f"  sup boss Z=[{sup_z_bot:.1f}..{sup_z_top:.1f}]  bat_z_top={bat_z_top_v:.1f}  Z-gap={z_gap_sup:.2f}mm")
+    print(f"  3D collision inf={col_3d_inf}  sup={col_3d_sup}")
+    if col_3d_inf or col_3d_sup:
+        print(f"  ACTION REQUIRED: battery has 3D interference with boss(es).")
     else:
-        print(f"  OK.")
+        print(f"  All boss clearances OK (bosses and battery are in different Z bands).")
     print()
 
     if any_real:
@@ -1090,11 +1184,79 @@ def main():
     print(f"       Bezel volume={bezel_vol:.0f} mm3  solids={bezel_solids}  valid={bezel_valid}")
     print(f"       => {'PASS' if v5_pass else 'FAIL'}")
 
-    print(f"\n  Rear in 40x40x70 envelope : {env_rear}")
-    print(f"  Bezel in 40xNx70 envelope : {env_bezel}")
+    print(f"\n  Rear in 44x40x70 envelope : {env_rear}")
+    print(f"  Bezel in 44xNx70 envelope : {env_bezel}")
     print(f"  header_clr: {P['header_clr']} mm (>= 6 mm: {P['header_clr'] >= 6})")
     print(f"  USB-C cutout on -X face   : YES (TP4056 charge port)")
     print(f"  CHAMFER ELIMINATED        : YES (no chamfer_h/chamfer_ang in build)")
+
+    # -----------------------------------------------------------------------
+    # V6: Battery containment — check margins inside cavity 40(X)×36(Y)×66(Z)
+    # -----------------------------------------------------------------------
+    cav_x  = D["int_x"]           # 40 mm (with ext_x=44)
+    cav_y  = D["int_y"]           # 36 mm
+    cav_z  = D["int_z"]           # 66 mm
+    bat_z0 = D["bat_z0"]          # Z bottom of battery above cavity floor
+    bat_z_top = bat_z0 + P["bat_h"]   # Z top of battery
+
+    margin_x_per_side = (cav_x - P["bat_w"]) / 2.0     # expected ~2.5 mm each side
+    margin_y          = cav_y - (P["bat_t"] + P["bat_swell"])  # available Y clearance
+    margin_z_bot      = bat_z0                            # below battery
+    margin_z_top      = cav_z - bat_z_top                # above battery
+
+    v6_pass = (margin_x_per_side > 0 and margin_y > 0 and
+               margin_z_bot > 0 and margin_z_top > 0 and
+               bat_z_top <= cav_z)
+
+    print(f"\n  [V6] Battery containment in cavity {cav_x:.0f}(X)×{cav_y:.0f}(Y)×{cav_z:.0f}(Z) mm:")
+    print(f"       bat_w={P['bat_w']} bat_t={P['bat_t']}+swell={P['bat_swell']} bat_h={P['bat_h']}")
+    print(f"       X margin per side : {margin_x_per_side:.2f} mm  (expected ~2.5)")
+    print(f"       Y clearance       : {margin_y:.2f} mm  (cav_y - bat_t - swell)")
+    print(f"       Z margin below    : {margin_z_bot:.2f} mm  (bat_z0 above cavity floor)")
+    print(f"       Z margin above    : {margin_z_top:.2f} mm  (above battery top={bat_z_top:.1f})")
+    print(f"       => {'PASS' if v6_pass else 'FAIL'}")
+
+    # V7: Boss vs battery 3D clearance (esquema D)
+    # A collision requires BOTH X and Z ranges to overlap simultaneously.
+    # Bosses are separated from battery in Z (different Z bands) even though
+    # boss_off_x (17.3mm) is slightly inside bat_w/2 (17.5mm) in the X-only projection.
+    boss_r   = P["boss_od"] / 2.0
+    bx_off   = D["boss_off_x"]
+    x_inner_edge = bx_off - boss_r           # 14.8mm — inner edge of boss cylinder
+    x_bat_half   = P["bat_w"] / 2.0          # 17.5mm — battery half-width
+    x_overlap_2d = x_inner_edge < x_bat_half  # True if boss and battery share X column
+
+    inf_z_top = P["boss_z_bot"] + P["boss_h"]
+    sup_z_bot = P["boss_z_top"]
+    sup_z_top = P["boss_z_top"] + P["boss_h"]
+    # Superior boss top is designed to equal ez-wall (touching interior ceiling)
+    ez_minus_wall = P["ext_z"] - P["wall"]
+
+    z_gap_inf    = bat_z0 - inf_z_top        # >0 → battery bottom above inf boss top
+    z_gap_sup    = sup_z_bot - bat_z_top     # >0 → sup boss bottom above battery top
+
+    # 3D collision: X overlap AND Z ranges intersect (gap <= 0)
+    col_3d_inf = x_overlap_2d and (z_gap_inf <= 0)
+    col_3d_sup = x_overlap_2d and (z_gap_sup <= 0)
+
+    v7_pass = (not col_3d_inf) and (not col_3d_sup) and (abs(sup_z_top - ez_minus_wall) < 0.1)
+
+    print(f"\n  [V7] Boss vs battery 3D clearance (esquema D):")
+    print(f"       boss_off_x={bx_off:.2f}  boss_r={boss_r}  bat_w/2={x_bat_half:.1f}")
+    print(f"       X inner edge of boss={x_inner_edge:.2f} — X 2D overlap with battery: {x_overlap_2d}")
+    print(f"       inf boss Z=[{P['boss_z_bot']:.1f}..{inf_z_top:.1f}]  bat_z0={bat_z0:.1f}  Z-gap={z_gap_inf:.2f}mm")
+    print(f"       sup boss Z=[{sup_z_bot:.1f}..{sup_z_top:.1f}]  bat_z_top={bat_z_top:.1f}  Z-gap={z_gap_sup:.2f}mm")
+    print(f"       sup boss top={sup_z_top:.1f} vs ez-wall={ez_minus_wall:.1f}: {'flush (OK)' if abs(sup_z_top-ez_minus_wall)<0.1 else 'MISMATCH'}")
+    print(f"       3D collision inf={col_3d_inf}  sup={col_3d_sup}")
+    print(f"       => {'PASS' if v7_pass else 'FAIL'}")
+
+    # V8: Button and screen centred in X (cx=0 by design, verify win_w fits in new ext_x)
+    win_w = D["scr_win_w"]
+    v8_pass = (win_w <= D["int_x"] - 2.0)  # 2mm clearance to interior wall each side
+    print(f"\n  [V8] Screen window ({win_w:.2f} mm) centred in ext_x={P['ext_x']} mm:")
+    print(f"       int_x={D['int_x']:.1f}  margin per side={(D['int_x']-win_w)/2:.2f} mm")
+    print(f"       Button (dia={P['btn_dia']}) centred cx=0 by design")
+    print(f"       => {'PASS' if v8_pass else 'FAIL — window wider than interior'}")
 
     # Parametric validation
     validate_parametric(P)
