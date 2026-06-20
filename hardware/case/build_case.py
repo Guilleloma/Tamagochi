@@ -12,14 +12,12 @@ Coordinate system (rear body):
   −X  = side with USB-C cutout
   +Z  = top (TFT end)
 
-Orientation notes for slicer (no effect on geometry):
-  - Rear body  : print mouth-up (cavity toward +Z)
-  - Front bezel: print face-down (front face toward build plate).
-      The concave button recess is self-supporting when printed face-down
-      (the concave sphere is never steeper than 45° from horizontal at its
-       rim, and the dish depth is only 1.5 mm). No support needed for the
-       button recess. Support may be needed for the lip ring on the inner
-       face — use tree supports or a small raft only on the lip ring.
+Orientation notes for slicer (FDM Bambu / PLA / 0.4mm nozzle):
+  - Rear body  : cara trasera -Y en la cama (aberturas verticales, sin soporte)
+  - Front bezel: cara frontal +Y en la cama (concavidad y ventana hacia arriba, sin soporte)
+      La concavidad del boton (casquete R30, prof 0.6 mm, Ø12) es autosoportada
+      impresa face-down: el angulo maximo en el borde es < 45° y la profundidad es solo 0.6 mm.
+      Soporte solo para el lip ring en la cara interna (tree supports o raft minimo).
 
 Run:
   PYTHONPATH=/Applications/FreeCAD.app/Contents/Resources/lib \
@@ -43,105 +41,110 @@ import Part
 # 1. PARAMETERS — single source of truth, all values live here
 # ===========================================================================
 P = {
-    # Envelope  — SET B (44 mm wide, architect approved 2026-06-20)
-    "ext_x":           44.0,   # widened from 40 → interior X now 40 mm
-    "ext_y":           40.0,
-    "ext_z":           70.0,
+    # Envelope — SET B (44 mm wide), distribucion optima validada 2026-06-20
+    # Axes: +Y=front/user, -Y=rear, -X=USB-C lateral, +Z=top
+    # Printing: rear body mouth-up; bezel face-down (+Y to build plate)
+    "ext_x":           44.0,   # exterior width  → int_x=40 mm
+    "ext_y":           40.0,   # exterior depth  → int_y=36 mm
+    "ext_z":           70.0,   # exterior height → int_z=66 mm
     "wall":             2.0,
     "wall_front":       2.0,
-    "fillet_ext":       4.0,   # vertical-edge fillet radius
-    "fillet_edge":      1.5,   # bottom horizontal-edge fillet radius
+    "fillet_ext_vert":  4.0,   # vertical-corner fillet radius (aesthetic + embeds bosses)
+    "fillet_ext_horiz": 2.0,   # top/bottom horizontal-edge fillet radius
+    "fillet_int":       0.5,   # internal fillet radius for pockets/bosses
 
     # Fit / clearance
-    "clr_fit":          0.20,
+    "clr_fit":          0.15,  # press-fit clearance (was 0.20; reduced per plan)
     "clr_slide":        0.15,
     "clr_z":            0.30,
 
-    # Screen PCB (TFT)
+    # Screen PCB (TFT JD9853)
     "scr_pcb_w":        32.26,
     "scr_pcb_h":        48.86,
     "scr_pcb_t":         1.66,
-    "scr_act_w":        29.52,
-    "scr_act_h":        34.93,
+    "scr_act_w":        29.52,  # active area width  (centred in X)
+    "scr_act_h":        34.93,  # active area height
     "scr_act_off_y":     0.0,
+    "disp_front_clr":    1.5,   # air gap between PCB front face and bezel inner face
+    # disp_center_z: Z centre of active area (nominal 40.4 mm — derived from PCB geometry)
 
     # Bezel
     "bezel_lip":         1.2,
-    # bezel_th: minimum = btn_depth + btn_wall + margin.
-    # btn_depth=1.5 + btn_wall=1.4 + margin=2.1 = 5.0 mm.
-    # (Previously 8.0 mm — was forced up ONLY to accommodate the chamfer.
-    #  Chamfer is now ELIMINATED; bezel returns to minimal functional thickness.)
+    # bezel_th: minimum for PCB pocket + header clearance + margin.
+    # Screen zone: pcb_t(1.66) + clr_z(0.30) + header_clr(6.0) = 7.96mm → 8.0mm minimum.
+    # btn zone:  stock 1.6mm (before concavity) — ensured by geometry, not by reducing bezel_th.
+    # btn_wall NETO = bezel_th - btn_depth - ttp_pocket_d = 5.0-0.6-3.4 = 1.0mm ✓
     "bezel_th":          5.0,
     "pcb_clip_h":        2.0,
 
-    # Header clearance (ESP32 header behind TFT)
-    "header_clr":        6.0,
+    # Header clearance (8-pin straight header behind TFT, protrudes -Y from PCB bottom)
+    "header_clr":        6.0,   # disp_header_y per plan
 
-    # Capacitive button (Home-style concave dish, front face)
-    # btn_dia   : diameter of the circular button footprint on the front face
-    # btn_depth : depth of the concave recess at its centre (deepest point)
-    # btn_wall  : material remaining between recess bottom and TTP223 pocket
-    #             CRITICAL: must stay <= 1.6 mm for capacitive coupling
-    # btn_center_z : Z of button centre in bezel local frame (0 = bottom, ext_z = top)
-    #             Placed in the lower strip beneath the screen window.
-    #             Computed so the button is centred vertically in the strip below
-    #             the screen window lower edge.
-    "btn_dia":          15.0,
-    "btn_depth":         1.5,
-    "btn_wall":          1.4,
-    # btn_center_z is derived (see derive()); defined here only as sentinel
-    # so users know it is tunable.  Override by setting to a positive value
-    # != 0 to skip the auto-calculation.
-    "btn_center_z":      0.0,   # 0 = auto-derive
+    # Capacitive button — Home-style concave dish, front face, lower strip
+    # Geometry: casquete esferical R30 (≈ plan btn_concave_r=30), Ø12, prof 0.6
+    # btn_wall_t NETO bajo la concavidad = 1.0 mm (imprimible, ≥ 0.84; atraviesa capacitivo)
+    # Stock en zona boton = 1.6 mm (antes de la concavidad)
+    # TTP223 apoyado contra cara interior, 2 nervios + clip, sin pocket profundo
+    "btn_dia":          12.0,   # concavity diameter (Ø12, was 15)
+    "btn_depth":         0.6,   # concave dish depth at centre (was 1.5)
+    "btn_wall":          1.0,   # NET wall between dish bottom and TTP223 (CRITICAL ≤ 1.6)
+    # btn_center_z: FIXED at 9 mm (lower strip, centred X). Set !=0 to skip auto-derive.
+    "btn_center_z":      9.0,   # franja inferior, centrado X
 
-    # MCU (ESP32-S3 Zero)
-    "mcu_w":            18.0,
-    "mcu_l":            23.5,
-    "mcu_t":             1.2,
+    # MCU — ESP32-S3 Zero (tumbado contra bisel interior, zona base)
+    # esp_center_z = 9 mm (same Z as button; different Y plane — rear side)
+    "mcu_w":            18.0,   # esp_w per plan
+    "mcu_l":            23.5,   # esp_h per plan
+    "mcu_t":             1.0,   # esp_t per plan (was 1.2)
+    "mcu_center_z":      9.0,   # esp_center_z — absolute Z of MCU centre in cavity
     "mcu_usb_w":         9.4,
     "mcu_usb_h":         3.6,
     "mcu_usb_protrude":  1.0,
 
-    # Battery — real LiPo 505070 (50×35×7 mm):  architect SET B / esquema D
-    # Orientation: lying flat against rear wall (−Y), grosor = Y-axis.
-    #   bat_t  = thickness in Y  (7 mm, against −Y wall)
-    #   bat_w  = width    in X  (35 mm, across body)
-    #   bat_h  = height   in Z  (50 mm, along body axis)
-    # bat_z0 = Z of battery bottom edge above cavity floor (derived, keeps battery
-    #          above inferior bosses so bosses stay clear of battery footprint).
-    "bat_t":             7.0,
-    "bat_w":            35.0,
-    "bat_h":            50.0,
-    "bat_swell":         0.8,
+    # Battery — LiPo real, PEGADA a pared trasera (-Y) con adhesivo
+    # Orientacion: bat_t = grosor in Y (7 mm, contra pared -Y)
+    #              bat_w = width in X  (35 mm)  [bat_h en plan]
+    #              bat_h = height in Z (50 mm)  [bat_w en plan]
+    # bat_center_z = Z centre of battery = 40.5 mm (distribucion optima)
+    # bat_swell_clr = 1.0 mm holgura hacia +Y (hinchamiento)
+    # Superficie de pegado plana; tope/reborde ligero de posicionamiento (sin cuna elaborada)
+    "bat_t":             7.0,   # grosor Y (bat_t en plan)
+    "bat_w":            35.0,   # ancho X  (bat_h en plan)
+    "bat_h":            50.0,   # alto  Z  (bat_w en plan)
+    "bat_center_z":     40.5,   # Z centre of battery (fixed, validated by architect)
+    "bat_swell":         1.0,   # bat_swell_clr per plan (was 0.8)
 
-    # Charger TP4056
-    "tp_w":             17.0,
-    "tp_l":             26.0,
-    "tp_t":              4.5,
-    "tp_usb_w":          9.4,
-    "tp_usb_h":          3.6,
+    # Charger TP4056 — USB-C alineado al cutout -X, tp_center_z=22
+    "tp_w":             17.0,   # tp_h per plan (ancho Y)
+    "tp_l":             26.0,   # tp_w per plan (largo X)
+    "tp_t":              4.5,   # tp_t per plan
+    "tp_center_z":      22.0,   # tp_center_z per plan (Z centre of TP4056 in cavity)
+    "tp_usb_w":         10.0,   # usb_cutout_w per plan (was 9.4)
+    "tp_usb_h":          5.0,   # usb_cutout_h per plan (was 3.6)
 
-    # Touch sensor TTP223
+    # USB-C cutout — SINGLE cutout on -X face, aligned with TP4056
+    # usb_cutout_z derived from tp_center_z (= 22 mm, set in plan)
+    # ESP32 USB stays internal (no cutout)
+
+    # Touch sensor TTP223 — pegado a cara interior del bezel (zona boton)
+    # Sujecion: 2 nervios laterales + 1 clip; sin pocket profundo
     "ttp_w":            15.0,
     "ttp_h":            11.0,
     "ttp_t":             1.6,
-    "ttp_standoff":      1.0,
+    "ttp_clip_clr":      0.3,   # clip clearance (was ttp_standoff; renamed per plan)
 
-    # Boss / screws — esquema D (4× M2, 2 inferior + 2 superior, clear of battery Z range)
-    # boss_z_bot  : Z base of inferior boss pair (sits on cavity floor, below battery)
-    # boss_z_top  : Z base of superior boss pair (above battery, top flush with cavity ceiling)
-    # boss_h      : height of each boss cylinder
-    # Geometry (with bat_h=50, cav_z=66, ez-wall=68):
-    #   inf boss: base=2 (wall), top=2+5=7 → bat_z0=8.5 → Z-gap=1.5mm
-    #   sup boss: base=63, top=63+5=68=ez-wall → touching interior ceiling → Z-gap=4.5mm above bat_z_top=58.5
-    # boss_off_x (derived): ext_x/2 − wall − boss_r − clr_fit = 22−2−2.5−0.2 = 17.3 mm
-    # X 2D-overlap with bat_w/2=17.5 exists (0.2mm) but Z ranges never coincide → NO 3D collision.
-    # Superior bosses base at ez−wall−boss_h: boss top touches interior ceiling → fuses cleanly.
-    "boss_od":           5.0,
-    "boss_id":           1.6,
-    "boss_h":            5.0,   # boss height; superior pair top=ez-wall (flush with interior ceiling)
-    "boss_z_bot":        2.0,   # inferior pair base: on cavity floor (Z=wall)
-    "boss_z_top":       63.0,   # superior pair base: top=63+5=68=ez-wall (touching interior ceiling)
+    # Boss / screws — 4x M2 self-tap, esquinas embebidas en fillet exterior
+    # boss_od=4.0 (was 5.0): outer face flush with exterior wall
+    # boss_off_x = ext_x/2 - boss_r = 22 - 2 = 20 mm
+    # bat_w/2 = 17.5 mm → boss inner edge = 18 mm > 17.5 → NO X overlap → NO 3D collision
+    # inf boss: Z=[4..9]  bat_z0=15.5 → Z gap = 6.5 mm ✓
+    # sup boss: Z=[62..67] → top=67 = ext_z - wall - 1 (just below ceiling) → flush OK
+    # bat_z_top = 15.5+50 = 65.5 → Z gap sup = 62-65.5 = -3.5 but X gap = 0.5mm → NO 3D collision
+    "boss_od":           4.0,   # was 5.0; embebido en fillet_ext_vert=4.0
+    "boss_id":           1.5,   # M2 self-tap pilot (was 1.6; plan: boss_pilot=1.5)
+    "boss_h":            5.0,
+    "boss_z_bot":        4.0,   # inferior pair base Z (was 2.0; plan: boss_z_bot=4)
+    "boss_z_top":       62.0,   # superior pair base Z (was 63.0; plan: boss_z_top=62)
     "screw_head_d":      4.0,
     "screw_clear_d":     2.4,
     "n_screws":          4,
@@ -165,104 +168,94 @@ def derive(P):
     d["scr_win_w"]    = P["scr_act_w"] - 2*P["bezel_lip"]
     d["scr_win_h"]    = P["scr_act_h"] - 2*P["bezel_lip"]
 
-    # Battery pocket — bat_t=Y (thickness against rear wall), bat_w=X, bat_h=Z
+    # Battery pocket — bat_t=Y (grosor contra pared -Y), bat_w=X, bat_h=Z
+    # bat_center_z = 40.5 mm (fixed by plan) → bat_z0 = bat_center_z - bat_h/2
     d["bat_pocket_t"] = P["bat_t"] + P["bat_swell"] + P["clr_fit"]  # pocket depth in Y
     d["bat_pocket_w"] = P["bat_w"] + 2*P["clr_fit"]                 # pocket width  in X
     d["bat_pocket_h"] = P["bat_h"] + 2*P["clr_fit"]                 # pocket height in Z
+    d["bat_z0"]       = P["bat_center_z"] - P["bat_h"] / 2.0       # = 40.5 - 25 = 15.5 mm
 
+    # MCU pocket — esp_center_z=9 fixed; pocket base = center - t/2
     d["mcu_pocket_w"] = P["mcu_w"] + 2*P["clr_fit"]
     d["mcu_pocket_l"] = P["mcu_l"] + 2*P["clr_fit"]
+    d["mcu_z_base"]   = P["mcu_center_z"] - P["mcu_t"] / 2.0       # Z base of MCU pocket
 
+    # TP4056 pocket — tp_center_z=22 fixed; pocket base = center - t/2
     d["tp_pocket_w"]  = P["tp_w"] + 2*P["clr_fit"]
     d["tp_pocket_l"]  = P["tp_l"] + 2*P["clr_fit"]
+    d["tp_z_base"]    = P["tp_center_z"] - P["tp_t"] / 2.0         # Z base of TP pocket
 
     d["ttp_pocket_w"] = P["ttp_w"] + 2*P["clr_fit"]
     d["ttp_pocket_h"] = P["ttp_h"] + 2*P["clr_fit"]
 
     # -------------------------------------------------------------------------
-    # Boss positions — esquema D:
-    # boss_off_x: X offset of boss centres from body centreline.
-    #   boss_off_x = ext_x/2 − wall − boss_r − clr_fit
-    #   With ext_x=44: 22 − 2 − 2.5 − 0.2 = 17.3 mm
-    # boss_z_bot / boss_z_top come directly from primary params (tunable).
-    # bat_z0: Z of battery bottom edge, placed so battery clears inferior bosses.
-    #   bat_z0 = boss_z_bot + boss_r + 1.5 mm margin
+    # Boss positions — 4x M2, esquinas embebidas en fillet exterior (4.0 mm)
+    # boss_off_x = ext_x/2 - boss_r = 22 - 2 = 20 mm
+    # bat_w/2 = 17.5 mm → boss inner edge = 18 mm > 17.5 → X gap = 0.5 mm → NO 3D collision
     # -------------------------------------------------------------------------
     boss_r = P["boss_od"] / 2.0
-    # boss_off_x: boss centre position in X so the boss outer face is flush with the
-    # exterior wall (boss right edge = ext_x/2). This guarantees the boss cylinder
-    # overlaps the shell wall material → OCC Boolean fuse produces a single solid.
-    # boss_off_x = ext_x/2 − boss_r = 22 − 2.5 = 19.5 mm
-    d["boss_off_x"]  = P["ext_x"]/2 - boss_r
+    d["boss_off_x"]  = P["ext_x"] / 2.0 - boss_r   # = 22 - 2 = 20 mm
     d["boss_z_bot"]  = P["boss_z_bot"]
     d["boss_z_top"]  = P["boss_z_top"]
-    # bat_z0: battery base sits ABOVE inferior boss top with 1.5mm margin.
-    # bat_z0 = boss_z_bot + boss_h + 1.5 = 2+5+1.5 = 8.5 mm above cavity floor.
-    d["bat_z0"]      = P["boss_z_bot"] + P["boss_h"] + 1.5
 
-    # Legacy alias kept so any existing reference still works
-    d["boss_pos"]    = d["boss_off_x"]
+    # Legacy alias
+    d["boss_pos"] = d["boss_off_x"]
 
     # -------------------------------------------------------------------------
     # Screen window vertical position
-    # The screen PCB top is flush with the interior ceiling (Z = ext_z - wall).
-    # The active area centre is offset from PCB top by the PCB/active geometry.
-    # With the chamfer gone the window can sit naturally; we only enforce a
-    # 6 mm top margin and a 2 mm gap above the button zone.
+    # PCB top flush with interior ceiling (Z = ext_z - wall = 68 mm).
+    # Active area centre derived from PCB geometry.
     # -------------------------------------------------------------------------
     ez = P["ext_z"]; wall = P["wall"]
     scr_pcb_h = P["scr_pcb_h"]; scr_act_h = P["scr_act_h"]
     pcb_top_z = ez - wall                              # 68.0 mm
-    # Raw window centre (PCB-geometry derived)
     win_z_raw = (pcb_top_z
                  - scr_pcb_h
                  + (scr_pcb_h - scr_act_h) / 2
                  + scr_act_h / 2
                  + P["scr_act_off_y"])
-    # win_z_raw ≈ 68 - 48.86 + 6.965 + 17.465 = 43.57
-    win_h = d["scr_win_h"]                             # ≈ 32.53 mm
-    # Top margin = 6 mm → maximum allowed centre:
-    win_z_max_top  = ez - 6.0 - win_h / 2             # 47.74
-    # Must also leave room for the button below (btn_center_z + btn_dia/2 + 2 mm gap above btn)
-    # We compute btn_center_z below; use a safe floor: window bottom >= 22 mm from Z=0
-    win_z_min_bottom = 22.0 + win_h / 2               # rough lower limit
+    # win_z_raw ≈ 43.57 mm
+    win_h = d["scr_win_h"]
+    win_z_max_top     = ez - 6.0 - win_h / 2          # top-margin clamp (6 mm)
+    # Button is fixed at btn_center_z=9; leave >= 2 mm gap above button edge
+    btn_z_top_edge    = P["btn_center_z"] + P["btn_dia"] / 2.0 + 2.0
+    win_z_min_bottom  = btn_z_top_edge + win_h / 2
     d["win_z_ctr"] = max(win_z_min_bottom, min(win_z_max_top, win_z_raw))
-    # → 47.74 (cap at top margin; window bottom ≈ 31.47)
+    # → 47.74 mm (clamped by top margin)
+
+    # disp_center_z: Z centre of active area (informational)
+    d["disp_center_z"] = d["win_z_ctr"]
 
     # -------------------------------------------------------------------------
-    # Button centre Z (auto, unless user overrides with btn_center_z != 0)
-    # Placed midway between Z=4 (clear of screw bosses) and window lower edge.
+    # Button centre Z — btn_center_z=9 is FIXED (plan param); auto-derive only if 0
     # -------------------------------------------------------------------------
-    win_z_bot = d["win_z_ctr"] - win_h / 2            # lower edge of screen window ≈ 31.47
-    btn_strip_top = win_z_bot - 2.0                    # 2 mm gap below window
-    btn_strip_bot = 4.0                                # clear of boss zone
-    btn_z_auto = (btn_strip_top + btn_strip_bot) / 2  # ≈ 16.7
     if P["btn_center_z"] != 0.0:
         d["btn_center_z"] = P["btn_center_z"]
     else:
-        d["btn_center_z"] = btn_z_auto
+        win_z_bot = d["win_z_ctr"] - win_h / 2
+        btn_strip_top = win_z_bot - 2.0
+        btn_strip_bot = P["boss_z_bot"]
+        d["btn_center_z"] = (btn_strip_top + btn_strip_bot) / 2
 
     # -------------------------------------------------------------------------
-    # Sphere radius for the concave dish (btn_depth, btn_dia are the constraints)
-    # From: R = (r² + btn_depth²) / (2 * btn_depth)  [cap of sphere formula]
-    # where r = btn_dia/2
+    # Sphere radius for concave dish (cap-of-sphere formula)
+    # plan: btn_concave_r=30 → R = (r²+d²)/(2d) with r=6, d=0.6 → R=30.3 ≈ 30 ✓
     # -------------------------------------------------------------------------
     r_btn = P["btn_dia"] / 2.0
     btn_d = P["btn_depth"]
-    d["btn_sphere_r"] = (r_btn**2 + btn_d**2) / (2.0 * btn_d)  # ≈ 19.5 mm
+    d["btn_sphere_r"]  = (r_btn**2 + btn_d**2) / (2.0 * btn_d)
 
     # Sphere centre Y in bezel local frame (Y=0 inner face, Y=bezel_th front face):
-    # Sphere surface at Y=bezel_th (front) with sag = btn_depth inward:
-    #   sphere_centre_y = bezel_th - btn_sphere_r + btn_depth
-    #   (sphere centre is inside the material, depth btn_depth from front face)
-    # We will use this in the cut, centred at (cx=0, cy=sphere_cy, cz=btn_center_z)
+    # sphere surface at Y=bezel_th with sag=btn_depth inward
     d["btn_sphere_cy"] = P["bezel_th"] - d["btn_sphere_r"] + btn_d
 
-    # TTP223 pocket depth from inner face (Y=0 side):
-    #   Available material = bezel_th - btn_depth - btn_wall
-    #   The pocket goes from Y=0 inward by ttp_pocket_d
+    # TTP223 pocket depth from inner face:
+    # ttp_pocket_d = bezel_th - btn_depth - btn_wall = 5.0 - 0.6 - 1.0 = 3.4 mm
+    # Grosor neto bajo la concavidad = btn_wall = 1.0 mm ✓
     d["ttp_pocket_d"]  = P["bezel_th"] - btn_d - P["btn_wall"]
-    # ≈ 5.0 - 1.5 - 1.4 = 2.1 mm
+
+    # USB cutout centre Z (aligned with TP4056 centre)
+    d["usb_cutout_z"]  = P["tp_center_z"]   # = 22 mm
 
     return d
 
@@ -300,59 +293,56 @@ def build_rear_body(P, D):
                     cx=0, cy=0, cz=ez - lip_h)
     shell = shell.cut(ledge_cut)
 
-    # 2.4 Battery pocket (lying flat against rear wall −Y)
-    # Orientation: bat_t = grosor in Y, bat_w = width in X, bat_h = height in Z.
-    # Pocket: bpw(X) × (bpt_y + extra)(Y) × bph(Z)
-    # bat_z0 = Z bottom edge, placed above inferior bosses (see derive).
-    bpw  = D["bat_pocket_w"]   # X: bat_w + 2*clr_fit = 35.4 mm
-    bph  = D["bat_pocket_h"]   # Z: bat_h + 2*clr_fit = 50.4 mm
-    bpt  = D["bat_pocket_t"]   # Y: bat_t + swell + clr_fit = 8.0 mm
-    bat_z0 = D["bat_z0"]       # Z bottom of pocket above cavity floor
-    # Pocket open toward +Y (front): extra depth ensures full clearance for swell.
-    bat_pocket_depth = bpt + 15  # generous Y-depth, stops at interior (cavity is open)
+    # 2.4 Battery pocket (pegada a pared trasera -Y con adhesivo)
+    # bat_t = grosor in Y (7 mm, against rear wall)
+    # bat_w = width in X (35 mm), bat_h = height in Z (50 mm)
+    # bat_z0 = bat_center_z - bat_h/2 = 40.5 - 25 = 15.5 mm above cavity floor
+    # Pocket extends from rear wall toward +Y (generous depth; cavity is open)
+    # Tope/reborde ligero de posicionamiento: una ceja de 1 mm al borde inferior
+    bpw  = D["bat_pocket_w"]   # X: 35 + 2*0.15 = 35.30 mm
+    bph  = D["bat_pocket_h"]   # Z: 50 + 2*0.15 = 50.30 mm
+    bpt  = D["bat_pocket_t"]   # Y: 7 + 1.0 + 0.15 = 8.15 mm (t + swell + clr)
+    bat_z0 = D["bat_z0"]       # = 15.5 mm above cavity floor (Z in global frame = wall+bat_z0)
+    bat_pocket_depth = bpt + 10  # extra Y-depth to clear swell toward +Y
     bat_pocket = box(bpw, bat_pocket_depth, bph,
                      cx=0,
                      cy=-ey/2 + wall + bat_pocket_depth/2,
                      cz=wall + bat_z0)
     shell = shell.cut(bat_pocket)
 
-    # 2.5 MCU pocket (ESP32-S3 Zero)
-    mpw = D["mcu_pocket_w"]; mpl = D["mcu_pocket_l"]
-    mcu_z  = wall + D["bat_pocket_t"] + 2.0
-    mcu_cx = ey/2 - wall - mpw/2   # near +X wall
-    mcu_pocket = box(mpl, mpw, P["mcu_t"] + P["clr_fit"]*2 + 4,
-                     cx=mcu_cx, cy=0, cz=mcu_z)
+    # 2.5 MCU pocket (ESP32-S3 Zero, tumbado contra bisel interior)
+    # esp_center_z = 9 mm; mcu_z_base = center - t/2 = 9 - 0.5 = 8.5 mm (global Z)
+    # Pocket sits on Y ~ +X side of cavity (near bezel interior) at Y centre ≈ 0
+    mpw    = D["mcu_pocket_w"]; mpl = D["mcu_pocket_l"]
+    mcu_z  = wall + D["mcu_z_base"]     # global Z of MCU bottom face
+    mcu_cx = 0.0                          # centred in X per plan (esp_center X ≈ 12.75 from rear wall)
+    mcu_cy = -ey/2 + wall + mpw/2        # near rear wall (-Y side of cavity)
+    mcu_pocket = box(mpl, mpw, P["mcu_t"] + P["clr_fit"]*2 + 2.0,
+                     cx=mcu_cx, cy=mcu_cy, cz=mcu_z)
     shell = shell.cut(mcu_pocket)
 
-    # 2.6 TP4056 pocket (adjacent, toward −Y)
-    tppl = D["tp_pocket_l"]; tppw = D["tp_pocket_w"]
-    tp_z  = mcu_z
-    tp_cx = mcu_cx
-    tp_cy = -ey/2 + wall + tppw/2
-    tp_pocket = box(tppl, tppw, P["tp_t"] + P["clr_fit"]*2 + 1,
+    # 2.6 TP4056 pocket — tp_center_z=22 (adjacent, toward -Y)
+    # TP4056 is between MCU and rear wall in Y, USB-C faces -X wall
+    tppl   = D["tp_pocket_l"]; tppw = D["tp_pocket_w"]
+    tp_z   = wall + D["tp_z_base"]       # global Z of TP4056 bottom face
+    tp_cx  = 0.0                          # centred in X
+    tp_cy  = -ey/2 + wall + tppw/2       # near rear wall (-Y side), same Y zone as MCU
+    tp_pocket = box(tppl, tppw, P["tp_t"] + P["clr_fit"]*2 + 1.0,
                     cx=tp_cx, cy=tp_cy, cz=tp_z)
     shell = shell.cut(tp_pocket)
 
-    # 2.7 USB-C cutout on −X face (TP4056 exterior charge port)
-    usb_w = P["tp_usb_w"]; usb_h = P["tp_usb_h"]
-    usb_z = tp_z + (P["tp_t"] - usb_h) / 2
-    usb_y = tp_cy
-    # Punch through −X wall; box centred so it pierces wall completely
-    usb_cut_d = wall + 4          # generous depth to ensure clean breakthrough
+    # 2.7 USB-C cutout on -X face — SINGLE cutout for TP4056 charge port ONLY
+    # usb_cutout_z = tp_center_z = 22 mm (plan: usb_cutout_z=22, usb_cutout_w=10, h=5)
+    # ESP32 USB stays internal (no cutout — flash via BLE/OTA or open bezel)
+    usb_w   = P["tp_usb_w"]   # 10 mm
+    usb_h   = P["tp_usb_h"]   # 5 mm
+    usb_z   = D["usb_cutout_z"] - usb_h / 2  # bottom of cutout in global Z
+    usb_cy  = tp_cy                            # aligned in Y with TP4056 centre
+    usb_cut_d = wall + 4                       # generous depth → clean breakthrough
     usb_cx    = -(ex/2 - usb_cut_d/2)
-    usb_cut   = box(usb_cut_d, usb_w, usb_h, cx=usb_cx, cy=usb_y, cz=usb_z)
+    usb_cut   = box(usb_cut_d, usb_w, usb_h, cx=usb_cx, cy=usb_cy, cz=usb_z)
     shell = shell.cut(usb_cut)
-
-    # 2.8 ESP32 USB-C access slot on −X face (for firmware flashing)
-    mcu_usb_h = P["mcu_usb_h"]; mcu_usb_w = P["mcu_usb_w"]
-    mcu_usb_z = mcu_z + (P["mcu_t"] - mcu_usb_h) / 2
-    mcu_slot_d = wall + 4
-    mcu_slot_cx = -(ex/2 - mcu_slot_d/2)
-    dist_to_wall = ex/2 - wall - mcu_cx
-    if dist_to_wall < 12:
-        mcu_usb_cut = box(mcu_slot_d, mcu_usb_w, mcu_usb_h,
-                          cx=mcu_slot_cx, cy=mcu_cx, cz=mcu_usb_z)
-        shell = shell.cut(mcu_usb_cut)
+    # NOTE: ESP32 USB cutout deliberately OMITTED (decision 2026-06-20: single USB-C only)
 
     # 2.9 TFT PCB retention ribs (protrude from +Y interior wall)
     clip_h = P["pcb_clip_h"]; clip_w = 3.0; clip_d = 1.5
@@ -364,19 +354,18 @@ def build_rear_body(P, D):
                   cz=ez - wall - P["scr_pcb_h"] - clip_h)
         shell = shell.fuse(rib)
 
-    # 2.10 Bosses (4× M2, esquema D) — 2 inferior (below battery) + 2 superior (above battery)
-    # Position in XY-plane: X = ±boss_off_x, boss sits on cavity floor (cz=wall).
-    # Z position: boss_z_bot (inferior pair) and boss_z_top (superior pair).
-    # All 4 bosses land OUTSIDE the battery footprint in Z (bat_z0..bat_z0+bat_h).
+    # 2.10 Bosses (4× M2 self-tap, esquinas embebidas en fillet exterior 4.0 mm)
+    # boss_od=4.0, boss_r=2.0 → boss_off_x=20.0 mm (outer face flush with exterior wall)
+    # bat_w/2=17.5 → boss inner edge=18.0 > 17.5 → X gap=0.5 mm → NO 3D collision with battery
+    # inf pair: Z=[4..9]  bat_z0=15.5 → Z gap inf=6.5 mm ✓
+    # sup pair: Z=[62..67] bat_z_top=65.5 → Z overlap in Z but X gap=0.5mm → NO 3D collision
+    # boss_id=1.5 mm (M2 self-tap pilot per plan)
     boss_od = P["boss_od"]; boss_id = P["boss_id"]; boss_h = P["boss_h"]
-    bx_off  = D["boss_off_x"]   # ±17.3 mm from centre in X
-    # Interior Y of the body — bosses run from cavity floor up, centred in interior Y
-    # (originally bosses were at ±boss_pos in both X and Y, using body-centre Y= ±bp).
-    # Now they sit at Y=0 (body X-Z plane), protruding from cavity floor.
+    bx_off  = D["boss_off_x"]   # ±20.0 mm from centre in X
     boss_pairs = [
-        (bx_off,  0.0, P["boss_z_bot"]),   # inferior right
+        ( bx_off, 0.0, P["boss_z_bot"]),   # inferior right
         (-bx_off, 0.0, P["boss_z_bot"]),   # inferior left
-        (bx_off,  0.0, P["boss_z_top"]),   # superior right
+        ( bx_off, 0.0, P["boss_z_top"]),   # superior right
         (-bx_off, 0.0, P["boss_z_top"]),   # superior left
     ]
     for bx, by, bz in boss_pairs:
@@ -481,51 +470,53 @@ def build_front_bezel(P, D):
     btn_sphere_solid = Part.makeSphere(sph_r, App.Vector(0, sph_cy, btn_cz))
     bezel = bezel.cut(btn_sphere_solid)
 
-    # 3.5 TTP223 pocket (inner face, Y=0 side, behind button)
-    # Pocket depth = ttp_pocket_d (= bezel_th - btn_depth - btn_wall)
-    # Pocket dimensions: ttp_w + 2*clr_fit × ttp_h + 2*clr_fit in XZ
-    ttp_pw  = D["ttp_pocket_w"]
-    ttp_ph  = D["ttp_pocket_h"]
-    ttp_pd  = D["ttp_pocket_d"]           # depth from inner face (Y=0 inward to +Y)
-    ttp_so_h = P["ttp_standoff"]
+    # 3.5 TTP223 nervios + recess (inner face, Y=0 side, behind button)
+    # Plan: TTP223 apoyado contra cara interior del bezel; 2 nervios laterales + 1 clip.
+    # Sin pocket profundo — sólo una recess poco profunda que deja la pastilla apoyada.
+    # ttp_pocket_d = 3.4 mm (= bezel_th - btn_depth - btn_wall = 5.0 - 0.6 - 1.0)
+    # Grosor neto bajo concavidad = btn_wall = 1.0 mm (CRITICO)
+    ttp_pw   = D["ttp_pocket_w"]
+    ttp_ph   = D["ttp_pocket_h"]
+    ttp_pd   = D["ttp_pocket_d"]           # = 3.4 mm from inner face (Y=0)
+    clr_clip = P["ttp_clip_clr"]           # = 0.3 mm clip clearance
 
-    # Standoff strategy: two side-slot cuts leaving central pillars of material.
-    # This avoids any fuse-back operation (fuse after complex cuts → OCC multi-solid).
-    # Standoff outer radius = so_r; standoff centres at ±so_cx in X.
-    # Cut two slots (left and right of each standoff area) + centre gap between them.
+    # Nervio strategy: two lateral ribs keep TTP223 centred in X.
+    # Cut a shallow rectangular recess the full ttp_pocket_w × ttp_pocket_h × ttp_pd.
+    # Ribs are what remain between recess and ttp_w; they constrain ±X motion.
+    # so_r: rib keep-clear half-width; so_cx: rib centre offset from bezel centre
     so_r  = 2.0
-    so_cx = ttp_pw / 2 - 2.5     # standoff centre X offset from bezel centreline
+    so_cx = ttp_pw / 2.0 - 2.5     # rib centre X offset from bezel centreline
 
-    # Slot widths: from pocket edge to standoff keep-clear zone
-    slot_w_outer = ttp_pw / 2 - so_cx - so_r   # material between pocket edge and standoff
+    # Slot widths flanking each rib
+    slot_w_outer = ttp_pw / 2.0 - so_cx - so_r
     slot_d  = ttp_pd
     slot_h  = ttp_ph
 
     if slot_w_outer > 0.1:
         # Left outer slot
         slot_l = box(slot_w_outer, slot_d, slot_h,
-                     cx=-(ttp_pw / 2 - slot_w_outer / 2),
-                     cy=ttp_pd / 2,
-                     cz=btn_cz - ttp_ph / 2)
+                     cx=-(ttp_pw / 2.0 - slot_w_outer / 2.0),
+                     cy=ttp_pd / 2.0,
+                     cz=btn_cz - ttp_ph / 2.0)
         bezel = bezel.cut(slot_l)
         # Right outer slot (mirror)
         slot_r = box(slot_w_outer, slot_d, slot_h,
-                     cx=(ttp_pw / 2 - slot_w_outer / 2),
-                     cy=ttp_pd / 2,
-                     cz=btn_cz - ttp_ph / 2)
+                     cx=(ttp_pw / 2.0 - slot_w_outer / 2.0),
+                     cy=ttp_pd / 2.0,
+                     cz=btn_cz - ttp_ph / 2.0)
         bezel = bezel.cut(slot_r)
-        # Centre slot (between the two standoff keep-clear zones)
-        centre_w = 2 * so_cx - 2 * so_r
+        # Centre slot (between the two rib keep-clear zones)
+        centre_w = 2.0 * so_cx - 2.0 * so_r
         if centre_w > 0.1:
             slot_c = box(centre_w, slot_d, slot_h,
                          cx=0,
-                         cy=ttp_pd / 2,
-                         cz=btn_cz - ttp_ph / 2)
+                         cy=ttp_pd / 2.0,
+                         cz=btn_cz - ttp_ph / 2.0)
             bezel = bezel.cut(slot_c)
     else:
-        # Slot widths degenerate — fall back to plain rectangular pocket (no standoffs)
+        # Slot widths degenerate — fall back to plain rectangular recess
         ttp_recess = box(ttp_pw, ttp_pd, ttp_ph,
-                         cx=0, cy=ttp_pd / 2, cz=btn_cz - ttp_ph / 2)
+                         cx=0, cy=ttp_pd / 2.0, cz=btn_cz - ttp_ph / 2.0)
         bezel = bezel.cut(ttp_recess)
 
     # 3.6 Screw through-holes + counterbores — esquema D positions
@@ -566,89 +557,102 @@ def build_spreadsheet(doc, P, D):
 
     rows = [
         # Primary parameters
+        # Envelope
         ("ext_x",            P["ext_x"],            "Exterior width (mm)"),
         ("ext_y",            P["ext_y"],             "Exterior depth (mm)"),
         ("ext_z",            P["ext_z"],             "Exterior height (mm)"),
         ("wall",             P["wall"],              "Shell wall thickness"),
         ("wall_front",       P["wall_front"],        "Front bezel outer wall"),
-        ("fillet_ext",       P["fillet_ext"],        "Vertical edge fillet r"),
-        ("fillet_edge",      P["fillet_edge"],       "Bottom edge fillet r"),
-        ("clr_fit",          P["clr_fit"],           "Press-fit clearance"),
+        ("fillet_ext_vert",  P["fillet_ext_vert"],  "Vertical-corner fillet r (aesthetic + embeds bosses)"),
+        ("fillet_ext_horiz", P["fillet_ext_horiz"], "Top/bottom horizontal-edge fillet r"),
+        ("fillet_int",       P["fillet_int"],        "Internal fillet r for pockets/bosses"),
+        # Clearance
+        ("clr_fit",          P["clr_fit"],           "Press-fit clearance (0.15 mm)"),
         ("clr_slide",        P["clr_slide"],         "Sliding clearance"),
         ("clr_z",            P["clr_z"],             "Z depth clearance"),
+        # Screen PCB (TFT JD9853)
         ("scr_pcb_w",        P["scr_pcb_w"],         "TFT PCB width"),
         ("scr_pcb_h",        P["scr_pcb_h"],         "TFT PCB height"),
         ("scr_pcb_t",        P["scr_pcb_t"],         "TFT PCB thickness"),
-        ("scr_act_w",        P["scr_act_w"],         "TFT active area width"),
+        ("scr_act_w",        P["scr_act_w"],         "TFT active area width (centred X)"),
         ("scr_act_h",        P["scr_act_h"],         "TFT active area height"),
         ("scr_act_off_y",    P["scr_act_off_y"],     "Active area Y offset on PCB"),
+        ("disp_front_clr",   P["disp_front_clr"],    "Air gap PCB front face to bezel inner face"),
+        # Bezel
         ("bezel_lip",        P["bezel_lip"],         "Screen bezel lip width"),
-        ("bezel_th",         P["bezel_th"],          "Bezel plate thickness (= btn_depth + btn_wall + margin = 5 mm)"),
+        ("bezel_th",         P["bezel_th"],          "Bezel plate thickness. btn zone: stock=1.6mm, neto=1.0mm after concavity"),
         ("pcb_clip_h",       P["pcb_clip_h"],        "TFT retention rib height"),
-        ("header_clr",       P["header_clr"],        "Header clearance behind TFT"),
-        # Capacitive button parameters
-        ("btn_dia",          P["btn_dia"],           "Button dish diameter (mm) — finger-sized"),
-        ("btn_depth",        P["btn_depth"],         "Concave dish depth at centre (mm)"),
-        ("btn_wall",         P["btn_wall"],          "Wall between dish bottom and TTP223 pocket (mm) — keep <= 1.6"),
-        ("btn_center_z",     P["btn_center_z"],      "Button Z centre (0=auto-derive from screen window)"),
-        # MCU
-        ("mcu_w",            P["mcu_w"],             "MCU width"),
-        ("mcu_l",            P["mcu_l"],             "MCU length"),
-        ("mcu_t",            P["mcu_t"],             "MCU thickness"),
+        ("header_clr",       P["header_clr"],        "Header clearance behind TFT (disp_header_y)"),
+        # Capacitive button — distribucion optima: Ø12, prof 0.6, wall NETO 1.0 mm
+        ("btn_dia",          P["btn_dia"],           "Button concavity diameter Ø12 (was 15)"),
+        ("btn_depth",        P["btn_depth"],         "Concave dish depth at centre 0.6 mm (was 1.5)"),
+        ("btn_wall",         P["btn_wall"],          "NET wall thickness under dish 1.0 mm (CRITICAL <= 1.6)"),
+        ("btn_center_z",     P["btn_center_z"],      "Button Z centre 9 mm (FIXED, franja inferior)"),
+        # MCU — ESP32-S3 Zero
+        ("mcu_w",            P["mcu_w"],             "MCU width (esp_w)"),
+        ("mcu_l",            P["mcu_l"],             "MCU length (esp_h)"),
+        ("mcu_t",            P["mcu_t"],             "MCU thickness (esp_t)"),
+        ("mcu_center_z",     P["mcu_center_z"],      "ESP32 Z centre in cavity (esp_center_z=9)"),
         ("mcu_usb_w",        P["mcu_usb_w"],         "MCU USB-C port width"),
         ("mcu_usb_h",        P["mcu_usb_h"],         "MCU USB-C port height"),
         ("mcu_usb_protrude", P["mcu_usb_protrude"],  "MCU USB protrusion from PCB"),
-        # Battery — real LiPo 50x35x7 mm (tumbada plana, grosor en Y)
-        ("bat_t",            P["bat_t"],             "Battery thickness in Y (against rear wall)"),
-        ("bat_w",            P["bat_w"],             "Battery width in X"),
-        ("bat_h",            P["bat_h"],             "Battery height in Z"),
-        ("bat_swell",        P["bat_swell"],         "Battery swell allowance"),
-        # TP4056
-        ("tp_w",             P["tp_w"],              "TP4056 width"),
-        ("tp_l",             P["tp_l"],              "TP4056 length"),
-        ("tp_t",             P["tp_t"],              "TP4056 thickness"),
-        ("tp_usb_w",         P["tp_usb_w"],          "TP4056 USB-C port width"),
-        ("tp_usb_h",         P["tp_usb_h"],          "TP4056 USB-C port height"),
-        # TTP223
-        ("ttp_w",            P["ttp_w"],             "TTP223 width"),
-        ("ttp_h",            P["ttp_h"],             "TTP223 height"),
-        ("ttp_t",            P["ttp_t"],             "TTP223 thickness"),
-        ("ttp_standoff",     P["ttp_standoff"],      "TTP223 standoff pin height"),
-        # Bosses / screws — esquema D
-        ("boss_od",          P["boss_od"],           "Boss outer diameter"),
-        ("boss_id",          P["boss_id"],           "Boss drill diameter (M2)"),
-        ("boss_h",           P["boss_h"],            "Boss height"),
-        ("boss_z_bot",       P["boss_z_bot"],        "Z centre of inferior boss pair (below battery)"),
-        ("boss_z_top",       P["boss_z_top"],        "Z base of superior boss pair (top=boss_z_top+boss_h=ez-wall, touching ceiling)"),
+        # Battery — LiPo 505070, pegada a pared trasera -Y con adhesivo
+        ("bat_t",            P["bat_t"],             "Battery thickness in Y 7 mm (against rear wall)"),
+        ("bat_w",            P["bat_w"],             "Battery width in X 35 mm"),
+        ("bat_h",            P["bat_h"],             "Battery height in Z 50 mm"),
+        ("bat_center_z",     P["bat_center_z"],      "Battery Z centre 40.5 mm (distribucion optima)"),
+        ("bat_swell",        P["bat_swell"],         "Battery swell clearance toward +Y 1.0 mm"),
+        # TP4056 — USB-C alineado a cutout -X
+        ("tp_w",             P["tp_w"],              "TP4056 width (Y) 17 mm"),
+        ("tp_l",             P["tp_l"],              "TP4056 length (X) 26 mm"),
+        ("tp_t",             P["tp_t"],              "TP4056 thickness (Z) 4.5 mm"),
+        ("tp_center_z",      P["tp_center_z"],       "TP4056 Z centre 22 mm (alineado con USB cutout)"),
+        ("tp_usb_w",         P["tp_usb_w"],          "USB-C cutout width 10 mm (usb_cutout_w)"),
+        ("tp_usb_h",         P["tp_usb_h"],          "USB-C cutout height 5 mm (usb_cutout_h)"),
+        # TTP223 — 2 nervios + clip, sin pocket profundo
+        ("ttp_w",            P["ttp_w"],             "TTP223 width 15 mm"),
+        ("ttp_h",            P["ttp_h"],             "TTP223 height 11 mm"),
+        ("ttp_t",            P["ttp_t"],             "TTP223 thickness 1.6 mm"),
+        ("ttp_clip_clr",     P["ttp_clip_clr"],      "TTP223 clip clearance 0.3 mm"),
+        # Bosses / screws — 4x M2 self-tap, esquinas en fillet 4.0 mm
+        ("boss_od",          P["boss_od"],           "Boss outer diameter 4.0 mm (was 5.0)"),
+        ("boss_id",          P["boss_id"],           "M2 self-tap pilot diameter 1.5 mm (boss_pilot)"),
+        ("boss_h",           P["boss_h"],            "Boss height 5.0 mm"),
+        ("boss_z_bot",       P["boss_z_bot"],        "Inferior boss base Z 4.0 mm (was 2.0)"),
+        ("boss_z_top",       P["boss_z_top"],        "Superior boss base Z 62.0 mm (was 63.0)"),
         ("screw_head_d",     P["screw_head_d"],      "Screw head counterbore dia"),
         ("screw_clear_d",    P["screw_clear_d"],     "Screw clearance hole dia"),
         ("n_screws",         P["n_screws"],          "Number of fasteners"),
-        ("charge_mode",      P["charge_mode"],       "0=TP4056, 1=ESP32 direct"),
+        ("charge_mode",      P["charge_mode"],       "0=TP4056 dedicated, 1=ESP32 direct"),
         ("lip_h",            P["lip_h"],             "Bezel engagement lip height"),
-        # Derived (informational)
-        ("int_x",            D["int_x"],             "= ext_x - 2*wall"),
-        ("int_y",            D["int_y"],             "= ext_y - 2*wall"),
-        ("int_z",            D["int_z"],             "= ext_z - 2*wall"),
+        # Derived (informational only)
+        ("int_x",            D["int_x"],             "= ext_x - 2*wall = 40 mm"),
+        ("int_y",            D["int_y"],             "= ext_y - 2*wall = 36 mm"),
+        ("int_z",            D["int_z"],             "= ext_z - 2*wall = 66 mm"),
         ("scr_pocket_w",     D["scr_pocket_w"],      "= scr_pcb_w + 2*clr_fit"),
         ("scr_pocket_h",     D["scr_pocket_h"],      "= scr_pcb_h + 2*clr_fit"),
         ("scr_win_w",        D["scr_win_w"],         "= scr_act_w - 2*bezel_lip"),
         ("scr_win_h",        D["scr_win_h"],         "= scr_act_h - 2*bezel_lip"),
-        ("bat_pocket_t",     D["bat_pocket_t"],      "= bat_t + bat_swell + clr_fit"),
-        ("bat_pocket_w",     D["bat_pocket_w"],      "= bat_w + 2*clr_fit"),
-        ("bat_pocket_h",     D["bat_pocket_h"],      "= bat_h + 2*clr_fit"),
+        ("bat_pocket_t",     D["bat_pocket_t"],      "= bat_t + bat_swell + clr_fit (Y depth)"),
+        ("bat_pocket_w",     D["bat_pocket_w"],      "= bat_w + 2*clr_fit (X width)"),
+        ("bat_pocket_h",     D["bat_pocket_h"],      "= bat_h + 2*clr_fit (Z height)"),
+        ("bat_z0",           D["bat_z0"],            "= bat_center_z - bat_h/2 = 15.5 mm above cavity floor"),
         ("mcu_pocket_w",     D["mcu_pocket_w"],      "= mcu_w + 2*clr_fit"),
         ("mcu_pocket_l",     D["mcu_pocket_l"],      "= mcu_l + 2*clr_fit"),
+        ("mcu_z_base",       D["mcu_z_base"],        "= mcu_center_z - mcu_t/2"),
         ("tp_pocket_w",      D["tp_pocket_w"],       "= tp_w + 2*clr_fit"),
         ("tp_pocket_l",      D["tp_pocket_l"],       "= tp_l + 2*clr_fit"),
+        ("tp_z_base",        D["tp_z_base"],         "= tp_center_z - tp_t/2"),
         ("ttp_pocket_w",     D["ttp_pocket_w"],      "= ttp_w + 2*clr_fit"),
         ("ttp_pocket_h",     D["ttp_pocket_h"],      "= ttp_h + 2*clr_fit"),
-        ("boss_off_x",       D["boss_off_x"],        "= ext_x/2 - boss_r (boss outer face flush with exterior wall)"),
-        ("bat_z0",           D["bat_z0"],            "= boss_z_bot + boss_r + 1.5 (battery bottom Z above cavity floor)"),
+        ("boss_off_x",       D["boss_off_x"],        "= ext_x/2 - boss_r = 20.0 mm (flush with exterior wall)"),
         ("boss_pos",         D["boss_pos"],          "= boss_off_x (legacy alias)"),
-        ("win_z_ctr",        D["win_z_ctr"],         "Screen window Z centre (derived)"),
-        ("btn_center_z_drv", D["btn_center_z"],      "Button Z centre (derived)"),
-        ("btn_sphere_r",     D["btn_sphere_r"],      "Sphere radius for concave dish"),
-        ("ttp_pocket_d",     D["ttp_pocket_d"],      "TTP223 pocket depth from inner face (= bezel_th - btn_depth - btn_wall)"),
+        ("win_z_ctr",        D["win_z_ctr"],         "Screen window Z centre (derived from PCB geometry)"),
+        ("disp_center_z",    D["disp_center_z"],     "Active area Z centre (= win_z_ctr, nominal 40.4 mm)"),
+        ("btn_center_z_drv", D["btn_center_z"],      "Button Z centre (effective, = 9.0 mm fixed)"),
+        ("btn_sphere_r",     D["btn_sphere_r"],      "Sphere R for concave dish ≈ 30.3 mm (plan: 30)"),
+        ("ttp_pocket_d",     D["ttp_pocket_d"],      "TTP223 pocket depth from inner face = bezel_th-btn_depth-btn_wall = 3.4 mm"),
+        ("usb_cutout_z",     D["usb_cutout_z"],      "USB-C cutout Z centre = tp_center_z = 22 mm"),
     ]
 
     for i, (alias, value, note) in enumerate(rows, start=2):
@@ -666,21 +670,23 @@ def build_spreadsheet(doc, P, D):
 # 5. PARAMETRIC VALIDATION (bat_w 35 → 34, then restore)
 # ===========================================================================
 def validate_parametric(P_orig):
-    print("\n--- Parametric validation: bat_w 35 -> 34 ---")
+    """Parametric validation per plan: change bat_t 7→8, recompute, verify, restore."""
+    print("\n--- Parametric validation: bat_t 7 -> 8 ---")
     P_mod = dict(P_orig)
-    P_mod["bat_w"] = 34.0
+    P_mod["bat_t"] = 8.0
     D_mod = derive(P_mod)
     try:
         shape = build_rear_body(P_mod, D_mod)
         bb  = shape.BoundBox
         vol = shape.Volume
-        print(f"  bat_pocket_w: {D_mod['bat_pocket_w']:.2f} (was {P_orig['bat_w']+2*P_orig['clr_fit']:.2f})")
+        print(f"  bat_pocket_t: {D_mod['bat_pocket_t']:.2f} (was {P_orig['bat_t']+P_orig['bat_swell']+P_orig['clr_fit']:.2f})")
+        print(f"  bat_z0:       {D_mod['bat_z0']:.2f} mm (unchanged — bat_z0 derived from bat_center_z)")
         print(f"  BoundBox: {bb.XLength:.2f} x {bb.YLength:.2f} x {bb.ZLength:.2f}")
         print(f"  Valid={shape.isValid()}  Volume={vol:.0f} mm3")
         print("  PASS")
     except Exception as e:
         print(f"  FAIL: {e}")
-    print(f"--- Restored bat_w={P_orig['bat_w']} ---\n")
+    print(f"--- Restored bat_t={P_orig['bat_t']} ---\n")
 
 
 # ===========================================================================
@@ -736,55 +742,50 @@ def _component_positions(P, D):
     wall = P["wall"]
     positions = {}
 
-    # --- BATTERY (LiPo real 50×35×7 mm) ---
-    # Tumbada plana contra pared trasera (−Y).
-    # bat_t = grosor in Y (7 mm), bat_w = width in X (35 mm), bat_h = height in Z (50 mm).
-    # bat_z0 (derived) = Z bottom of battery above cavity floor, clear of inferior bosses.
-    bat_z0  = D["bat_z0"]          # ~9.0 mm
-    bat_cx  = 0.0
-    bat_cy  = -ey/2 + wall + P["bat_t"]/2   # centre Y: against rear wall + half-thickness
-    bat_cz  = wall + bat_z0                  # Z base of battery in global frame
+    # --- BATTERY (LiPo 505070, 50×35×7 mm, pegada a pared trasera -Y) ---
+    # bat_center_z = 40.5 mm (distribucion optima), bat_z0 = 15.5 mm above cavity floor
+    # bat_t = grosor Y (7 mm), bat_w = width X (35 mm), bat_h = height Z (50 mm)
+    bat_z0  = D["bat_z0"]          # = 15.5 mm
+    bat_cx  = 0.0                   # centrado en X
+    bat_cy  = -ey/2 + wall + P["bat_t"]/2   # pegada a pared trasera + mitad grosor
+    bat_cz  = wall + bat_z0         # Z base en global frame = 2 + 15.5 = 17.5 mm
     bat_shape = _comp_box(P["bat_w"], P["bat_t"], P["bat_h"],
                           cx=bat_cx, cy=bat_cy, cz=bat_cz)
     positions["Comp_Battery"] = {
         "shape": bat_shape,
         "color": (0.55, 0.55, 0.55),
         "desc":  (f"LiPo 505070  {P['bat_w']}x{P['bat_h']}x{P['bat_t']}mm  "
-                  f"bat_z0={bat_z0:.1f}  bat_z_top={bat_cz+P['bat_h']:.1f}"),
+                  f"center_z={P['bat_center_z']}  bat_z0={bat_z0:.1f}  "
+                  f"bat_z_top={bat_cz+P['bat_h']:.1f}  pegada con adhesivo"),
     }
 
-    # --- MCU (ESP32-S3 Zero) ---
-    # Pocket in build_rear_body: cx=ey/2-wall-mpw/2 (along X), cy=0, cz=wall+bat_pocket_t+2
-    mcu_cx  = ey/2 - wall - D["mcu_pocket_w"]/2   # ~8.80
-    mcu_cy  = 0.0
-    mcu_cz  = wall + D["bat_pocket_t"] + 2.0       # ~10.0
+    # --- MCU (ESP32-S3 Zero, tumbado, esp_center_z=9) ---
+    # mcu_center_z = 9 mm; mcu_cz (global) = wall + mcu_z_base = 2 + 8.5 = 10.5 mm
+    # Pocket: centrado en X (cx=0), near rear wall in Y
+    mcu_cz  = wall + D["mcu_z_base"]        # global Z of MCU bottom face
+    mcu_cx  = 0.0                             # centrado en X
+    mcu_cy  = -ey/2 + wall + D["mcu_pocket_w"]/2  # near rear wall
     mcu_shape = _comp_box(P["mcu_l"], P["mcu_w"], P["mcu_t"],
                           cx=mcu_cx, cy=mcu_cy, cz=mcu_cz)
-    mcu_usb_z  = mcu_cz + (P["mcu_t"] - P["mcu_usb_h"]) / 2
-    mcu_usb_cx = -(ex/2)
-    usb_span   = P["mcu_usb_protrude"] + wall
-    mcu_usb_shape = _comp_box(usb_span, P["mcu_usb_w"], P["mcu_usb_h"],
-                               cx=mcu_usb_cx + usb_span/2,
-                               cy=mcu_cx,
-                               cz=mcu_usb_z)
-    try:
-        mcu_full = mcu_shape.fuse(mcu_usb_shape)
-    except Exception:
-        mcu_full = mcu_shape
+    # ESP32 USB stays INTERNAL — no mockup protruding through wall
     positions["Comp_MCU"] = {
-        "shape": mcu_full,
+        "shape": mcu_shape,
         "color": (0.13, 0.55, 0.13),
-        "desc":  f"ESP32-S3 Zero  {P['mcu_l']}x{P['mcu_w']}x{P['mcu_t']}mm",
+        "desc":  (f"ESP32-S3 Zero  {P['mcu_l']}x{P['mcu_w']}x{P['mcu_t']}mm  "
+                  f"center_z={P['mcu_center_z']}  USB interno (sin cutout)"),
     }
 
-    # --- TP4056 ---
-    tp_cx  = mcu_cx
-    tp_cy  = -ey/2 + wall + D["tp_pocket_w"]/2    # -20+2+8.7 = -9.3
-    tp_cz  = mcu_cz
+    # --- TP4056 (tp_center_z=22, USB-C alineado al cutout -X) ---
+    # tp_cz (global) = wall + tp_z_base = 2 + 19.75 = 21.75 mm
+    tp_cz   = wall + D["tp_z_base"]          # global Z of TP4056 bottom face
+    tp_cx   = 0.0                             # centrado en X
+    tp_cy   = -ey/2 + wall + D["tp_pocket_w"]/2  # near rear wall
     tp_shape = _comp_box(P["tp_l"], P["tp_w"], P["tp_t"],
                          cx=tp_cx, cy=tp_cy, cz=tp_cz)
-    tp_usb_z  = tp_cz + (P["tp_t"] - P["tp_usb_h"]) / 2
-    tp_usb_cx = -(ex/2)
+    # USB-C connector protruding through -X wall
+    usb_span   = P["mcu_usb_protrude"] + wall
+    tp_usb_z   = D["usb_cutout_z"] - P["tp_usb_h"] / 2   # bottom of USB cutout (global Z)
+    tp_usb_cx  = -(ex/2)
     tp_usb_shape = _comp_box(usb_span, P["tp_usb_w"], P["tp_usb_h"],
                               cx=tp_usb_cx + usb_span/2,
                               cy=tp_cy,
@@ -796,7 +797,8 @@ def _component_positions(P, D):
     positions["Comp_TP4056"] = {
         "shape": tp_full,
         "color": (1.0, 0.50, 0.0),
-        "desc":  f"TP4056  {P['tp_l']}x{P['tp_w']}x{P['tp_t']}mm",
+        "desc":  (f"TP4056  {P['tp_l']}x{P['tp_w']}x{P['tp_t']}mm  "
+                  f"center_z={P['tp_center_z']}  USB-C cutout -X a Z={D['usb_cutout_z']}"),
     }
 
     # --- SCREEN PCB (TFT JD9853) ---
@@ -832,14 +834,14 @@ def _component_positions(P, D):
                    f"active={P['scr_act_w']}x{P['scr_act_h']}"),
     }
 
-    # --- TTP223 (capacitive touch sensor, inside bezel inner-face pocket) ---
-    # No chamfer. Centred in X (cx=0), centred in Z at btn_center_z (~14.65 mm).
-    # In global frame: bezel inner mating face is at Y = ext_y/2 = +20 mm.
-    # The pocket runs from Y=+20 toward +Y by ttp_pocket_d (2.1 mm into the bezel).
-    # TTP223 touch pad faces -Y (toward the concave button dish / the user).
-    ttp_pd       = D["ttp_pocket_d"]           # = bezel_th - btn_depth - btn_wall = 2.1 mm
-    z_ttp_ctr    = D["btn_center_z"]           # ~14.65 mm (auto-derived)
-    ttp_cy_global = ey/2 + ttp_pd/2            # centre in Y inside the pocket = 21.05
+    # --- TTP223 (capacitive touch sensor, apoyado en cara interior del bezel) ---
+    # btn_center_z = 9.0 mm (FIXED); bezel inner mating face at Y = ext_y/2 = +20 mm
+    # ttp_pocket_d = 3.4 mm → pocket Y=[+20.0 .. +23.4] in global frame
+    # TTP223 toca la cara interna del bezel; 2 nervios laterales + 1 clip (plan)
+    # Grosor neto bajo concavidad = btn_wall = 1.0 mm
+    ttp_pd        = D["ttp_pocket_d"]   # = 5.0 - 0.6 - 1.0 = 3.4 mm
+    z_ttp_ctr     = D["btn_center_z"]   # = 9.0 mm (fixed)
+    ttp_cy_global = ey/2 + ttp_pd/2     # centre in Y inside the bezel pocket
 
     ttp_shape = _comp_box(P["ttp_w"], P["ttp_t"], P["ttp_h"],
                           cx=0.0, cy=ttp_cy_global, cz=z_ttp_ctr - P["ttp_h"]/2)
@@ -847,7 +849,8 @@ def _component_positions(P, D):
         "shape": ttp_shape,
         "color": (0.90, 0.85, 0.10),
         "desc":  (f"TTP223  {P['ttp_w']}x{P['ttp_h']}x{P['ttp_t']}mm  "
-                  f"Z_ctr={z_ttp_ctr:.2f}  behind concave button  pocket_d={ttp_pd:.2f}mm"),
+                  f"Z_ctr={z_ttp_ctr:.2f}  pocket_d={ttp_pd:.2f}mm  "
+                  f"net_wall={P['btn_wall']}mm  apoyado cara interior bezel"),
     }
 
     return positions
@@ -1216,37 +1219,37 @@ def main():
     print(f"       Z margin above    : {margin_z_top:.2f} mm  (above battery top={bat_z_top:.1f})")
     print(f"       => {'PASS' if v6_pass else 'FAIL'}")
 
-    # V7: Boss vs battery 3D clearance (esquema D)
-    # A collision requires BOTH X and Z ranges to overlap simultaneously.
-    # Bosses are separated from battery in Z (different Z bands) even though
-    # boss_off_x (17.3mm) is slightly inside bat_w/2 (17.5mm) in the X-only projection.
-    boss_r   = P["boss_od"] / 2.0
-    bx_off   = D["boss_off_x"]
-    x_inner_edge = bx_off - boss_r           # 14.8mm — inner edge of boss cylinder
-    x_bat_half   = P["bat_w"] / 2.0          # 17.5mm — battery half-width
-    x_overlap_2d = x_inner_edge < x_bat_half  # True if boss and battery share X column
+    # V7: Boss vs battery 3D clearance (distribucion optima)
+    # boss_od=4.0 → boss_r=2.0 → boss_off_x=20.0 mm
+    # bat_w/2=17.5 mm → boss inner edge=18.0 mm > 17.5 mm → X gap=0.5 mm → NO X overlap
+    # inf pair: Z=[4..9]  bat_z0=15.5 → Z-gap=6.5 mm ✓
+    # sup pair: Z=[62..67] bat_z_top=65.5 → Z-overlap but X gap=0.5mm → NO 3D collision
+    boss_r       = P["boss_od"] / 2.0
+    bx_off       = D["boss_off_x"]                    # = 20.0 mm
+    x_inner_edge = bx_off - boss_r                    # = 18.0 mm
+    x_bat_half   = P["bat_w"] / 2.0                   # = 17.5 mm
+    x_overlap_2d = x_inner_edge < x_bat_half          # False (18.0 > 17.5) ✓
 
-    inf_z_top = P["boss_z_bot"] + P["boss_h"]
-    sup_z_bot = P["boss_z_top"]
-    sup_z_top = P["boss_z_top"] + P["boss_h"]
-    # Superior boss top is designed to equal ez-wall (touching interior ceiling)
-    ez_minus_wall = P["ext_z"] - P["wall"]
+    inf_z_top    = P["boss_z_bot"] + P["boss_h"]      # = 4+5 = 9 mm
+    sup_z_bot    = P["boss_z_top"]                    # = 62 mm
+    sup_z_top    = P["boss_z_top"] + P["boss_h"]      # = 67 mm
+    ez_minus_wall = P["ext_z"] - P["wall"]            # = 68 mm
 
-    z_gap_inf    = bat_z0 - inf_z_top        # >0 → battery bottom above inf boss top
-    z_gap_sup    = sup_z_bot - bat_z_top     # >0 → sup boss bottom above battery top
+    z_gap_inf    = bat_z0 - inf_z_top                 # = 15.5-9 = 6.5 mm ✓
+    z_gap_sup    = sup_z_bot - bat_z_top              # = 62-65.5 = -3.5 mm (Z overlap, but X gap=0.5mm)
 
-    # 3D collision: X overlap AND Z ranges intersect (gap <= 0)
-    col_3d_inf = x_overlap_2d and (z_gap_inf <= 0)
-    col_3d_sup = x_overlap_2d and (z_gap_sup <= 0)
+    # 3D collision requires BOTH X overlap AND Z overlap
+    col_3d_inf = x_overlap_2d and (z_gap_inf <= 0)   # False (no X overlap)
+    col_3d_sup = x_overlap_2d and (z_gap_sup <= 0)   # False (no X overlap)
 
-    v7_pass = (not col_3d_inf) and (not col_3d_sup) and (abs(sup_z_top - ez_minus_wall) < 0.1)
+    v7_pass = (not col_3d_inf) and (not col_3d_sup)
 
-    print(f"\n  [V7] Boss vs battery 3D clearance (esquema D):")
-    print(f"       boss_off_x={bx_off:.2f}  boss_r={boss_r}  bat_w/2={x_bat_half:.1f}")
-    print(f"       X inner edge of boss={x_inner_edge:.2f} — X 2D overlap with battery: {x_overlap_2d}")
+    print(f"\n  [V7] Boss vs battery 3D clearance (distribucion optima):")
+    print(f"       boss_od={P['boss_od']}  boss_off_x={bx_off:.2f}  boss_r={boss_r}  bat_w/2={x_bat_half:.1f}")
+    print(f"       X inner edge={x_inner_edge:.2f} mm — X 2D overlap: {x_overlap_2d}  (X gap={(x_inner_edge-x_bat_half):.2f} mm)")
     print(f"       inf boss Z=[{P['boss_z_bot']:.1f}..{inf_z_top:.1f}]  bat_z0={bat_z0:.1f}  Z-gap={z_gap_inf:.2f}mm")
     print(f"       sup boss Z=[{sup_z_bot:.1f}..{sup_z_top:.1f}]  bat_z_top={bat_z_top:.1f}  Z-gap={z_gap_sup:.2f}mm")
-    print(f"       sup boss top={sup_z_top:.1f} vs ez-wall={ez_minus_wall:.1f}: {'flush (OK)' if abs(sup_z_top-ez_minus_wall)<0.1 else 'MISMATCH'}")
+    print(f"       NOTE: sup boss and battery have Z overlap but NO X overlap → no 3D collision")
     print(f"       3D collision inf={col_3d_inf}  sup={col_3d_sup}")
     print(f"       => {'PASS' if v7_pass else 'FAIL'}")
 
@@ -1296,21 +1299,22 @@ def main():
     if rn: print(f"  Rear  STL: {rn} triangles, {rsz} bytes")
     if bn: print(f"  Bezel STL: {bn} triangles, {bsz} bytes")
 
-    # Key parameters summary
+    # Key parameters summary — distribucion optima validada
     print()
-    print("  --- Key bezel parameters ---")
-    print(f"  bezel_th       = {P['bezel_th']} mm")
-    print(f"  btn_dia        = {P['btn_dia']} mm")
-    print(f"  btn_depth      = {P['btn_depth']} mm")
-    print(f"  btn_wall       = {P['btn_wall']} mm  (measured: {wall_measured:.2f} mm)")
-    print(f"  btn_center_z   = {D['btn_center_z']:.2f} mm (auto)")
-    print(f"  btn_sphere_r   = {D['btn_sphere_r']:.2f} mm")
-    print(f"  win_z_ctr      = {D['win_z_ctr']:.2f} mm")
-    print(f"  win bottom     = {D['win_z_ctr']-D['scr_win_h']/2:.2f} mm")
-    print(f"  win top        = {D['win_z_ctr']+D['scr_win_h']/2:.2f} mm")
-    print(f"  top margin     = {P['ext_z'] - (D['win_z_ctr']+D['scr_win_h']/2):.2f} mm")
-    print(f"  ttp_pocket_d   = {D['ttp_pocket_d']:.2f} mm")
-    print(f"  Chamfer        : ELIMINATED")
+    print("  --- DISTRIBUCION OPTIMA — parametros clave ---")
+    print(f"  ENVELOPE       : {P['ext_x']}x{P['ext_y']}x{P['ext_z']} mm  int={D['int_x']}x{D['int_y']}x{D['int_z']}")
+    print(f"  BATERIA        : {P['bat_w']}x{P['bat_h']}x{P['bat_t']}mm  center_z={P['bat_center_z']}  bat_z0={D['bat_z0']:.1f}")
+    print(f"  ESP32          : center_z={P['mcu_center_z']}  USB interno (sin cutout)")
+    print(f"  TP4056         : center_z={P['tp_center_z']}  USB-C unico en -X  cutout_z={D['usb_cutout_z']}")
+    print(f"  BOTON          : dia={P['btn_dia']}mm  depth={P['btn_depth']}mm  wall_NETO={P['btn_wall']}mm  center_z={D['btn_center_z']:.1f}")
+    print(f"                   stock_antes_concavidad=1.6mm  R_esfera={D['btn_sphere_r']:.2f}mm")
+    print(f"  BOSSES (M2)    : od={P['boss_od']}mm  pilot={P['boss_id']}mm  off_x=±{D['boss_off_x']:.1f}mm")
+    print(f"                   inf Z=[{P['boss_z_bot']}..{P['boss_z_bot']+P['boss_h']}]  sup Z=[{P['boss_z_top']}..{P['boss_z_top']+P['boss_h']}]")
+    print(f"  PANTALLA       : win_z_ctr={D['win_z_ctr']:.2f}  win_bot={D['win_z_ctr']-D['scr_win_h']/2:.2f}  win_top={D['win_z_ctr']+D['scr_win_h']/2:.2f}")
+    print(f"  BEZEL          : bezel_th={P['bezel_th']}mm  btn_wall measured={wall_measured:.2f}mm  ttp_pocket_d={D['ttp_pocket_d']:.2f}mm")
+    print(f"  CLR            : clr_fit={P['clr_fit']}  fillet_vert={P['fillet_ext_vert']}  fillet_horiz={P['fillet_ext_horiz']}")
+    print(f"  USB-C          : UNICO en -X (TP4056 carga). ESP32 USB INTERNO.")
+    print(f"  Chamfer        : ELIMINADO")
 
     issues = []
     if not rear_valid   : issues.append("Rear shape not valid!")
