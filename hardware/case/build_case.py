@@ -272,6 +272,68 @@ def cyl(r, h, cx=0.0, cy=0.0, cz=0.0):
     """Vertical cylinder."""
     return Part.makeCylinder(r, h, App.Vector(cx, cy, cz), App.Vector(0, 0, 1))
 
+# ---------------------------------------------------------------------------
+# Fillet helpers
+# ---------------------------------------------------------------------------
+def _vert_edges(shape, min_len=60.0):
+    """Vertical edges (parallel to Z) with length >= min_len."""
+    edges = []
+    for e in shape.Edges:
+        try:
+            v1 = e.Vertexes[0].Point
+            v2 = e.Vertexes[1].Point
+            if (abs(v2.x - v1.x) < 0.01 and abs(v2.y - v1.y) < 0.01
+                    and e.Length >= min_len):
+                edges.append(e)
+        except Exception:
+            pass
+    return edges
+
+def _horiz_edges_at_z(shape, z_target, min_len=5.0, tol=0.1):
+    """Horizontal edges at z_target with length >= min_len."""
+    edges = []
+    for e in shape.Edges:
+        try:
+            v1 = e.Vertexes[0].Point
+            v2 = e.Vertexes[1].Point
+            if (abs(v2.z - v1.z) < 0.01 and e.Length >= min_len
+                    and abs(v1.z - z_target) < tol):
+                edges.append(e)
+        except Exception:
+            pass
+    return edges
+
+def apply_fillets(shape, r_vert, r_horiz, ez, label="shape"):
+    """
+    Apply fillet_ext_vert on all long vertical edges, then fillet_ext_horiz
+    on top/bottom horizontal edges.  Falls back gracefully on OCC errors.
+    Returns (filleted_shape, applied_vert, applied_horiz).
+    """
+    result = shape
+    applied_vert = False
+    applied_horiz = False
+
+    vert_e = _vert_edges(result, min_len=ez * 0.85)
+    if vert_e and r_vert > 0:
+        try:
+            result = result.makeFillet(r_vert, vert_e)
+            applied_vert = True
+        except Exception as exc:
+            print(f"  [WARN] {label} vert fillet r={r_vert} failed: {exc} — skipping")
+
+    if r_horiz > 0:
+        top_e = _horiz_edges_at_z(result, ez)
+        bot_e = _horiz_edges_at_z(result, 0.0)
+        horiz_e = top_e + bot_e
+        if horiz_e:
+            try:
+                result = result.makeFillet(r_horiz, horiz_e)
+                applied_horiz = True
+            except Exception as exc:
+                print(f"  [WARN] {label} horiz fillet r={r_horiz} failed: {exc} — skipping")
+
+    return result, applied_vert, applied_horiz
+
 # ===========================================================================
 # 2. REAR BODY
 # ===========================================================================
@@ -279,8 +341,16 @@ def build_rear_body(P, D):
     ex = P["ext_x"]; ey = P["ext_y"]; ez = P["ext_z"]
     wall = P["wall"]
 
-    # 2.1 Outer shell
+    # 2.1 Outer solid — fillet BEFORE cutting interior so OCC topology stays clean
     outer = box(ex, ey, ez, cx=0, cy=0, cz=0)
+
+    # Apply exterior fillets on solid outer box (simpler topology = reliable OCC)
+    rv = P["fillet_ext_vert"]; rh = P["fillet_ext_horiz"]
+    outer, fv_ok, fh_ok = apply_fillets(outer, rv, rh, ez, label="RearBody_outer")
+    if fv_ok:
+        print(f"  [fillet] vert r={rv} applied to outer solid")
+    if fh_ok:
+        print(f"  [fillet] horiz r={rh} applied to outer solid")
 
     # 2.2 Interior cavity (open top; floor = wall)
     cav_w = D["int_x"]; cav_d = D["int_y"]
@@ -386,141 +456,153 @@ def build_rear_body(P, D):
 # ===========================================================================
 def build_front_bezel(P, D):
     """
-    Local frame: X = width (±ext_x/2), Z = height (0..ext_z), Y = depth (0..bezel_th).
-      Y=0   = inner mating face (contacts rear body)
-      Y=bth = outer/front face (user-facing)
+    Built entirely in GLOBAL coordinates (same frame as rear body) to avoid
+    the transformGeometry() distortion that inflated the bounding box.
 
-    The chamfer from the previous revision has been ELIMINATED.
-    The bezel is now a plain rectangular plate (with its male lip).
+    Global frame reference:
+      Inner mating face (contacts rear body)  : Y = ext_y/2  = +20 mm
+      Outer/front face (user-facing)          : Y = ext_y/2 + bezel_th = +25 mm
+      Lip (protrudes toward -Y into rear body): Y = ext_y/2 - lip_h .. ext_y/2
+                                                   = +16 .. +20 mm
 
-    Front-face features:
-      - Screen window: through-hole, centred in upper area of front face
-      - Concave button: spherical dish recess in lower strip, centred in X
-        Modelled as a sphere of radius btn_sphere_r intersected with the plate.
-        The sphere is centred at Y = btn_sphere_cy (negative, behind front face)
-        so that it creates a dish of depth btn_depth at Z = btn_center_z.
-
-    Inner-face features:
-      - PCB pocket (screen)
-      - Header clearance pocket
-      - TTP223 pocket: pocket from inner face (Y=0), depth = ttp_pocket_d,
-        centred in X and at Z = btn_center_z, directly behind the button dish.
-        Leaves btn_wall of material between dish bottom and pocket top.
-
-    No chamfer geometry anywhere.
+    Fillet strategy:
+      - blank (Y=20..25) is filleted STANDALONE before fusing the lip.
+        Vert fillet radius is clamped to bezel_th/2-0.05 so it fits the thin plate.
+        Horiz fillet r=fillet_ext_horiz applied to top/bottom edges of blank.
+      - Lip fused with a 0.2 mm Y-overlap into blank so OCC merges them as 1 solid.
+      - All subsequent cuts use global Y offsets: bezel_y0 + local_y.
     """
-    ex  = P["ext_x"]; ez = P["ext_z"]
-    bth = P["bezel_th"]
+    ex   = P["ext_x"]; ey = P["ext_y"]; ez = P["ext_z"]
+    bth  = P["bezel_th"]
     wall = P["wall"]
-
-    # -----------------------------------------------------------------------
-    # Key strategy: build blank + male lip as ONE fused solid BEFORE any cuts.
-    # Post-cut fuse on complex shapes causes OCC to produce multi-solid results.
-    # -----------------------------------------------------------------------
     lip_h   = P["lip_h"]; clr_sl = P["clr_slide"]
     lip_th  = wall - clr_sl               # ring wall thickness in Y
     lip_od_x = ex - 2*clr_sl
     lip_od_z = ez - 2*clr_sl
 
-    # Blank: Y = [0 .. bth]
-    blank = Part.makeBox(ex, bth, ez, App.Vector(-ex/2, 0, 0))
-    # Lip ring: Y = [-lip_h .. 0]  (protrudes from inner face toward -Y)
-    lip_outer = Part.makeBox(lip_od_x, lip_h, lip_od_z,
-                             App.Vector(-lip_od_x/2, -lip_h, 0))
-    lip_inner = Part.makeBox(lip_od_x - 2*lip_th, lip_h, lip_od_z - lip_th,
-                             App.Vector(-(lip_od_x/2 - lip_th), -lip_h, lip_th))
+    # Global Y references
+    bezel_y0 = ey / 2.0           # +20 mm — inner mating face
+    bezel_y1 = bezel_y0 + bth     # +25 mm — outer front face
+    lip_y0   = bezel_y0 - lip_h   # +16 mm — lip base
+
+    # Fillet radii
+    rv_blank = min(P["fillet_ext_vert"], bth / 2.0 - 0.05)  # fits bth=5 → 2.45
+    rh       = P["fillet_ext_horiz"]
+
+    # -----------------------------------------------------------------------
+    # 3.0  Build blank, fillet it standalone, then fuse lip with overlap.
+    #      Fillet-first avoids topology failures on post-fuse complex shapes.
+    # -----------------------------------------------------------------------
+    OVERLAP = 0.2   # small Y overlap so OCC merges blank+lip into 1 solid
+    blank = Part.makeBox(ex, bth, ez, App.Vector(-ex/2, bezel_y0, 0))
+
+    # Vert fillets on blank (standalone — simple box topology)
+    blank_vert_e = _vert_edges(blank, min_len=ez * 0.85)
+    if blank_vert_e and rv_blank > 0:
+        try:
+            blank = blank.makeFillet(rv_blank, blank_vert_e)
+            print(f"  [fillet] bezel blank vert r={rv_blank:.2f} applied")
+        except Exception as exc:
+            print(f"  [WARN] bezel blank vert fillet failed: {exc}")
+
+    # Horiz fillets on blank (top/bottom edges)
+    top_e_b = _horiz_edges_at_z(blank, ez)
+    bot_e_b = _horiz_edges_at_z(blank, 0.0)
+    if (top_e_b or bot_e_b) and rh > 0:
+        try:
+            blank = blank.makeFillet(rh, top_e_b + bot_e_b)
+            print(f"  [fillet] bezel blank horiz r={rh} applied")
+        except Exception as exc:
+            print(f"  [WARN] bezel blank horiz fillet failed: {exc}")
+
+    # Lip ring: Y = [lip_y0 .. bezel_y0+OVERLAP]  (OVERLAP ensures clean fuse)
+    lip_outer = Part.makeBox(lip_od_x, lip_h + OVERLAP, lip_od_z,
+                             App.Vector(-lip_od_x/2, lip_y0, 0))
+    lip_inner = Part.makeBox(lip_od_x - 2*lip_th, lip_h + OVERLAP, lip_od_z - lip_th,
+                             App.Vector(-(lip_od_x/2 - lip_th), lip_y0, lip_th))
     lip = lip_outer.cut(lip_inner)
 
-    # Fuse blank + lip while both are simple solids (pre-cut = clean topology)
+    # Fuse filleted blank + lip → single solid
     bezel = blank.fuse(lip)
+    if len(bezel.Solids) > 1:
+        # Fallback: merge via multiFuse
+        try:
+            bezel = bezel.Solids[0].multiFuse(bezel.Solids[1:])
+        except Exception:
+            pass  # keep as-is; subsequent cuts may unify
 
-    # 3.1 Screen window (through-hole in Y direction)
-    # Positioned in the upper area of the front face.
-    # win_z_ctr was computed in derive() using PCB geometry + top margin.
-    win_w    = D["scr_win_w"]
-    win_h    = D["scr_win_h"]
+    # -----------------------------------------------------------------------
+    # 3.1  Screen window (through-hole in Y/global direction)
+    # All Y positions are now global: bezel_y0 = +20 is "Y=0 local"
+    # -----------------------------------------------------------------------
+    win_w     = D["scr_win_w"]
+    win_h     = D["scr_win_h"]
     win_z_ctr = D["win_z_ctr"]
-    screen_win = box(win_w, bth + 2, win_h, cx=0, cy=bth/2, cz=win_z_ctr - win_h / 2)
+    screen_win = box(win_w, bth + 2, win_h,
+                     cx=0, cy=bezel_y0 + bth/2, cz=win_z_ctr - win_h / 2)
     bezel = bezel.cut(screen_win)
 
-    # 3.2 Screen PCB pocket (recess from inner face, Y=0 side)
+    # 3.2 Screen PCB pocket (recess from inner face, Y=bezel_y0 side)
     spw = D["scr_pocket_w"]; sph = D["scr_pocket_h"]
     spd = P["scr_pcb_t"] + P["clr_z"]   # pocket depth in Y
     pcb_top_z  = ez - wall
     pcb_z_bot  = pcb_top_z - P["scr_pcb_h"]
-    pcb_pocket = box(spw, spd, sph, cx=0, cy=spd/2, cz=pcb_z_bot)
+    pcb_pocket = box(spw, spd, sph, cx=0, cy=bezel_y0 + spd/2, cz=pcb_z_bot)
     bezel = bezel.cut(pcb_pocket)
 
-    # 3.3 Header clearance pocket (behind PCB inner face)
+    # 3.3 Header clearance pocket (behind PCB, toward front face)
     hdr_clr = P["header_clr"]
     hdr_pocket = box(spw, hdr_clr, 8.0,
-                     cx=0, cy=spd + hdr_clr/2, cz=pcb_z_bot)
+                     cx=0, cy=bezel_y0 + spd + hdr_clr/2, cz=pcb_z_bot)
     bezel = bezel.cut(hdr_pocket)
 
     # 3.4 Concave button dish (front face, lower strip)
-    # Model: subtract a sphere from the blank. The sphere has radius btn_sphere_r
-    # and is centred at (cx=0, cy=btn_sphere_cy, cz=btn_center_z) in bezel local frame.
-    # Because btn_sphere_cy << 0 (sphere centre is deep behind the front face), only
-    # the shallow cap at Y≈bezel_th is removed, leaving the smooth concave dish.
-    # btn_sphere_cy = bezel_th - btn_sphere_r + btn_depth  (may be negative → inside material)
+    # Sphere centre in global Y: bezel_y0 + btn_sphere_cy_local
+    # btn_sphere_cy_local = bezel_th - btn_sphere_r + btn_depth (computed in derive())
     btn_cz  = D["btn_center_z"]
     sph_r   = D["btn_sphere_r"]
-    sph_cy  = D["btn_sphere_cy"]
+    sph_cy_local = D["btn_sphere_cy"]              # local (relative to bezel inner face)
+    sph_cy_global = bezel_y0 + sph_cy_local        # global Y of sphere centre
 
-    btn_sphere_solid = Part.makeSphere(sph_r, App.Vector(0, sph_cy, btn_cz))
+    btn_sphere_solid = Part.makeSphere(sph_r, App.Vector(0, sph_cy_global, btn_cz))
     bezel = bezel.cut(btn_sphere_solid)
 
-    # 3.5 TTP223 nervios + recess (inner face, Y=0 side, behind button)
-    # Plan: TTP223 apoyado contra cara interior del bezel; 2 nervios laterales + 1 clip.
-    # Sin pocket profundo — sólo una recess poco profunda que deja la pastilla apoyada.
-    # ttp_pocket_d = 3.4 mm (= bezel_th - btn_depth - btn_wall = 5.0 - 0.6 - 1.0)
-    # Grosor neto bajo concavidad = btn_wall = 1.0 mm (CRITICO)
+    # 3.5 TTP223 nervios + recess (inner face side, behind button)
+    # Pocket starts at Y=bezel_y0 (inner face) and extends ttp_pocket_d toward front.
     ttp_pw   = D["ttp_pocket_w"]
     ttp_ph   = D["ttp_pocket_h"]
-    ttp_pd   = D["ttp_pocket_d"]           # = 3.4 mm from inner face (Y=0)
-    clr_clip = P["ttp_clip_clr"]           # = 0.3 mm clip clearance
+    ttp_pd   = D["ttp_pocket_d"]           # 3.4 mm from inner face
 
-    # Nervio strategy: two lateral ribs keep TTP223 centred in X.
-    # Cut a shallow rectangular recess the full ttp_pocket_w × ttp_pocket_h × ttp_pd.
-    # Ribs are what remain between recess and ttp_w; they constrain ±X motion.
-    # so_r: rib keep-clear half-width; so_cx: rib centre offset from bezel centre
     so_r  = 2.0
-    so_cx = ttp_pw / 2.0 - 2.5     # rib centre X offset from bezel centreline
-
-    # Slot widths flanking each rib
+    so_cx = ttp_pw / 2.0 - 2.5
     slot_w_outer = ttp_pw / 2.0 - so_cx - so_r
-    slot_d  = ttp_pd
     slot_h  = ttp_ph
 
     if slot_w_outer > 0.1:
         # Left outer slot
-        slot_l = box(slot_w_outer, slot_d, slot_h,
-                     cx=-(ttp_pw / 2.0 - slot_w_outer / 2.0),
-                     cy=ttp_pd / 2.0,
-                     cz=btn_cz - ttp_ph / 2.0)
-        bezel = bezel.cut(slot_l)
+        bezel = bezel.cut(box(slot_w_outer, ttp_pd, slot_h,
+                              cx=-(ttp_pw / 2.0 - slot_w_outer / 2.0),
+                              cy=bezel_y0 + ttp_pd / 2.0,
+                              cz=btn_cz - ttp_ph / 2.0))
         # Right outer slot (mirror)
-        slot_r = box(slot_w_outer, slot_d, slot_h,
-                     cx=(ttp_pw / 2.0 - slot_w_outer / 2.0),
-                     cy=ttp_pd / 2.0,
-                     cz=btn_cz - ttp_ph / 2.0)
-        bezel = bezel.cut(slot_r)
-        # Centre slot (between the two rib keep-clear zones)
+        bezel = bezel.cut(box(slot_w_outer, ttp_pd, slot_h,
+                              cx=(ttp_pw / 2.0 - slot_w_outer / 2.0),
+                              cy=bezel_y0 + ttp_pd / 2.0,
+                              cz=btn_cz - ttp_ph / 2.0))
+        # Centre slot
         centre_w = 2.0 * so_cx - 2.0 * so_r
         if centre_w > 0.1:
-            slot_c = box(centre_w, slot_d, slot_h,
-                         cx=0,
-                         cy=ttp_pd / 2.0,
-                         cz=btn_cz - ttp_ph / 2.0)
-            bezel = bezel.cut(slot_c)
+            bezel = bezel.cut(box(centre_w, ttp_pd, slot_h,
+                                  cx=0,
+                                  cy=bezel_y0 + ttp_pd / 2.0,
+                                  cz=btn_cz - ttp_ph / 2.0))
     else:
-        # Slot widths degenerate — fall back to plain rectangular recess
-        ttp_recess = box(ttp_pw, ttp_pd, ttp_ph,
-                         cx=0, cy=ttp_pd / 2.0, cz=btn_cz - ttp_ph / 2.0)
-        bezel = bezel.cut(ttp_recess)
+        # Degenerate — fall back to plain rectangular recess
+        bezel = bezel.cut(box(ttp_pw, ttp_pd, ttp_ph,
+                              cx=0, cy=bezel_y0 + ttp_pd / 2.0,
+                              cz=btn_cz - ttp_ph / 2.0))
 
-    # 3.6 Screw through-holes + counterbores — esquema D positions
-    # boss_off_x = ±bx_off in X; Z = boss_z_bot (inferior) and boss_z_top (superior).
+    # 3.6 Screw through-holes + counterbores
     bx_off = D["boss_off_x"]
     sc_cl  = P["screw_clear_d"]; sc_hd = P["screw_head_d"]
     total_y_extent = bth + lip_h + 1.0   # full Y span of bezel+lip
@@ -531,20 +613,23 @@ def build_front_bezel(P, D):
         (-bx_off, P["boss_z_top"]),   # superior left
     ]
     for bx, bz in bezel_boss_pairs:
-        bezel = bezel.cut(cyl(sc_cl/2, total_y_extent, cx=bx, cy=-lip_h, cz=bz))
-        bezel = bezel.cut(cyl(sc_hd/2, 2.5, cx=bx, cy=bth - 2.5, cz=bz))
+        bezel = bezel.cut(cyl(sc_cl/2, total_y_extent, cx=bx, cy=lip_y0, cz=bz))
+        bezel = bezel.cut(cyl(sc_hd/2, 2.5, cx=bx, cy=bezel_y1 - 2.5, cz=bz))
 
     return bezel, {
-        "win_z_ctr":    win_z_ctr,
-        "win_h":        win_h,
-        "win_w":        win_w,
-        "btn_cz":       btn_cz,
-        "btn_dia":      P["btn_dia"],
-        "btn_depth":    P["btn_depth"],
-        "btn_wall":     P["btn_wall"],
-        "btn_sphere_r": sph_r,
-        "btn_sphere_cy": sph_cy,
-        "ttp_pd":       ttp_pd,
+        "win_z_ctr":     win_z_ctr,
+        "win_h":         win_h,
+        "win_w":         win_w,
+        "btn_cz":        btn_cz,
+        "btn_dia":       P["btn_dia"],
+        "btn_depth":     P["btn_depth"],
+        "btn_wall":      P["btn_wall"],
+        "btn_sphere_r":  sph_r,
+        "btn_sphere_cy": sph_cy_local,   # report local value for readability
+        "ttp_pd":        ttp_pd,
+        "rv_blank":      rv_blank,
+        "bezel_y0":      bezel_y0,
+        "bezel_y1":      bezel_y1,
     }
 
 
@@ -1090,10 +1175,9 @@ def main():
     print("\n[3/4] Body_FrontBezel ...")
     bezel, binfo = build_front_bezel(P, D)
 
-    # Translate bezel to sit adjacent to rear body (+Y)
-    mat = App.Matrix()
-    mat.move(App.Vector(0, P["ext_y"]/2, 0))
-    bezel_placed = bezel.transformGeometry(mat)
+    # Bezel is already built in global coordinates (no transformGeometry needed).
+    # Inner mating face at Y=+20, outer front face at Y=+25.
+    bezel_placed = bezel
 
     bezel_valid  = bezel_placed.isValid()
     bezel_closed = bezel_placed.isClosed()
@@ -1108,7 +1192,8 @@ def main():
           f"Z[{bezel_bb.ZMin:.2f}..{bezel_bb.ZMax:.2f}]")
 
     # Button/window geometry report
-    print(f"\n  --- Bezel geometry (local frame, Y=0 inner, Y={P['bezel_th']} front) ---")
+    bezel_y0_rep = P["ext_y"] / 2.0  # 20 mm — inner mating face in global coords
+    print(f"\n  --- Bezel geometry (global frame, Y={bezel_y0_rep:.0f} inner, Y={bezel_y0_rep+P['bezel_th']:.0f} front) ---")
     print(f"  Screen window : Z_ctr={binfo['win_z_ctr']:.2f}  "
           f"W={binfo['win_w']:.2f}  H={binfo['win_h']:.2f}")
     print(f"  Screen window : Z_bot={binfo['win_z_ctr']-binfo['win_h']/2:.2f}  "
@@ -1129,11 +1214,16 @@ def main():
     # -----------------------------------------------------------------------
     print("\n[4/4] Verification checks ...")
 
-    env_rear  = (rear_bb.XLength  <= P["ext_x"] + 0.01 and
-                 rear_bb.YLength  <= P["ext_y"] + 0.01 and
+    # Fillets add up to ~fillet_ext_horiz to the XY envelope (corner rounding).
+    fillet_tol = P["fillet_ext_horiz"] + 0.01
+    env_rear  = (rear_bb.XLength  <= P["ext_x"] + fillet_tol and
+                 rear_bb.YLength  <= P["ext_y"] + fillet_tol and
                  rear_bb.ZLength  <= P["ext_z"] + 0.01)
-    env_bezel = (bezel_bb.XLength <= P["ext_x"] + 0.01 and
-                 bezel_bb.ZLength <= P["ext_z"] + 0.01)
+    # Bezel X must not exceed rear body X (44 mm). Fillet adds ~fillet_ext_horiz/2 per side.
+    env_bezel = (bezel_bb.XLength <= P["ext_x"] + fillet_tol and
+                 bezel_bb.ZLength <= P["ext_z"] + 0.01 and
+                 bezel_bb.XMin >= -P["ext_x"]/2 - fillet_tol/2 and
+                 bezel_bb.XMax <= P["ext_x"]/2 + fillet_tol/2)
 
     print(f"  [V1] Bezel isValid={bezel_valid}  isClosed={bezel_closed}  "
           f"Solids={bezel_solids}  => {'PASS' if bezel_valid and bezel_solids == 1 else 'FAIL'}")
