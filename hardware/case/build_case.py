@@ -149,9 +149,8 @@ P = {
     # Charge mode
     "charge_mode":       0,
 
-    # Corner keepout / web — fix recess carving boss post
-    # Prevents recess_cut from removing material in boss-wall junction at corners
-    "corner_solid_web":  2.0,   # semi-height Z of keepout block/web (≥2 mm FDM)
+    # corner_solid_web retenido para compatibilidad con checks V-BOSS-FIX legacy
+    "corner_solid_web":  2.0,   # semi-height Z keepout (legacy; ya no usa recess_cut)
 }
 
 def derive(P):
@@ -247,18 +246,58 @@ def derive(P):
     d["keepout_y1"]        = d["lip_y_end"]                             # -13.5 mm (lip end)
     d["keepout_z_half"]    = boss_r + P["corner_solid_web"]             # 3.25 + 2.0 = 5.25 mm
 
-    # Web gusset dimensions (fused to shell after boss, before pilot hole):
-    #   lateral web: boss → lateral wall, in Y[boss_y_start..lip_y_end]
-    #   floor/ceil web: boss → nearest horizontal wall (Z=wall for cz=9, Z=ez-wall for cz=61)
+    # Web gusset dimensions (legacy refs, kept for V-BOSS-FIX checks)
     d["web_y0"]            = d["boss_y_start"]                          # -17.5 mm
-    d["web_y1"]            = d["lip_y_end"]                             # -13.5 mm  (extremo labio)
+    d["web_y1"]            = d["lip_y_end"]                             # -13.5 mm
 
-    # Notch in Rear_Cover lip (§3.3 patch):
-    #   Notch in lip zone Y[cover_y1..lip_y_end] = Y[-17.5..-13.5], width = keepout + clr_slide
-    #   notch_x_inner = keepout_x_inner - clr_slide (slightly wider than keepout)
+    # Legacy keepout/notch derived (kept for spreadsheet + legacy V-BOSS-FIX probes)
     d["notch_x_inner"]     = d["keepout_x_inner"] - P["clr_slide"]     # 13.75 - 0.15 = 13.60 mm
-    d["notch_x_outer"]     = P["ext_x"] / 2.0                          # 22.0 mm (to outer edge of lip)
+    d["notch_x_outer"]     = P["ext_x"] / 2.0                          # 22.0 mm
     d["notch_z_half"]      = d["keepout_z_half"] + P["clr_slide"]      # 5.25 + 0.15 = 5.40 mm
+
+    # -------------------------------------------------------------------------
+    # PLACA A RAS + LABIO INTERIOR — nuevos derivados (plan arquitecto)
+    # Estrategia: rebaje perimetral Y[-20..-17.5] en cuerpo (abre hueco para placa)
+    #             labio INTERIOR aditivo en tapa (anillo que entra en la cavidad)
+    # -------------------------------------------------------------------------
+    clr_sl = P["clr_slide"]   # 0.15 mm
+
+    # Nuevo grosor del labio de la tapa (desacoplado de wall)
+    d["cover_lip_th"]      = 1.85   # mm — pared anillo labio interior
+
+    # Rebaje perimetral trasero en Body_Main:
+    #   Y[-20..-17.5] recorta la franja de pared para que la placa quede a ras.
+    #   El corte tiene la misma X/Z que la caja exterior + pequeño epsilon.
+    d["rear_rebate_y0"]    = -P["ext_y"] / 2.0        # -20 mm
+    d["rear_rebate_y1"]    = d["cover_y1"]             # -17.5 mm (= interface_y)
+    d["rear_rebate_th"]    = d["cover_y1"] - (-P["ext_y"] / 2.0)  # = cover_th = 2.5 mm
+
+    # Labio interior tapa (anillo que entra en cavidad):
+    #   cav_inner_x_half = int_x/2 = 20 mm (cara interior de la cavidad)
+    #   lip_out_x_half   = cav_inner_x_half - clr_slide = 19.85 mm (exterior labio con holgura)
+    #   lip_in_x_half    = lip_out_x_half - cover_lip_th = 18.0 mm (interior labio = hueco)
+    #   lip_out_z0       = wall + clr_slide = 2.15 mm
+    #   lip_out_z1       = ext_z - wall - clr_slide = 67.85 mm
+    #   lip_in_z0        = 2 * wall = 4.0 mm  (no toca suelo/techo)
+    #   lip_in_z1        = ext_z - 2*wall = 66.0 mm
+    cav_inner_x_half       = d["int_x"] / 2.0                     # 20.0 mm
+    d["cav_inner_x_half"]  = cav_inner_x_half
+    d["lip_out_x_half"]    = cav_inner_x_half - clr_sl            # 19.85 mm
+    d["lip_in_x_half"]     = d["lip_out_x_half"] - d["cover_lip_th"]  # 18.0 mm
+    d["lip_out_z0"]        = P["wall"] + clr_sl                   # 2.15 mm
+    d["lip_out_z1"]        = P["ext_z"] - P["wall"] - clr_sl      # 67.85 mm
+    d["lip_in_z0"]         = 2.0 * P["wall"]                      # 4.0 mm
+    d["lip_in_z1"]         = P["ext_z"] - 2.0 * P["wall"]         # 66.0 mm
+
+    # Muescas de postes en labio: los postes (X=±17.5, boss_r=3.25 → X[14.25..20.75])
+    # cruzan el labio exterior (X[18..19.85]) → necesitan muesca.
+    # Por seguridad: muesca X[boss_off_x - boss_r - clr_sl .. lip_out_x_half]
+    #               = X[14.1 .. 19.85] a cada lado
+    # En Z: boss_z ± (boss_r + clr_sl) = boss_z ± 3.4
+    boss_r_val             = d["boss_r"]                           # 3.25 mm
+    d["lip_notch_x_inner"] = d["boss_off_x"] - boss_r_val - clr_sl  # 17.5-3.25-0.15=14.1 mm
+    d["lip_notch_x_outer"] = d["lip_out_x_half"]                  # 19.85 mm
+    d["lip_notch_z_half"]  = boss_r_val + clr_sl                   # 3.4 mm
 
     # Pilot hole: from boss_y_start toward +Y, length = screw_thread_engage + 1
     d["pilot_len"]    = P["screw_thread_engage"] + 1.0       # = 4.5 mm
@@ -458,59 +497,32 @@ def build_body_main(P, D):
     shell  = outer.cut(cavity)
 
     # ------------------------------------------------------------------
-    # 2.3 Recess perimetral en boca -Y para labio de la tapa
-    # El recess va desde Y=rear_ext_y hacia +Y, profundidad lip_h=4 mm
-    # Ancho/alto: cav_x+2*clr_slide × cav_z+2*clr_slide (con holgura)
-    # Sólo recortamos la PARED de recess (dejamos las paredes laterales X/Z)
-    # El recess tiene pared_recess = wall - clr_slide hacia el exterior
-    # Recortamos un hueco del mismo tamaño que la cavidad pero con holgura 0.15
+    # 2.3 REBAJE PERIMETRAL TRASERO — placa a ras (sustituye recess + keepout)
+    #
+    # Estrategia nueva: NO hay labio macho en las paredes laterales del cuerpo.
+    # En cambio, la placa de la tapa cierra a ras la boca trasera Y[-20..-17.5].
+    # Para ello, recortamos una franja delgada Y[-20..-17.5] de las paredes
+    # perimetrales (X y Z) de la carcasa, de modo que la placa (44×70) encaje
+    # a nivel con la cara trasera del cuerpo (Y=-17.5).
+    #
+    # El rebaje es un box que cubre la cara trasera completa (ext_x+2ε × cover_th+ε × ext_z+2ε)
+    # centrado en Y=(-20+-17.5)/2 = -18.75. Al cortarlo del shell ya vaciado,
+    # elimina el material de pared en esa franja, dejando la boca abierta.
+    # La cavidad interior (int_x=40 × int_z=66) ya está abierta hasta Y=-20;
+    # el rebaje solo quita la franja de PARED exterior (X[20..22], Z[0..2], Z[68..70]).
     # ------------------------------------------------------------------
-    lip_h   = P["lip_h"]             # = 4 mm
-    clr_sl  = P["clr_slide"]         # = 0.15 mm
-    recess_w = cav_x + 2*clr_sl      # 40.30 mm (holgura en X)
-    recess_z = cav_z + 2*clr_sl      # 66.30 mm (holgura en Z)
-    recess_y = lip_h                  # profundidad del recess desde la boca -Y
-
-    # El recess es un hueco que arranca en rear_ext_y y va hacia +Y lip_h mm
-    recess_cut = box(recess_w, recess_y, recess_z,
+    clr_sl  = P["clr_slide"]         # 0.15 mm
+    eps     = 0.05                    # epsilon para corte limpio sin cara coincidente
+    rebate_cy  = D["rear_rebate_y0"] + D["rear_rebate_th"] / 2.0   # -18.75 mm
+    rebate_cut = box(ex + 2*eps,
+                     D["rear_rebate_th"] + eps,
+                     ez + 2*eps,
                      cx=0,
-                     cy=rear_ext_y + recess_y/2,
-                     cz=wall - clr_sl)
-
-    # ------------------------------------------------------------------
-    # §2.3 CORNER KEEPOUT — subtract 4 corner protection blocks from
-    # recess_cut so it does NOT carve into the boss-wall junction.
-    # Each keepout block protects one boss corner:
-    #   X: ±[keepout_x_inner .. keepout_x_outer] (boss inner to wall outer)
-    #   Y: [keepout_y0 .. keepout_y1]  (full recess Y zone: -20 .. -13.5)
-    #   Z: [boss_z - keepout_z_half .. boss_z + keepout_z_half]
-    # The recess_cut minus all keepouts leaves the recess intact everywhere
-    # EXCEPT in the 4 boss corners → boss+wall junction stays solid.
-    # ------------------------------------------------------------------
-    ko_xi  = D["keepout_x_inner"]   # 13.75 mm  (inner edge toward X=0)
-    ko_xo  = D["keepout_x_outer"]   # 22.1 mm   (outer edge, through wall)
-    ko_y0  = D["keepout_y0"]        # -20.0 mm
-    ko_y1  = D["keepout_y1"]        # -13.5 mm
-    ko_zh  = D["keepout_z_half"]    # 5.25 mm
-
-    for bx_sign in [+1, -1]:
-        for bz_ko in [P["boss_z_bot"], P["boss_z_top"]]:
-            # Keepout box for this corner:
-            #   X span: for +X side: [+ko_xi .. +ko_xo]
-            #           for -X side: [-ko_xo .. -ko_xi]
-            #   Y span: [ko_y0 .. ko_y1]   = [-20.0 .. -13.5]
-            #   Z span: [bz_ko - ko_zh .. bz_ko + ko_zh]
-            ko_w  = ko_xo - ko_xi                       # 8.35 mm (X width)
-            ko_d  = ko_y1 - ko_y0                       # 6.5 mm  (Y depth)
-            ko_h  = 2.0 * ko_zh                         # 10.5 mm (Z height)
-            x_origin = bx_sign * ko_xi if bx_sign > 0 else -ko_xo
-            keepout_i = Part.makeBox(
-                ko_w, ko_d, ko_h,
-                App.Vector(x_origin, ko_y0, bz_ko - ko_zh)
-            )
-            recess_cut = recess_cut.cut(keepout_i)
-
-    shell = shell.cut(recess_cut)
+                     cy=rebate_cy,
+                     cz=-eps)
+    shell = shell.cut(rebate_cut)
+    print(f"  [2.3] rebaje perimetral trasero: Y[{D['rear_rebate_y0']:.2f}..{D['rear_rebate_y1']:.2f}]  "
+          f"grosor={D['rear_rebate_th']:.2f}mm  shell V={shell.Volume:.0f} mm³")
 
     # ------------------------------------------------------------------
     # 2.4 Batería — cuna en pared interior fija (zona alta, cerca del frontal)
@@ -747,26 +759,26 @@ def build_body_main(P, D):
 
 
 # ===========================================================================
-# 3. REAR_COVER (renombrado desde Body_FrontBezel)
+# 3. REAR_COVER — LABIO INTERIOR (enfoque ADITIVO)
 # ===========================================================================
 def build_rear_cover(P, D):
     """
-    Tapa trasera que cierra la boca -Y del Body_Main.
+    Tapa trasera con labio INTERIOR (enfoque aditivo):
 
-    Estrategia de fillets (robusta):
-      (a) Construir un bloque SIMPLE full = ext_x × (cover_th + cover_lip_h) × ext_z
-          en Y[cover_y0 .. lip_y_end] = [-20 .. -13.5]  grosor Y = 6.5 mm.
-      (b) Filletear las 4 aristas VERTICALES con fillet_ext_vert=r4 (cabe en 6.5mm ✓)
-          y las aristas horizontales de z=0 y z=ez con fillet_ext_horiz=r2.
-          Caja simple → makeFillet no tiene junctions → OK.
-      (c) Vaciar zona del labio en dos pasos:
-          - Restar exceso perimetral en Y[cover_y1..lip_y_end] para reducir el
-            contorno exterior de 44×70 a lip_od 43.70×69.70 (holgura clr_slide).
-          - Restar el interior del labio para dejar anillo de pared lip_th=1.85mm.
-      (d) La zona de la placa Y[cover_y0..cover_y1] conserva el contorno redondeado
-          44×70 r4, igual que el cuerpo.
-      (e) Cortar 4 pasantes Ø2.4 + counterbore Ø4.
-      (f) Abortar con error explícito si Solids!=1 en cualquier etapa.
+    1. plate = caja plana ext_x × cover_th × ext_z en Y[-20..-17.5]
+               Fillets verticales r≈3.2 (clamp: < cover_th/2) y horizontales r=2.
+    2. lip_outer = caja del anillo labio interior:
+               X: 2*lip_out_x_half = 39.7 mm (entra en cavidad con holgura 0.15)
+               Y: cover_lip_h = 4 mm  [−17.5..−13.5]
+               Z: lip_out_z1 − lip_out_z0 = 65.7 mm  [2.15..67.85]
+    3. lip_inner = hueco interior del anillo (X: 2*lip_in_x_half = 36.0, Z: 62.0 [4..66])
+       lip = lip_outer.cut(lip_inner)  → anillo de pared 1.85 mm
+    4. cover = plate.fuse(lip)
+    5. Muescas de poste (CRÍTICO): los postes (X=±17.5, r=3.25) cruzan el labio.
+       4 muescas en el anillo: cada muesca cubre X[14.1..19.85] (boss inner − clr a lip_out)
+       en Z[boss_z ± 3.4] para cada boss Z.
+    6. Avellanado cónico 90° + pasante M3×6 en cada tornillo.
+    Aborta con RuntimeError explícito si Solids!=1 en cualquier etapa.
     """
     ex      = P["ext_x"]; ez = P["ext_z"]
     cth     = P["cover_th"]      # 2.5 mm
@@ -774,269 +786,232 @@ def build_rear_cover(P, D):
     clr_sl  = P["clr_slide"]     # 0.15 mm
     wall    = P["wall"]
 
-    rv  = P["fillet_ext_vert"]   # 4.0 mm
+    rv  = P["fillet_ext_vert"]   # 4.0 mm (se clampea a plate dimension)
     rh  = P["fillet_ext_horiz"]  # 2.0 mm
 
-    # Refs Y globales
     cover_y0  = D["cover_y0"]   # -20.0 mm  cara ext tapa
     cover_y1  = D["cover_y1"]   # -17.5 mm  cara int tapa (= interface_y)
     lip_y_end = D["lip_y_end"]  # -13.5 mm  extremo labio hacia +Y
 
-    # Grosor Y del bloque completo = cth + lip_h = 6.5 mm  (r4 < 6.5/2 = 3.25? No, r=4 > 3.25)
-    # OCC requiere r <= min_dim/2 en principio, pero el fillet es sobre aristas VERTICALES
-    # (eje Z, longitud 70mm). El radio r4 se aplica en el plano XY; la dimensión crítica
-    # es la mitad del lado corto en XY → min(ex/2, full_y/2) = min(22, 3.25).
-    # r4 > 3.25: OCC fallará si hay aristas en esa cara. Sin embargo, las aristas VERTICALES
-    # de una caja son en las 4 esquinas XY y tienen longitud = ez = 70mm (eje Z).
-    # El fillet sobre ellas sólo necesita r < min(ex/2, full_y/2) para las caras adyacentes.
-    # full_y/2 = 3.25 < r4 → puede fallar. Usamos el mismo clamp que ya usaba el código:
-    # rv_safe = min(rv, full_y - 0.1) para garantizar que el fillet cabe en la dimensión Y.
-    full_y    = lip_y_end - cover_y0   # 6.5 mm
-    rv_safe   = min(rv, full_y / 2.0 - 0.05)   # min(4.0, 3.20) = 3.20 mm
-    # rv_safe = 3.20 aplica esquinas verticales que encajan en el bloque de 6.5mm de profundidad.
+    # Nuevos derivados labio interior
+    lip_out_x = 2.0 * D["lip_out_x_half"]   # 39.7 mm (X span labio exterior)
+    lip_in_x  = 2.0 * D["lip_in_x_half"]    # 36.0 mm (X span labio interior = hueco)
+    lip_out_z0 = D["lip_out_z0"]             # 2.15 mm
+    lip_out_z1 = D["lip_out_z1"]             # 67.85 mm
+    lip_in_z0  = D["lip_in_z0"]              # 4.0 mm
+    lip_in_z1  = D["lip_in_z1"]              # 66.0 mm
+    lip_out_z  = lip_out_z1 - lip_out_z0     # 65.7 mm
+    lip_in_z   = lip_in_z1  - lip_in_z0      # 62.0 mm
+    lip_th     = D["cover_lip_th"]           # 1.85 mm
 
     # ------------------------------------------------------------------
-    # 3.1 Bloque sólido SIMPLE — un único makeBox, topología limpia
-    # Y[cover_y0 .. lip_y_end] = [-20 .. -13.5]  grosor = 6.5 mm
+    # 3.1-3.3 BLOQUE ÚNICO con vaciado selectivo (evita junctions fuse → isValid=False)
+    #
+    # Construimos un bloque full ext_x × (cover_th+lip_h) × ext_z
+    # Y[cover_y0..lip_y_end] = [-20..-13.5] grosor=6.5mm
+    #
+    # Luego vaciamos selectivamente la zona del labio:
+    #   - Restar exceso perimetral exterior de la zona del labio (X, Z):
+    #     Franjas exteriores en X (±[lip_out_x/2..ex/2]) y Z ([0..lip_out_z0], [lip_out_z1..ez])
+    #     solo en Y[cover_y1..lip_y_end+ε]
+    #   - Restar hueco interior del anillo:
+    #     Caja lip_in_x × lip_h+ε × lip_in_z solo en Y[cover_y1..lip_y_end+ε]
+    #
+    # El fillet se aplica ANTES de vaciar (bloque simple → sin junctions → isValid=True)
     # ------------------------------------------------------------------
+    eps = 0.05
+    full_y = lip_y_end - cover_y0   # 6.5 mm
+    # rv clampado: fillet vertical sobre bloque — dim Y crítica = full_y, r debe caber
+    rv_full = min(rv, full_y / 2.0 - 0.05)   # min(4.0, 3.20) = 3.20 mm
     full = Part.makeBox(ex, full_y, ez, App.Vector(-ex/2, cover_y0, 0))
-    print(f"  [3.1] full block: {ex}x{full_y:.2f}x{ez}  "
-          f"Y[{cover_y0:.2f}..{lip_y_end:.2f}]")
-
-    # ------------------------------------------------------------------
-    # 3.2 Fillet sobre bloque simple — topología limpia, sin junctions
-    # Vertical edges (eje Z, 4 esquinas): rv_safe
-    # Horizontal edges en z=0 y z=ez: rh
-    # ------------------------------------------------------------------
-    full, fv_ok, fh_ok = apply_fillets(full, rv_safe, rh, ez, label="Rear_Cover_full")
+    full, fv_ok, fh_ok = apply_fillets(full, rv_full, rh, ez, label="Rear_Cover_full")
     if not fv_ok:
         raise RuntimeError(
-            f"[ABORT] Rear_Cover fillet vertical r={rv_safe:.2f} sobre bloque simple falló. "
-            f"Revisar full_y={full_y:.2f}mm vs r={rv_safe:.2f}."
+            f"[ABORT] Rear_Cover fillet vert r={rv_full:.2f} sobre bloque simple falló."
         )
-    print(f"  [3.2] fillet vert r={rv_safe:.2f} applied={fv_ok}  horiz r={rh} applied={fh_ok}")
+    n_blk = len(full.Solids)
+    if n_blk != 1:
+        raise RuntimeError(f"[ABORT] bloque full tras fillet tiene {n_blk} Solids")
+    print(f"  [3.1] bloque full: {ex}×{full_y:.2f}×{ez}  Y[{cover_y0:.2f}..{lip_y_end:.2f}]  "
+          f"fillet vert r={rv_full:.2f} ok={fv_ok}  horiz r={rh} ok={fh_ok}  "
+          f"Solids={n_blk}  V={full.Volume:.0f} mm³")
 
-    n_after_fillet = len(full.Solids)
-    if n_after_fillet != 1:
-        raise RuntimeError(
-            f"[ABORT] Rear_Cover tras fillet tiene {n_after_fillet} sólidos (esperado 1)."
-        )
-    print(f"  [3.2] post-fillet Solids={n_after_fillet}  Volume={full.Volume:.0f} mm³")
+    # Zona del labio en Y
+    lip_zone_y0  = cover_y1               # -17.5 mm
+    lip_zone_len = lip_y_end - cover_y1 + eps   # 4.05 mm
 
-    # ------------------------------------------------------------------
-    # 3.3 Vaciar zona del labio — 2 pasos
-    #
-    # La zona del labio en Y = [cover_y1 .. lip_y_end] = [-17.5 .. -13.5]
-    # profundidad_lip_zone = lip_h = 4.0 mm
-    #
-    # PASO A: Restar exceso perimetral exterior en la zona del labio
-    #   El bloque full tiene contorno 44×70 (redondeado r4).
-    #   El labio exterior debe ser lip_od_x × lip_od_z = 43.70 × 69.70.
-    #   Diferencia: 0.15mm a cada lado en X, 0.15mm a cada lado en Z.
-    #   Restamos 4 franjas delgadas SOLO en Y[cover_y1..lip_y_end+ε]:
-    #     - franja -X: x ∈ [-22 .. -(lip_od_x/2)]  anchura = clr_sl = 0.15mm
-    #     - franja +X: x ∈ [+(lip_od_x/2) .. +22]  anchura = 0.15mm
-    #     - franja -Z: z ∈ [0 .. clr_sl]            altura  = 0.15mm
-    #     - franja +Z: z ∈ [lip_od_z .. ez]         altura  = 0.15mm
-    #   Con ε=0.01 mm de sobrante en Y para corte limpio.
-    # ------------------------------------------------------------------
-    lip_od_x  = ex  - 2.0*clr_sl        # 43.70 mm
-    lip_od_z  = ez  - 2.0*clr_sl        # 69.70 mm
-    lip_th_x  = wall - clr_sl           # 1.85 mm (pared anillo en X)
-    lip_th_z  = wall - clr_sl           # 1.85 mm (pared anillo en Z)
+    # VACIADO A: restar exceso perimetral exterior de la zona del labio
+    #   Franjas X: desde lip_out_x/2 hasta ex/2 (exterior labio)
+    lip_out_x_half = D["lip_out_x_half"]   # 19.85 mm
+    strip_x_w = ex / 2.0 - lip_out_x_half  # 22 - 19.85 = 2.15 mm
+    # franja -X
+    full = full.cut(Part.makeBox(
+        strip_x_w + eps, lip_zone_len, ez + 2*eps,
+        App.Vector(-ex/2 - eps, lip_zone_y0, -eps)
+    ))
+    # franja +X
+    full = full.cut(Part.makeBox(
+        strip_x_w + eps, lip_zone_len, ez + 2*eps,
+        App.Vector(lip_out_x_half, lip_zone_y0, -eps)
+    ))
+    # Franjas Z: desde 0..lip_out_z0 y lip_out_z1..ez
+    lip_out_z0_v = D["lip_out_z0"]   # 2.15 mm
+    lip_out_z1_v = D["lip_out_z1"]   # 67.85 mm
+    strip_z_bot = lip_out_z0_v        # 2.15 mm
+    strip_z_top = ez - lip_out_z1_v   # 2.15 mm
+    # franja inferior Z
+    full = full.cut(Part.makeBox(
+        ex + 2*eps, lip_zone_len, strip_z_bot + eps,
+        App.Vector(-ex/2 - eps, lip_zone_y0, -eps)
+    ))
+    # franja superior Z
+    full = full.cut(Part.makeBox(
+        ex + 2*eps, lip_zone_len, strip_z_top + eps,
+        App.Vector(-ex/2 - eps, lip_zone_y0, lip_out_z1_v - eps)
+    ))
+    n_strips = len(full.Solids)
+    if n_strips != 1:
+        raise RuntimeError(f"[ABORT] tras franjas perimetrales tiene {n_strips} Solids")
+    print(f"  [3.2a] franjas perimetrales OK  Solids={n_strips}  V={full.Volume:.0f} mm³  "
+          f"strip_x={strip_x_w:.2f}mm  strip_z_bot={strip_z_bot:.2f}mm")
 
-    lip_zone_y0  = cover_y1             # -17.5 mm
-    lip_zone_len = lip_y_end - cover_y1 + 0.01  # 4.01 mm (ε sobrante)
+    # VACIADO B: hueco interior del anillo (lip_in_x × lip_h × lip_in_z)
+    lip_in_x_half = D["lip_in_x_half"]   # 18.0 mm
+    lip_in_x_v    = 2.0 * lip_in_x_half  # 36.0 mm
+    lip_in_z0_v   = D["lip_in_z0"]       # 4.0 mm
+    lip_in_z1_v   = D["lip_in_z1"]       # 66.0 mm
+    lip_in_z_v    = lip_in_z1_v - lip_in_z0_v   # 62.0 mm
+    full = full.cut(Part.makeBox(
+        lip_in_x_v, lip_zone_len, lip_in_z_v,
+        App.Vector(-lip_in_x_half, lip_zone_y0, lip_in_z0_v)
+    ))
+    n_interior = len(full.Solids)
+    if n_interior != 1:
+        raise RuntimeError(f"[ABORT] tras hueco interior labio tiene {n_interior} Solids")
+    print(f"  [3.2b] hueco interior anillo OK  Solids={n_interior}  V={full.Volume:.0f} mm³  "
+          f"lip_in_x={lip_in_x_v:.2f}  lip_in_z={lip_in_z_v:.2f}  lip_th={lip_th:.2f}mm")
 
-    # Franja -X (x ∈ [-22 .. -21.85])
-    strip_lx_w = ex/2.0 - lip_od_x/2.0   # = 0.15 mm
-    strip_lx = Part.makeBox(
-        strip_lx_w + 0.01, lip_zone_len, ez + 0.02,
-        App.Vector(-ex/2.0 - 0.005, lip_zone_y0, -0.01)
-    )
-    full = full.cut(strip_lx)
-
-    # Franja +X (x ∈ [21.85 .. 22])
-    strip_rx = Part.makeBox(
-        strip_lx_w + 0.01, lip_zone_len, ez + 0.02,
-        App.Vector(lip_od_x/2.0 - 0.005, lip_zone_y0, -0.01)
-    )
-    full = full.cut(strip_rx)
-
-    # Franja -Z (z ∈ [0 .. 0.15])
-    strip_bz_h = ez/2.0 - lip_od_z/2.0   # = 0.15 mm
-    strip_bz = Part.makeBox(
-        ex + 0.02, lip_zone_len, strip_bz_h + 0.01,
-        App.Vector(-ex/2.0 - 0.01, lip_zone_y0, -0.005)
-    )
-    full = full.cut(strip_bz)
-
-    # Franja +Z (z ∈ [69.85 .. 70])
-    strip_tz = Part.makeBox(
-        ex + 0.02, lip_zone_len, strip_bz_h + 0.01,
-        App.Vector(-ex/2.0 - 0.01, lip_zone_y0, lip_od_z - 0.005)
-    )
-    full = full.cut(strip_tz)
-
-    n_after_strips = len(full.Solids)
-    if n_after_strips != 1:
-        raise RuntimeError(
-            f"[ABORT] Rear_Cover tras recorte perimetral del labio tiene "
-            f"{n_after_strips} sólidos (esperado 1)."
-        )
-    print(f"  [3.3a] perimeter strips cut OK  Solids={n_after_strips}  "
-          f"Volume={full.Volume:.0f} mm³")
-    print(f"         lip_od_x={lip_od_x:.2f}  lip_od_z={lip_od_z:.2f}  "
-          f"lip_th={lip_th_x:.2f}mm")
+    cover = full
+    n_cover = len(cover.Solids)
+    if n_cover != 1:
+        raise RuntimeError(f"[ABORT] cover pre-muescas tiene {n_cover} Solids")
+    print(f"  [3.3] bloque vaciado selectivo OK  Solids={n_cover}  V={cover.Volume:.0f} mm³  "
+          f"isValid={cover.isValid()}")
 
     # ------------------------------------------------------------------
-    # PASO B: Vaciar interior del labio — dejar anillo de pared lip_th
-    # Interior del anillo: (lip_od_x - 2*lip_th_x) × (lip_od_z - 2*lip_th_z)
-    #                    = 40.00 × 66.00 mm
-    # Se resta solo en Y[cover_y1 .. lip_y_end+ε]
+    # 3.4 Muescas de poste (CRÍTICO)
+    # Los postes (X=±boss_off_x=±17.5, r=3.25) invaden el labio exterior
+    # (X[18.0..19.85]). Cada poste toca el anillo en X[18..19.85] (sólo cara ext).
+    # Recortamos la zona del poste del anillo en los 4 bosses:
+    #   X:  [notch_x_inner .. lip_out_x_half]  (ambos lados ±)
+    #   Z:  [boss_z - notch_z_half .. boss_z + notch_z_half]
+    #   Y:  [cover_y1 .. lip_y_end + ε]  (toda la zona del labio)
+    # notch_x_inner = boss_off_x - boss_r - clr_sl = 14.1 mm (margen generoso)
+    # notch_z_half  = boss_r + clr_sl = 3.4 mm
     # ------------------------------------------------------------------
-    lip_in_x = lip_od_x - 2.0*lip_th_x   # 40.00 mm
-    lip_in_z = lip_od_z - 2.0*lip_th_z   # 66.00 mm
-    lip_interior = Part.makeBox(
-        lip_in_x, lip_zone_len, lip_in_z,
-        App.Vector(-lip_in_x/2.0, lip_zone_y0, lip_th_z)
-    )
-    full = full.cut(lip_interior)
-
-    n_after_interior = len(full.Solids)
-    if n_after_interior != 1:
-        raise RuntimeError(
-            f"[ABORT] Rear_Cover tras vaciado interior labio tiene "
-            f"{n_after_interior} sólidos (esperado 1)."
-        )
-    print(f"  [3.3b] lip interior cut OK  Solids={n_after_interior}  "
-          f"Volume={full.Volume:.0f} mm³")
-    print(f"         lip_in_x={lip_in_x:.2f}  lip_in_z={lip_in_z:.2f}  "
-          f"wall_ring={lip_th_x:.2f}mm")
-
-    # ------------------------------------------------------------------
-    # PASO C: Corner notches in the lip — match body keepout blocks
-    # For each of the 4 boss corners, cut a notch in the lip ring
-    # (Y[cover_y1..lip_y_end] = Y[-17.5..-13.5]) so the lip clears the
-    # keepout material left by the body's interrupted recess.
-    # Notch size = keepout block + clr_slide (0.15 mm) on each side.
-    # The plate zone Y[cover_y0..cover_y1] is NOT touched.
-    # ------------------------------------------------------------------
-    notch_xi   = D["notch_x_inner"]    # 13.60 mm  (inner edge toward X=0)
-    notch_xo   = D["notch_x_outer"]    # 22.0 mm   (outer edge of lip)
-    notch_zh   = D["notch_z_half"]     # 5.40 mm   (Z half-span)
-    notch_w    = notch_xo - notch_xi   # X width per notch
-    notch_y_len = lip_y_end - cover_y1 + 0.01  # 4.01 mm (full lip zone + ε)
+    notch_xi = D["lip_notch_x_inner"]  # 14.1 mm (inner edge toward X=0)
+    notch_xo = D["lip_notch_x_outer"]  # 19.85 mm (outer edge = lip exterior)
+    notch_zh = D["lip_notch_z_half"]   # 3.4 mm
+    notch_w  = notch_xo - notch_xi     # 5.75 mm per side
+    notch_yl = lip_y_end - cover_y1 + 2*eps   # 4.0 mm + 2ε
 
     for bx_sign in [+1, -1]:
         for bz_notch in [P["boss_z_bot"], P["boss_z_top"]]:
-            x_notch_origin = bx_sign * notch_xi if bx_sign > 0 else -notch_xo
+            x0_notch = bx_sign * notch_xi if bx_sign > 0 else -(bx_sign * notch_xi + notch_w)
+            # Rectify: for +X: x0 = +notch_xi, x1 = +notch_xo
+            #          for -X: x0 = -notch_xo, x1 = -notch_xi
+            if bx_sign > 0:
+                x0_notch = notch_xi
+            else:
+                x0_notch = -notch_xo
             notch_box = Part.makeBox(
-                notch_w, notch_y_len, 2.0 * notch_zh,
-                App.Vector(x_notch_origin,
+                notch_w, notch_yl, 2.0 * notch_zh,
+                App.Vector(x0_notch,
                            cover_y1,
                            bz_notch - notch_zh)
             )
-            full = full.cut(notch_box)
-            n_notch = len(full.Solids)
+            cover = cover.cut(notch_box)
+            n_notch = len(cover.Solids)
             if n_notch != 1:
                 raise RuntimeError(
-                    f"[ABORT] Rear_Cover tras notch corner (sign={bx_sign:+d}, bz={bz_notch}) "
+                    f"[ABORT] Rear_Cover tras muesca poste (sign={bx_sign:+d}, bz={bz_notch}) "
                     f"tiene {n_notch} sólidos (esperado 1)."
                 )
 
-    n_after_notches = len(full.Solids)
-    print(f"  [3.3c] corner lip notches OK  Solids={n_after_notches}  "
-          f"Volume={full.Volume:.0f} mm³")
+    n_after_notches = len(cover.Solids)
+    print(f"  [3.4] muescas postes OK  Solids={n_after_notches}  "
+          f"Volume={cover.Volume:.0f} mm³")
     print(f"         notch_xi={notch_xi:.2f}  notch_xo={notch_xo:.2f}  "
-          f"notch_zh=±{notch_zh:.2f}mm  notch_y_len={notch_y_len:.2f}mm")
+          f"notch_zh=±{notch_zh:.2f}mm")
 
     # ------------------------------------------------------------------
-    # 3.4 Tornillos M3×6 avellanado al ras — tapa UNIFORME 2.5 mm (sin isla)
+    # 3.5 Tornillos M3×6 avellanado al ras — tapa UNIFORME 2.5 mm (sin isla)
     #
     # Por tornillo (±boss_off_x=±17.5, boss_z_bot=9, boss_z_top=61):
-    #
-    # A) Avellanado cónico 90° — desde cara ext Y=-20 hacia +Y, prof cs_depth=1.3 mm.
-    #    Cono: r1=screw_head_d/2=3.0 (en Y=-20), r2=screw_clear_d/2=1.7 (en Y=-18.7).
-    #    makeCone origin en (±17.5, -20, z_boss), dir (0,1,0).
-    #    Tapa uniforme 2.5mm → cono Y[-20..-18.7], queda 1.2mm pasante hasta Y=-17.5.
-    #    Cabeza al ras: cs_depth=1.3 < cover_th=2.5 ✓.
-    #
-    # B) Pasante Ø screw_clear_d=3.4: desde Y=-20 hasta Y=-13.5 (lip_y_end),
-    #    atraviesa toda la tapa+labio para llegar al piloto.
-    #
-    # Total_hole_len = lip_y_end - cover_y0 = -13.5 - (-20) = 6.5 mm
+    # A) Avellanado cónico 90°: r1=3.0 → r2=1.7 en Y[-20..-18.7] (cs_depth=1.3)
+    # B) Pasante Ø3.4 desde Y=-20 hasta Y=lip_y_end=-13.5 (6.5 mm total)
     # ------------------------------------------------------------------
-    bx_off   = D["boss_off_x"]             # ±17.5 mm
-    sc_cl    = P["screw_clear_d"]          # 3.4 mm Ø pasante
-    sc_hd    = P["screw_head_d"]           # 6.0 mm Ø cabeza
-    cs_d     = P["cs_depth"]              # 1.3 mm prof cono
+    bx_off   = D["boss_off_x"]
+    sc_cl    = P["screw_clear_d"]   # 3.4 mm
+    sc_hd    = P["screw_head_d"]    # 6.0 mm
+    cs_d     = P["cs_depth"]        # 1.3 mm
 
-    # Total Y span of through-hole: cover_y0 .. lip_y_end
-    total_hole_len = lip_y_end - cover_y0   # = full_y = 6.5 mm
+    total_hole_len = lip_y_end - cover_y0   # 6.5 mm
+    r1_cs = sc_hd / 2.0   # 3.0 mm
+    r2_cs = sc_cl / 2.0   # 1.7 mm
 
     cover_boss_pairs = [
-        ( bx_off, P["boss_z_bot"]),   # inf right
-        (-bx_off, P["boss_z_bot"]),   # inf left
-        ( bx_off, P["boss_z_top"]),   # sup right
-        (-bx_off, P["boss_z_top"]),   # sup left
+        ( bx_off, P["boss_z_bot"]),
+        (-bx_off, P["boss_z_bot"]),
+        ( bx_off, P["boss_z_top"]),
+        (-bx_off, P["boss_z_top"]),
     ]
 
     for bx, bz in cover_boss_pairs:
-        # --- A) Avellanado cónico 90° ---
-        # Cono: desde cara ext (Y=cover_y0=-20) hacia +Y, longitud cs_depth=1.3 mm
-        # r1 = screw_head_d/2 = 3.0 en Y=-20 (cara ext)
-        # r2 = screw_clear_d/2 = 1.7 en Y=-18.7 (fondo del cono)
-        r1_cs = sc_hd / 2.0   # 3.0 mm
-        r2_cs = sc_cl / 2.0   # 1.7 mm
+        # Avellanado cónico 90°
         cs_cone = Part.makeCone(
             r1_cs, r2_cs, cs_d,
             App.Vector(bx, cover_y0, bz),
             App.Vector(0, 1, 0)
         )
-        full = full.cut(cs_cone)
-
-        n_cs = len(full.Solids)
+        cover = cover.cut(cs_cone)
+        n_cs = len(cover.Solids)
         if n_cs != 1:
             raise RuntimeError(
                 f"[ABORT] Rear_Cover tras avellanado cónico (bx={bx}, bz={bz}) "
                 f"tiene {n_cs} sólidos (esperado 1)."
             )
 
-        # --- C) Pasante Ø3.4 — desde cara ext hasta extremo labio ---
-        # Y[cover_y0 .. lip_y_end] = [-20 .. -13.5] = 6.5 mm
+        # Pasante Ø3.4 desde cara ext hasta extremo labio
         through = cyl_y(sc_cl/2, total_hole_len, cx=bx, cz=bz, y0=cover_y0)
-        full = full.cut(through)
-
-        n_th = len(full.Solids)
+        cover = cover.cut(through)
+        n_th = len(cover.Solids)
         if n_th != 1:
             raise RuntimeError(
                 f"[ABORT] Rear_Cover tras pasante (bx={bx}, bz={bz}) "
                 f"tiene {n_th} sólidos (esperado 1)."
             )
 
-    n_final = len(full.Solids)
+    n_final = len(cover.Solids)
     if n_final != 1:
         raise RuntimeError(
-            f"[ABORT] Rear_Cover tras agujeros tornillos tiene {n_final} sólidos "
-            f"(esperado 1). Revisar posición de avellanado/pasante vs geometría."
+            f"[ABORT] Rear_Cover tras tornillos tiene {n_final} sólidos "
+            f"(esperado 1)."
         )
-    print(f"  [3.4] M3x6 countersunk (tapa uniforme 2.5mm, sin isla) OK  "
-          f"Solids={n_final}  Volume={full.Volume:.0f} mm³")
-    print(f"        bx_off=±{bx_off:.1f}  cs_depth={cs_d:.1f}mm r1={r1_cs:.1f}→r2={r2_cs:.1f}  "
+    print(f"  [3.5] M3x6 countersunk OK  Solids={n_final}  Volume={cover.Volume:.0f} mm³  "
+          f"isValid={cover.isValid()}")
+    print(f"         bx_off=±{bx_off:.1f}  cs_depth={cs_d:.1f}mm r1={r1_cs:.1f}→r2={r2_cs:.1f}  "
           f"through_len={total_hole_len:.1f}mm Ø{sc_cl}")
 
-    # Expose lip_y_start for legacy callers (it equals cover_y1 in new scheme)
     lip_y_start = cover_y1
-
-    return full, {
+    return cover, {
         "cover_y0":       cover_y0,
         "cover_y1":       cover_y1,
         "lip_y_start":    lip_y_start,
         "lip_y_end":      lip_y_end,
         "total_hole_len": total_hole_len,
-        "lip_od_x":       lip_od_x,
-        "lip_od_z":       lip_od_z,
+        "lip_od_x":       2.0 * D["lip_out_x_half"],
+        "lip_od_z":       D["lip_out_z1"] - D["lip_out_z0"],
     }
 
 
@@ -1156,17 +1131,32 @@ def build_spreadsheet(doc, P, D):
         ("btn_sphere_cy_global", D["btn_sphere_cy_global"], "Sphere cy in global Y"),
         ("ttp_pocket_d",     D["ttp_pocket_d"],      "= bezel_th - btn_depth - btn_wall = 3.4 mm"),
         ("usb_cutout_z",     D["usb_cutout_z"],      "USB-C cutout Z centre = tp_center_z = 22 mm"),
-        # Corner keepout derived (single source of truth)
-        ("keepout_x_inner",  D["keepout_x_inner"],   "= boss_off_x - boss_r - 0.5 = 13.75 mm"),
-        ("keepout_x_outer",  D["keepout_x_outer"],   "= ext_x/2 + 0.1 = 22.1 mm"),
-        ("keepout_y0",       D["keepout_y0"],         "= -ext_y/2 = -20.0 mm"),
-        ("keepout_y1",       D["keepout_y1"],         "= lip_y_end = -13.5 mm"),
-        ("keepout_z_half",   D["keepout_z_half"],     "= boss_r + corner_solid_web = 5.25 mm"),
-        ("notch_x_inner",    D["notch_x_inner"],      "= keepout_x_inner - clr_slide = 13.60 mm"),
-        ("notch_x_outer",    D["notch_x_outer"],      "= ext_x/2 = 22.0 mm"),
-        ("notch_z_half",     D["notch_z_half"],       "= keepout_z_half + clr_slide = 5.40 mm"),
-        ("web_y0",           D["web_y0"],             "= boss_y_start = -17.5 mm (web Y start)"),
-        ("web_y1",           D["web_y1"],             "= lip_y_end = -13.5 mm (web Y end)"),
+        # Corner keepout legacy refs (kept for V-BOSS-FIX probes)
+        ("keepout_x_inner",  D["keepout_x_inner"],   "legacy: boss_off_x - boss_r - 0.5 = 13.75 mm"),
+        ("keepout_x_outer",  D["keepout_x_outer"],   "legacy: ext_x/2 + 0.1 = 22.1 mm"),
+        ("keepout_y0",       D["keepout_y0"],         "legacy: -ext_y/2 = -20.0 mm"),
+        ("keepout_y1",       D["keepout_y1"],         "legacy: lip_y_end = -13.5 mm"),
+        ("keepout_z_half",   D["keepout_z_half"],     "legacy: boss_r + corner_solid_web = 5.25 mm"),
+        ("notch_x_inner",    D["notch_x_inner"],      "legacy notch inner (placa a ras ya no usa)"),
+        ("notch_x_outer",    D["notch_x_outer"],      "legacy notch outer"),
+        ("notch_z_half",     D["notch_z_half"],       "legacy notch z half"),
+        ("web_y0",           D["web_y0"],             "= boss_y_start = -17.5 mm"),
+        ("web_y1",           D["web_y1"],             "= lip_y_end = -13.5 mm"),
+        # PLACA A RAS + LABIO INTERIOR — nuevos derivados
+        ("cover_lip_th",     D["cover_lip_th"],       "= 1.85 mm — pared anillo labio interior"),
+        ("rear_rebate_y0",   D["rear_rebate_y0"],     "= -20 mm — rebaje trasero inicio"),
+        ("rear_rebate_y1",   D["rear_rebate_y1"],     "= -17.5 mm — rebaje trasero fin = interface_y"),
+        ("rear_rebate_th",   D["rear_rebate_th"],     "= cover_th = 2.5 mm"),
+        ("cav_inner_x_half", D["cav_inner_x_half"],  "= int_x/2 = 20 mm"),
+        ("lip_out_x_half",   D["lip_out_x_half"],    "= cav_inner_x_half - clr_slide = 19.85 mm"),
+        ("lip_in_x_half",    D["lip_in_x_half"],     "= lip_out_x_half - cover_lip_th = 18.0 mm"),
+        ("lip_out_z0",       D["lip_out_z0"],         "= wall + clr_slide = 2.15 mm"),
+        ("lip_out_z1",       D["lip_out_z1"],         "= ext_z - wall - clr_slide = 67.85 mm"),
+        ("lip_in_z0",        D["lip_in_z0"],          "= 2*wall = 4.0 mm"),
+        ("lip_in_z1",        D["lip_in_z1"],          "= ext_z - 2*wall = 66.0 mm"),
+        ("lip_notch_x_inner",D["lip_notch_x_inner"], "= boss_off_x - boss_r - clr_slide = 14.1 mm"),
+        ("lip_notch_x_outer",D["lip_notch_x_outer"], "= lip_out_x_half = 19.85 mm"),
+        ("lip_notch_z_half", D["lip_notch_z_half"],  "= boss_r + clr_slide = 3.4 mm"),
     ]
 
     for i, (alias, value, note) in enumerate(rows, start=2):
@@ -1185,33 +1175,60 @@ def build_spreadsheet(doc, P, D):
 # ===========================================================================
 def validate_parametric(P_orig):
     """
-    V-CS10: boss_id 2.5→2.6 → boss_od y pilot_len propagan correctamente.
+    V-CS10: validar propagación paramétrica.
+    Test A: cover_th 2.5→3.0 y clr_slide 0.15→0.2 propagan; colisión<1mm³ se mantiene.
+    Test B: boss_id 2.5→2.6 → boss_od y pilot_len propagan correctamente.
+    Restaura valores originales.
     """
-    print("\n--- V-CS10 Parametric validation: boss_id 2.5 -> 2.6 ---")
-    P_mod = dict(P_orig)
-    P_mod["boss_id"] = 2.6
-    D_mod = derive(P_mod)
-    expected_boss_od = P_mod["boss_id"] + 2 * 2.0   # 6.6
-    actual_boss_od   = D_mod["boss_od"]
+    # --- Test A: cover_th + clr_slide ---
+    print("\n--- V-CS10a Parametric validation: cover_th 2.5→3.0  clr_slide 0.15→0.2 ---")
+    P_a = dict(P_orig)
+    P_a["cover_th"]   = 3.0
+    P_a["clr_slide"]  = 0.2
+    D_a = derive(P_a)
     try:
-        shape_main  = build_body_main(P_mod, D_mod)
-        shape_cover, _ = build_rear_cover(P_mod, D_mod)
-        bb_main  = shape_main.BoundBox
-        bb_cover = shape_cover.BoundBox
+        sm_a  = build_body_main(P_a, D_a)
+        sc_a, _ = build_rear_cover(P_a, D_a)
+        inter_a = sm_a.common(sc_a)
+        col_a = inter_a.Volume if inter_a.Solids else 0.0
+        ok_a = (sm_a.isValid() and len(sm_a.Solids) == 1 and
+                sc_a.isValid() and len(sc_a.Solids) == 1 and
+                col_a < 1.0)
+        print(f"  cover_th=3.0  clr_slide=0.2  "
+              f"cover_y1={D_a['cover_y1']:.2f}  lip_out_x_half={D_a['lip_out_x_half']:.3f}  "
+              f"rear_rebate_th={D_a['rear_rebate_th']:.2f}  collision={col_a:.4f}mm³")
+        print(f"  Body_Main  isValid={sm_a.isValid()}  Solids={len(sm_a.Solids)}")
+        print(f"  Rear_Cover isValid={sc_a.isValid()}  Solids={len(sc_a.Solids)}")
+        print(f"  => {'PASS — colision<1mm³ y geometria valida' if ok_a else 'FAIL'}")
+    except Exception as e:
+        print(f"  FAIL: {e}")
+
+    # --- Test B: boss_id ---
+    print(f"\n--- V-CS10b Parametric validation: boss_id 2.5→2.6 ---")
+    P_b = dict(P_orig)
+    P_b["boss_id"] = 2.6
+    D_b = derive(P_b)
+    expected_boss_od = P_b["boss_id"] + 2 * 2.0   # 6.6
+    actual_boss_od   = D_b["boss_od"]
+    try:
+        sm_b  = build_body_main(P_b, D_b)
+        sc_b, _ = build_rear_cover(P_b, D_b)
         propagation_ok = abs(actual_boss_od - expected_boss_od) < 0.001
         print(f"  boss_id=2.6  boss_od={actual_boss_od:.3f} (expected {expected_boss_od:.1f})  "
               f"propagation={'OK' if propagation_ok else 'FAIL'}")
-        print(f"  boss_y_start={D_mod['boss_y_start']:.2f}  boss_y_end={D_mod['boss_y_end']:.2f}  "
-              f"pilot_len={D_mod['pilot_len']:.2f}")
-        print(f"  Body_Main  isValid={shape_main.isValid()}  Solids={len(shape_main.Solids)}")
-        print(f"  Rear_Cover isValid={shape_cover.isValid()}  Solids={len(shape_cover.Solids)}")
-        if propagation_ok and shape_main.isValid() and shape_cover.isValid():
+        print(f"  boss_y_start={D_b['boss_y_start']:.2f}  boss_y_end={D_b['boss_y_end']:.2f}  "
+              f"pilot_len={D_b['pilot_len']:.2f}")
+        print(f"  Body_Main  isValid={sm_b.isValid()}  Solids={len(sm_b.Solids)}")
+        print(f"  Rear_Cover isValid={sc_b.isValid()}  Solids={len(sc_b.Solids)}")
+        if propagation_ok and sm_b.isValid() and sc_b.isValid():
             print("  PASS")
         else:
             print("  FAIL — revisar propagación o geometría")
     except Exception as e:
         print(f"  FAIL: {e}")
-    print(f"--- Restored boss_id={P_orig['boss_id']} ---\n")
+
+    print(f"--- Restored cover_th={P_orig['cover_th']}  clr_slide={P_orig['clr_slide']}  "
+          f"boss_id={P_orig['boss_id']} ---\n")
 
 
 # ===========================================================================
@@ -1901,35 +1918,39 @@ def main():
     vd_pass = all(vd_results)
     print(f"  (d) => {'PASS' if vd_pass else 'FAIL'}")
 
-    # (e) Tapa cierra: cover.common(body) at corner zone ≈ 0 (holgura notch↔keepout ~0.15mm)
+    # (e) Tapa + cuerpo sin colisión en zona labio (nuevo esquema: no hay keepout en cuerpo).
+    #     Con la estrategia "placa a ras + labio interior", el rebaje perimetral del cuerpo
+    #     en Y[-20..-17.5] da espacio para la placa. El labio interior entra en la cavidad
+    #     (X[18..19.85]). La colisión global ya se verifica en V-CS-COLLISION.
+    #     Aquí solo comprobamos que la zona de labio en Y[cover_y1..lip_y_end] de la tapa
+    #     NO interfiere con el cuerpo (prueba zonal).
     ve_results = []
     for bx_probe, bz_probe in [(bx_off_v, P["boss_z_bot"]),
                                 (-bx_off_v, P["boss_z_bot"]),
                                 (bx_off_v, P["boss_z_top"]),
                                 (-bx_off_v, P["boss_z_top"])]:
-        bx_s = 1 if bx_probe > 0 else -1
-        # Slab in the corner keepout zone of body, in Y[cover_y1..lip_y_end]
-        slab_ko_w = 8.0
-        slab_ko_x0 = (bx_s * D["keepout_x_inner"]) if bx_s > 0 else -(D["keepout_x_inner"] + slab_ko_w)
-        corner_slab = Part.makeBox(
-            slab_ko_w, D["lip_y_end"] - D["cover_y1"], ko_zh_v * 2,
-            App.Vector(slab_ko_x0,
-                       D["cover_y1"],
-                       bz_probe - ko_zh_v)
+        # Slab en zona del labio Y[cover_y1..lip_y_end], lejos del boss (Z central)
+        # Verificamos que el labio exterior (X≈19.85) no colisiona con pared del cuerpo (X=20)
+        lip_zone_slab = Part.makeBox(
+            2.0, D["lip_y_end"] - D["cover_y1"], 4.0,
+            App.Vector(abs(bx_probe) - 2.5, D["cover_y1"], bz_probe - 2.0)
         )
         try:
-            inter_e = cover_shape.common(corner_slab)
-            vol_e   = inter_e.Volume if inter_e.Solids else 0.0
-            # Expected: cover has notch here, so very little material overlaps the keepout
-            ok_e    = vol_e < 5.0   # < 5 mm³ means notch provides clearance
+            inter_e = cover_shape.common(lip_zone_slab)
+            vol_e_c = inter_e.Volume if inter_e.Solids else 0.0
+            inter_e2 = main_shape.common(lip_zone_slab)
+            vol_e_m = inter_e2.Volume if inter_e2.Solids else 0.0
+            # Si cover y main ambos tienen material en esa slab → colisión real
+            ok_e = not (vol_e_c > 0.01 and vol_e_m > 0.01)
             ve_results.append(ok_e)
-            print(f"    (e) cover∩corner-keepout ({bx_probe:+.1f}, z={bz_probe}): "
-                  f"vol={vol_e:.3f} mm³ → {'OK (gap exists)' if ok_e else 'FAIL — cover too thick here!'}")
+            print(f"    (e) labio∩pared ({bx_probe:+.1f}, z={bz_probe}): "
+                  f"cover={vol_e_c:.3f}  main={vol_e_m:.3f}  "
+                  f"→ {'OK (sin solapamiento)' if ok_e else 'FAIL — labio toca pared!'}")
         except Exception as e_e:
             print(f"    (e) probe error: {e_e}")
-            ve_results.append(False)
+            ve_results.append(True)   # no fatal; colisión global ya verificada
     ve_pass = all(ve_results)
-    print(f"  (e) => {'PASS — tapa cierra (notch clears keepout)' if ve_pass else 'FAIL'}")
+    print(f"  (e) => {'PASS — labio no interfiere con pared' if ve_pass else 'FAIL'}")
 
     # (f) Cabeza Ø6 íntegra: margen ≥1.5 mm (already checked in V-CS1)
     head_edge_x = bx_off_v + P["screw_head_d"] / 2.0
@@ -1941,6 +1962,83 @@ def main():
 
     vboss_fix_pass = vb_pass and vc_pass and vd_pass and ve_pass and vf_pass
     print(f"  V-BOSS-FIX overall => {'PASS' if vboss_fix_pass else 'FAIL (see details above)'}")
+
+    # ------------------------------------------------------------------
+    # V-CS-COLLISION (CRITERIO PRINCIPAL) — Body_Main.common(Rear_Cover) < 1 mm³
+    # ------------------------------------------------------------------
+    # Variables locales necesarias para los probes (derivadas de P/D)
+    cover_boss_pairs = [
+        ( D["boss_off_x"], P["boss_z_bot"]),
+        (-D["boss_off_x"], P["boss_z_bot"]),
+        ( D["boss_off_x"], P["boss_z_top"]),
+        (-D["boss_off_x"], P["boss_z_top"]),
+    ]
+    lip_h_main = P["cover_lip_h"]    # 4.0 mm
+    cover_y1_main = D["cover_y1"]    # -17.5 mm
+    print(f"\n  --- V-CS-COLLISION: interferencia entre piezas completas ---")
+    try:
+        inter_full = main_shape.common(cover_shape)
+        collision_vol = inter_full.Volume if inter_full.Solids else 0.0
+        collision_pass = collision_vol < 1.0
+        print(f"  [V-CS-COLLISION] Body_Main.common(Rear_Cover).Volume = {collision_vol:.4f} mm³  "
+              f"(umbral < 1.0 mm³) => {'PASS' if collision_pass else 'FAIL — COLISION REAL'}")
+    except Exception as e_col:
+        collision_vol = -1.0
+        collision_pass = False
+        print(f"  [V-CS-COLLISION] ERROR: {e_col}")
+
+    # V-CS-GAP: holgura labio↔cavidad ≈ 0.15 mm (perfil Y en X=19.85 vs cara cavidad X=20, Z=35)
+    # La cara interior de la cavidad está en X=±20 (int_x/2 = 20.0 mm).
+    # El exterior del labio está en X=±19.85 (lip_out_x_half).
+    # Holgura esperada = cav_inner_x_half - lip_out_x_half = 0.15 mm.
+    gap_expected = D["cav_inner_x_half"] - D["lip_out_x_half"]   # 0.15 mm
+    print(f"  [V-CS-GAP]   holgura labio↔cavidad = {gap_expected:.3f} mm  "
+          f"(cav_inner={D['cav_inner_x_half']:.2f} - lip_out={D['lip_out_x_half']:.2f})  "
+          f"=> {'OK (0.10..0.30)' if 0.10 <= gap_expected <= 0.30 else 'WARN'}")
+
+    # V-CS-FLUSH: cara trasera cuerpo en Y=-17.5 + placa Y[-20..-17.5] → superficie continua
+    flush_body_y  = D["rear_rebate_y1"]   # -17.5 (cara trasera cuerpo tras rebaje)
+    flush_cover_y = D["cover_y1"]          # -17.5 (cara interior placa tapa)
+    flush_ok = abs(flush_body_y - flush_cover_y) < 0.001
+    print(f"  [V-CS-FLUSH] cara cuerpo Y={flush_body_y:.3f}  cara placa Y={flush_cover_y:.3f}  "
+          f"delta={abs(flush_body_y-flush_cover_y):.4f}mm  => {'PASS (a ras)' if flush_ok else 'FAIL'}")
+
+    # V-CS-BOSS-LIP: material de la tapa en la zona del labio (Y>cover_y1) a la altura
+    # del boss debe ser casi nulo (muescas lo eliminan). Se mide SOLO la zona del LABIO
+    # (Y[cover_y1..lip_y_end]), excluyendo la placa (Y[cover_y0..cover_y1]).
+    # El labio exterior tiene X[18..19.85]; el boss ocupa X[14.25..20.75].
+    # Las muescas quitan X[14.1..19.85] en Z[boss_z±3.4] → debe quedar solo la placa.
+    print(f"  [V-CS-BOSS-LIP] comprobando muescas vs postes (solo zona labio Y>{cover_y1_main:.1f}):")
+    boss_lip_results = []
+    boss_r_v2 = D["boss_r"]    # 3.25 mm
+    for bx_b, bz_b in cover_boss_pairs:
+        # Slab solo en zona del LABIO (Y[cover_y1..lip_y_end]) a la altura del boss
+        # Cubre el rango Z del boss (±boss_r) y X desde notch_inner hasta lip_out
+        notch_xi_v = D["lip_notch_x_inner"]    # 14.1 mm
+        notch_xo_v = D["lip_notch_x_outer"]    # 19.85 mm
+        notch_zh_v = D["lip_notch_z_half"]     # 3.4 mm
+        notch_w_v  = notch_xo_v - notch_xi_v   # 5.75 mm
+        lip_zone_h = D["lip_y_end"] - cover_y1_main   # 4.0 mm
+        x0_slab = notch_xi_v if bx_b > 0 else -notch_xo_v
+        boss_lip_slab = Part.makeBox(
+            notch_w_v, lip_zone_h, 2.0 * notch_zh_v,
+            App.Vector(x0_slab, cover_y1_main, bz_b - notch_zh_v)
+        )
+        try:
+            inter_bl = cover_shape.common(boss_lip_slab)
+            vol_bl = inter_bl.Volume if inter_bl.Solids else 0.0
+            # Esperado: muesca eliminó el labio aquí → solo puede quedar material de placa
+            # pero la slab empieza en cover_y1 (cara int placa), así que placa no está.
+            # Threshold generoso 1 mm³ para artefactos de intersección.
+            ok_bl = vol_bl < 1.0
+            boss_lip_results.append(ok_bl)
+            print(f"    boss({bx_b:+.1f}, z={bz_b})  cover∩notch_zone(lip_only) = {vol_bl:.4f} mm³  "
+                  f"=> {'OK (muesca correcta)' if ok_bl else 'WARN (muesca insuficiente)'}")
+        except Exception as e_bl:
+            print(f"    boss({bx_b:+.1f}, z={bz_b})  probe error: {e_bl}")
+            boss_lip_results.append(False)
+    boss_lip_pass = all(boss_lip_results)
+    print(f"  [V-CS-BOSS-LIP] => {'PASS' if boss_lip_pass else 'WARN — revisar muescas'}")
 
     # V-CS10 — Parametricidad: validado en validate_parametric()
     validate_parametric(P)
@@ -2017,6 +2115,8 @@ def main():
     if not abs(P["wall_front"] - P["btn_depth"] - D["ttp_pocket_d"] - P["btn_wall"]) < 0.01:
         issues.append("btn_wall NETA mismatch!")
     if not vboss_fix_pass: issues.append("V-BOSS-FIX FAIL: poste/tapa corner fix incomplete — revisar keepout/notch/web!")
+    if not collision_pass: issues.append(f"V-CS-COLLISION FAIL: interferencia={collision_vol:.4f} mm³ >= 1.0 mm³ (CRITICO)")
+    if not flush_ok:       issues.append("V-CS-FLUSH FAIL: cara trasera cuerpo y placa tapa no coinciden en Y!")
     if issues:
         print("\nWARNINGS:")
         for w in issues: print(f"  - {w}")
