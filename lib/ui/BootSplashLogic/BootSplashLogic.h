@@ -19,11 +19,11 @@ static constexpr uint16_t COL_SPLASH_BG   = 0x9E8C;
 static constexpr uint16_t COL_SPLASH_LOGO = 0x3186;
 
 // ── Geometría ─────────────────────────────────────────────────────────────────
-// Logo fuente: 65 px ancho × 7 px alto.
-// A escala kLogoScale=3: 195 × 21 px en pantalla.
-static constexpr int16_t kLogoScale  = 3;
-static constexpr int16_t kLogoSrcW  = 65;
-static constexpr int16_t kLogoSrcH  = 7;
+// Logo fuente: 87 px ancho × 9 px alto (7px/glyph + 1px gap, 11 glyphs bold).
+// A escala kLogoScale=2: 174 × 18 px en pantalla (centrado en 240×296).
+static constexpr int16_t kLogoScale  = 2;
+static constexpr int16_t kLogoSrcW  = 87;
+static constexpr int16_t kLogoSrcH  = 9;
 
 // ── Fases de animación ────────────────────────────────────────────────────────
 // kFallFrames  : frames de caída lineal desde arriba hasta centro.
@@ -42,10 +42,10 @@ static constexpr int16_t kBounceAmp = 7;
 // Pantalla 296 px de alto.
 // kYStart  : logo completamente fuera de pantalla por arriba.
 // kYFinal  : centro vertical de pantalla para el logo escalado.
-//   kYFinal = (296 - 7*3) / 2 = 137
+//   kYFinal = (296 - 9*2) / 2 = 139
 static constexpr int16_t kScreenH = 296;
-static constexpr int16_t kYStart  = -(kLogoSrcH * kLogoScale);            // -21
-static constexpr int16_t kYFinal  = (kScreenH - kLogoSrcH * kLogoScale) / 2; // 137
+static constexpr int16_t kYStart  = -(kLogoSrcH * kLogoScale);            // -18
+static constexpr int16_t kYFinal  = (kScreenH - kLogoSrcH * kLogoScale) / 2; // 139
 
 // bootSplashLogoY — posición Y del logo para el frame dado.
 //

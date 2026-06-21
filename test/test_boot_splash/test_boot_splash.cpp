@@ -5,8 +5,8 @@
 // bootSplashLogoY() es lógica pura sin dependencias de hardware.
 //
 // Constantes verificadas:
-//   kYStart      = -(kLogoSrcH * kLogoScale) = -(7 * 3) = -21
-//   kYFinal      = (296 - 7 * 3) / 2 = 137
+//   kYStart      = -(kLogoSrcH * kLogoScale) = -(9 * 2) = -18
+//   kYFinal      = (296 - 9 * 2) / 2 = 139
 //   kFallFrames  = 20
 //   kBounceFrames= 6
 //   kHoldFrames  = 40
