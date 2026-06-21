@@ -252,11 +252,16 @@ def derive(P):
     d["btn_sphere_r"]  = (r_btn**2 + btn_d**2) / (2.0 * btn_d)
 
     # Sphere centre in GLOBAL coords (front face at Y=+ext_y/2=+20)
-    # Dish carved from outside face Y=+20 inward
-    # btn_sphere_cy_local (from front face, going inward toward -Y):
-    #   surface at Y=+20, sag=btn_depth → sphere centre at Y=+20 - (btn_sphere_r - btn_depth)
+    # Dish carved from outside face Y=+20 inward (casquete desde exterior).
+    # Centre must lie OUTSIDE the solid (in +Y), so the sphere only intersects
+    # the front face as a shallow cap of depth btn_depth=0.6 mm:
+    #   sphere grazes Y=+20 at its nearest point → centre at Y=+20 + (btn_sphere_r - btn_depth)
+    # Previous (WRONG): ext_y/2 - btn_sphere_r + btn_depth  →  +20 - 30.3 + 0.6 = -9.7
+    #   (centre inside solid → cut was through-hole)
+    # Correct: ext_y/2 + btn_sphere_r - btn_depth  →  +20 + 30.3 - 0.6 = +49.7
+    #   (centre outside, cap depth 0.6 mm from Y=+20 inward → fondo en Y≈+19.4)
     d["btn_sphere_cy_global"] = (P["ext_y"] / 2.0
-                                  - d["btn_sphere_r"] + btn_d)
+                                  + d["btn_sphere_r"] - btn_d)
 
     # btn_sphere_cy local (for reporting; from front face inward)
     d["btn_sphere_cy_local"] = d["btn_sphere_r"] - btn_d
