@@ -612,47 +612,29 @@ def build_body_main(P, D):
         shell = shell.fuse(boss_solid)
 
         # ----------------------------------------------------------------
-        # Web gusset A — lateral: boss → lateral wall in lip zone
-        # Bridges boss to the lateral wall X in Y[web_y0..web_y1]=[-17.5..-13.5]
-        # X: from (lateral_wall_inner=±20.0) to (boss_center±boss_r=14.25..20.75)
-        #    i.e. from wall inner face to boss outer — width = boss_outer - wall_inner
-        #    = (bx_off + boss_od/2) - (ext_x/2 - wall) = 20.75 - 20.0 = 0.75 mm lateral only
-        #    Use full width from keepout_x_inner to wall outer (through wall) for robust anchor
-        # Use web_x_inner = keepout_x_inner = boss_off_x - boss_r - 0.5 = 13.75
-        # web_x_outer = ext_x/2 + 0.01 (to merge cleanly with wall)
-        web_y_len = D["web_y1"] - D["web_y0"]           # 4.0 mm  (Y[-17.5..-13.5])
-        web_z_h   = P["corner_solid_web"] * 2.0          # 4.0 mm  (Z centred on boss)
-        web_x_w   = (P["ext_x"]/2.0 + 0.01) - D["keepout_x_inner"]   # 22.01 - 13.75 = 8.26 mm
-        bx_sign   = 1 if bx > 0 else -1
-        web_lat_x_origin = bx_sign * D["keepout_x_inner"] if bx_sign > 0 else -(P["ext_x"]/2.0 + 0.01)
-        web_lateral = Part.makeBox(
-            web_x_w, web_y_len, web_z_h,
-            App.Vector(web_lat_x_origin,
-                       D["web_y0"],
-                       bz - P["corner_solid_web"])
-        )
-        shell = shell.fuse(web_lateral)
-
+        # Anchor blend — continuous bridge boss↔lateral wall, full post height
+        # Spans Y[boss_y_start=-17.5 .. boss_y_end=-9.5] (toda la longitud del poste)
+        # X: from keepout_x_inner (inner edge, near boss_center) to wall outer + 0.01 mm
+        #    for a solid connection (boss already overlaps wall ~0.75 mm; this fills the gap)
+        # Z: centred on boss axis, ±boss_r (just covers the boss width, no floating extra)
+        # Result: poste "nace" de la pared de forma continua en toda su altura.
         # ----------------------------------------------------------------
-        # Web gusset B — horizontal: boss → nearest floor or ceiling wall
-        # For cz=9 (boss_z_bot): floor at Z=wall=2; bridge boss bottom to floor
-        #   Z from wall(2) to boss_z - boss_r - 0.5 = 9 - 3.75 = 5.25 → height = 5.25 - 2 = 3.25
-        # For cz=61 (boss_z_top): ceiling at Z=ez-wall=68; bridge boss top to ceiling
-        #   Z from boss_z + boss_r + 0.5 = 64.75 to 68 → height = 3.25
-        # X: same as web_lateral (covers boss+wall zone), Y: web_y0..web_y1
-        if bz == P["boss_z_bot"]:
-            web_hz_z0  = P["wall"]                          # 2.0 mm
-            web_hz_z1  = bz - (boss_od/2 + 0.5)           # 9 - 3.75 = 5.25 mm
-        else:
-            web_hz_z0  = bz + (boss_od/2 + 0.5)           # 61 + 3.75 = 64.75 mm
-            web_hz_z1  = ez - P["wall"]                    # 68.0 mm
-        web_hz_h = web_hz_z1 - web_hz_z0
-        if web_hz_h > 0.1:
-            web_horiz = Part.makeBox(
-                web_x_w, web_y_len, web_hz_h,
-                App.Vector(web_lat_x_origin, D["web_y0"], web_hz_z0)
-            )
-            shell = shell.fuse(web_horiz)
+        bx_sign      = 1 if bx > 0 else -1
+        blend_x_inner = D["keepout_x_inner"]                    # 13.75 mm (from centre)
+        blend_x_outer = P["ext_x"] / 2.0 + 0.01                # 22.01 mm (into wall)
+        blend_x_w     = blend_x_outer - blend_x_inner           # 8.26 mm
+        blend_y_len   = D["boss_y_end"] - D["boss_y_start"]     # 8.0 mm (full post Y span)
+        blend_z_h     = boss_od                                  # 6.5 mm  (= boss diameter in Z)
+        blend_x_origin = (bx_sign * blend_x_inner
+                          if bx_sign > 0
+                          else -(blend_x_outer))
+        anchor_blend = Part.makeBox(
+            blend_x_w, blend_y_len, blend_z_h,
+            App.Vector(blend_x_origin,
+                       D["boss_y_start"],
+                       bz - boss_od / 2.0)
+        )
+        shell = shell.fuse(anchor_blend)
 
         # Piloto M3: arranca en boss_y_start, crece +Y, longitud pilot_len=4.5 mm
         # → Y[-17.5..-13.0]
@@ -757,14 +739,9 @@ def build_body_main(P, D):
                               cy=front_int_y + ttp_pd/2.0,
                               cz=btn_cz - ttp_ph/2.0))
 
-    # ------------------------------------------------------------------
-    # 2.14 Cable channel (5×5 mm, esquina -X / -Y)
-    # ------------------------------------------------------------------
-    chan_sz = 5.0
-    shell = shell.cut(box(chan_sz, chan_sz, ez - 2*wall,
-                          cx=-(ex/2 - wall - chan_sz/2 - 0.5),
-                          cy=-(ey/2 - wall - chan_sz/2 - 0.5),
-                          cz=wall))
+    # §2.14 Cable channel ELIMINADO — el canal 5×5 atravesaba los postes -X
+    # y causaba asimetría (postes +X íntegros, postes -X comidos).
+    # Los cables se rutean por la cavidad abierta; sin canal dedicado.
 
     return shell
 
@@ -1810,33 +1787,81 @@ def main():
     vb_pass = sum(vb_results) >= len(vb_results) * 0.7
     print(f"  (b) => {'PASS' if vb_pass else 'WARN — some slices thin'}")
 
-    # (c) Boss fused to lateral wall: common(boss_zone, lateral_wall) at Y=-15 → vol>0
+    # (b-SYM) Symmetry check: areas at Y=-16,-15,-14 for all 4 corners (compact table)
+    # Expected: all 4 corners ≈ same area (π·r²≈33.2 mm²); -X == +X
+    print(f"\n  --- SIMETRIA POSTES (areas en mm²; esperado ≈π·r²={boss_area_expected:.1f}) ---")
+    print(f"  {'Corner':<22} {'Y=-16':>8} {'Y=-15':>8} {'Y=-14':>8}  Sym")
+    sym_corner_areas = {}
+    for bx_probe, bz_probe in [(bx_off_v, P["boss_z_bot"]),
+                                (-bx_off_v, P["boss_z_bot"]),
+                                (bx_off_v, P["boss_z_top"]),
+                                (-bx_off_v, P["boss_z_top"])]:
+        areas_at = {}
+        for y_slice in [-16.0, -15.0, -14.0]:
+            slab_w = boss_r_v * 2.0 + 2.0
+            slab = Part.makeBox(
+                slab_w, 0.1, slab_w,
+                App.Vector(bx_probe - boss_r_v - 1.0,
+                           y_slice - 0.05,
+                           bz_probe - boss_r_v - 1.0)
+            )
+            try:
+                inter = main_shape.common(slab)
+                areas_at[y_slice] = inter.Volume / 0.1 if inter.Volume > 0 else 0.0
+            except Exception:
+                areas_at[y_slice] = -1.0
+        sym_corner_areas[(bx_probe, bz_probe)] = areas_at
+        label = f"bx={bx_probe:+.1f} bz={bz_probe}"
+        a16 = areas_at.get(-16.0, -1.0)
+        a15 = areas_at.get(-15.0, -1.0)
+        a14 = areas_at.get(-14.0, -1.0)
+        sym_ok = all(a > boss_area_min for a in [a16, a15, a14])
+        print(f"  {label:<22} {a16:>8.2f} {a15:>8.2f} {a14:>8.2f}  {'OK' if sym_ok else 'WARN'}")
+    # Compare +X vs -X for same Z
+    print(f"  --- diff +X vs -X (ideally <3 mm²) ---")
+    for bz_check in [P["boss_z_bot"], P["boss_z_top"]]:
+        for y_slice in [-16.0, -15.0, -14.0]:
+            a_pos = sym_corner_areas.get((bx_off_v,  bz_check), {}).get(y_slice, -1.0)
+            a_neg = sym_corner_areas.get((-bx_off_v, bz_check), {}).get(y_slice, -1.0)
+            diff  = abs(a_pos - a_neg) if (a_pos >= 0 and a_neg >= 0) else -1.0
+            sym_flag = "OK" if (diff >= 0 and diff < 3.0) else ("WARN" if diff >= 0 else "ERR")
+            print(f"    bz={bz_check} Y={y_slice}: +X={a_pos:.2f}  -X={a_neg:.2f}  diff={diff:.2f}  {sym_flag}")
+    print()
+
+    # (c) Boss fused to lateral wall: common(boss_zone, lateral_wall) along full Y[-17.5..-9.5]
+    # Probes at Y=-17,-15,-13,-11,-10 (dentro del rango del poste) → vol>0 en todos
     vc_results = []
+    anchor_y_probes = [-17.0, -15.0, -13.0, -11.0, -10.0]
     for bx_probe, bz_probe in [(bx_off_v, P["boss_z_bot"]),
                                 (-bx_off_v, P["boss_z_bot"]),
                                 (bx_off_v, P["boss_z_top"]),
                                 (-bx_off_v, P["boss_z_top"])]:
         bx_s = 1 if bx_probe > 0 else -1
-        # A thin slab that only covers the lateral wall region (X from wall_inner to wall_outer)
-        wall_probe_x_inner = bx_s * (P["ext_x"]/2 - P["wall"] - 0.1)
-        wall_probe_x_outer = bx_s * (P["ext_x"]/2 + 0.1)
-        x_orig = min(wall_probe_x_inner, wall_probe_x_outer)
-        wall_slab = Part.makeBox(
-            abs(wall_probe_x_outer - wall_probe_x_inner), 0.1, boss_r_v*2 + 2.0,
-            App.Vector(x_orig, -15.05, bz_probe - boss_r_v - 1.0)
-        )
-        try:
-            inter_w = main_shape.common(wall_slab)
-            vol_w   = inter_w.Volume if inter_w.Solids else 0.0
-            ok_c    = vol_w > 0.01
-            vc_results.append(ok_c)
-            print(f"    (c) boss({bx_probe:+.1f}, z={bz_probe}) wall↔boss at Y=-15: "
-                  f"vol={vol_w:.3f} mm³ → {'OK' if ok_c else 'FAIL — boss detached!'}")
-        except Exception as e_c:
-            print(f"    (c) probe error: {e_c}")
-            vc_results.append(False)
+        corner_ok_all = True
+        vols_at = []
+        for y_anchor in anchor_y_probes:
+            # Slab covering lateral wall zone (X from wall_inner to wall_outer), thin in Y
+            wall_probe_x_inner = bx_s * (P["ext_x"]/2 - P["wall"] - 0.1)
+            wall_probe_x_outer = bx_s * (P["ext_x"]/2 + 0.1)
+            x_orig = min(wall_probe_x_inner, wall_probe_x_outer)
+            wall_slab = Part.makeBox(
+                abs(wall_probe_x_outer - wall_probe_x_inner), 0.1, boss_r_v*2 + 2.0,
+                App.Vector(x_orig, y_anchor - 0.05, bz_probe - boss_r_v - 1.0)
+            )
+            try:
+                inter_w = main_shape.common(wall_slab)
+                vol_w   = inter_w.Volume if inter_w.Solids else 0.0
+                ok_this = vol_w > 0.01
+                corner_ok_all = corner_ok_all and ok_this
+                vols_at.append(f"Y={y_anchor}:{vol_w:.3f}")
+            except Exception as e_c:
+                corner_ok_all = False
+                vols_at.append(f"Y={y_anchor}:ERR")
+        vc_results.append(corner_ok_all)
+        print(f"    (c) boss({bx_probe:+.1f}, z={bz_probe}) anchor vols: "
+              f"{', '.join(vols_at)} → {'OK' if corner_ok_all else 'FAIL — boss detached!'}")
     vc_pass = all(vc_results)
-    print(f"  (c) => {'PASS' if vc_pass else 'FAIL — boss not fused to wall'}")
+    print(f"  (c) => {'PASS — anclaje continuo Y[-17.5..-9.5]' if vc_pass else 'FAIL — boss not fused to wall'}")
 
     # (d) Grip ≥3.5 mm: material continuous Y[-17.5..-14] at boss wall region
     # Probe at X = boss_outer - 0.5 mm (in the boss wall, not the pilot bore center)
@@ -1844,22 +1869,13 @@ def main():
     # = from 17.5 + 1.25 + 0.2 = 18.95 to 17.5 + 3.25 - 0.2 = 20.55 → probe at X=19.5
     vd_results = []
     # Probe at Y=-15 (midpoint of grip zone Y[-17.5..-14]).
-    # NOTE: The cable channel (5×5mm, X[-19.5..-14.5], Y[-17.5..-12.5], Z[2..68]) is
-    # PRE-EXISTING and intersects the -X bosses (cx=-17.5) in this Y range.
-    # For +X bosses: no cable channel interference → full boss cross-section.
-    # For -X bosses: cable channel removes most of the boss XZ area → reduced volume.
-    # This is a pre-existing design conflict NOT introduced by the recess fix.
-    # Check (d) verifies that our recess keepout did NOT make things WORSE,
-    # by measuring volume > 0 (any boss material present at Y=-15).
-    # The real fix check is (c): boss is fused to the wall at Y=-15.
+    # Cable channel ELIMINADO → todos los postes (±X) tienen sección íntegra.
+    # Threshold uniforme para las 4 esquinas: 70% del área neta del poste × slab.
     grip_y_probe = -15.0
     grip_slab_th = 0.2
     boss_pilot_r = P["boss_id"] / 2.0     # 1.25 mm
     boss_net_area = math.pi * (boss_r_v**2 - boss_pilot_r**2)  # ≈28.3 mm²
-    # For -X side: cable channel removes most of boss → use a very low threshold (>0)
-    # For +X side: full material expected → threshold = 70% of boss net area × slab
-    exp_vol_full = boss_net_area * grip_slab_th * 0.70   # 70% of full boss cross-section
-    exp_vol_cable_cut = boss_net_area * grip_slab_th * 0.10  # 10% for cable-cut side (any material)
+    exp_vol_full = boss_net_area * grip_slab_th * 0.70   # 70% de sección neta
     for bx_probe, bz_probe in [(bx_off_v, P["boss_z_bot"]),
                                 (-bx_off_v, P["boss_z_bot"]),
                                 (bx_off_v, P["boss_z_top"]),
@@ -1875,22 +1891,15 @@ def main():
         try:
             inter_d = main_shape.common(grip_slab)
             vol_d   = inter_d.Volume if inter_d.Solids else 0.0
-            # -X bosses have cable channel interference (pre-existing): use lower threshold
-            is_cable_side = (bx_probe < 0)
-            threshold = exp_vol_cable_cut if is_cable_side else exp_vol_full
-            ok_d    = vol_d >= threshold
-            cable_note = " [pre-existing cable channel cuts boss at -X]" if is_cable_side else ""
+            ok_d    = vol_d >= exp_vol_full
             vd_results.append(ok_d)
             print(f"    (d) boss({bx_probe:+.1f}, z={bz_probe}) @Y={grip_y_probe}: "
-                  f"vol={vol_d:.4f} (thr≥{threshold:.4f}) → {'OK' if ok_d else 'FAIL'}{cable_note}")
+                  f"vol={vol_d:.4f} (thr≥{exp_vol_full:.4f}) → {'OK' if ok_d else 'FAIL'}")
         except Exception as e_d:
             print(f"    (d) probe error: {e_d}")
             vd_results.append(False)
     vd_pass = all(vd_results)
     print(f"  (d) => {'PASS' if vd_pass else 'FAIL'}")
-    if not vd_pass:
-        print(f"       NOTE: -X boss grip is reduced by cable channel (pre-existing design tradeoff)")
-        print(f"       Recess fix is correct; cable channel overlap is a separate design issue.")
 
     # (e) Tapa cierra: cover.common(body) at corner zone ≈ 0 (holgura notch↔keepout ~0.15mm)
     ve_results = []
