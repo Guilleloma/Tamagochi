@@ -47,8 +47,8 @@ static constexpr uint16_t COL_DARKGRAY = 0x4208;
 static constexpr uint16_t COL_GRAY     = 0x7BEF;
 static constexpr uint16_t COL_PURPLE   = 0x780F;
 
-// Fondo de pantalla — azul oscuro, más agradable que negro puro.
-static constexpr uint16_t COL_BG = 0x0010;
+// Fondo de pantalla — negro puro.
+static constexpr uint16_t COL_BG = 0x0000;
 
 // ─── Tabla de carga de sprites por etapa ──────────────────────────────────────
 //

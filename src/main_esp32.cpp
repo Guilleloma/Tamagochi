@@ -52,6 +52,7 @@
 #include "WifiManager.h"
 #include "OTAManager.h"
 #include "WebUI.h"
+#include "BootSplash.h"
 
 // =============================================================================
 // Verificación de versión de firmware en compile-time.
@@ -501,13 +502,9 @@ void setup() {
     }
     LOG_INFO("Canvas OK. PSRAM libre: %u B", ESP.getFreePsram());
 
-    // Splash rápido mientras se inicializa el resto del sistema.
-    canvas->fillScreen(0x0010);
-    canvas->setTextColor(0xFFFF);
-    canvas->setTextSize(2);
-    canvas->setCursor(10, 120);
-    canvas->print("TAMAGOCHI v4");
-    canvas->flush();
+    // Splash animado estilo Game Boy DMG.
+    // TODO(guillermo): disparar ding con tone() si se añade buzzer pasivo a un GPIO
+    playBootSplash(canvas);
 
     // ── LittleFS ──────────────────────────────────────────────────────────────
     // Un único begin() compartido por SpriteStore y Persistence.
