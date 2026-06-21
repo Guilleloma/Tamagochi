@@ -623,30 +623,11 @@ def build_body_main(P, D):
         boss_solid = cyl_y(boss_od/2, b_post_l, cx=bx, cz=bz, y0=by_start)
         shell = shell.fuse(boss_solid)
 
-        # ----------------------------------------------------------------
-        # Anchor blend — continuous bridge boss↔lateral wall, full post height
-        # Spans Y[boss_y_start=-17.5 .. boss_y_end=-9.5] (toda la longitud del poste)
-        # X: from keepout_x_inner (inner edge, near boss_center) to wall outer + 0.01 mm
-        #    for a solid connection (boss already overlaps wall ~0.75 mm; this fills the gap)
-        # Z: centred on boss axis, ±boss_r (just covers the boss width, no floating extra)
-        # Result: poste "nace" de la pared de forma continua en toda su altura.
-        # ----------------------------------------------------------------
-        bx_sign      = 1 if bx > 0 else -1
-        blend_x_inner = D["keepout_x_inner"]                    # 13.75 mm (from centre)
-        blend_x_outer = P["ext_x"] / 2.0 + 0.01                # 22.01 mm (into wall)
-        blend_x_w     = blend_x_outer - blend_x_inner           # 8.26 mm
-        blend_y_len   = D["boss_y_end"] - D["boss_y_start"]     # 8.0 mm (full post Y span)
-        blend_z_h     = boss_od                                  # 6.5 mm  (= boss diameter in Z)
-        blend_x_origin = (bx_sign * blend_x_inner
-                          if bx_sign > 0
-                          else -(blend_x_outer))
-        anchor_blend = Part.makeBox(
-            blend_x_w, blend_y_len, blend_z_h,
-            App.Vector(blend_x_origin,
-                       D["boss_y_start"],
-                       bz - boss_od / 2.0)
-        )
-        shell = shell.fuse(anchor_blend)
+        # Anchor blend ELIMINADO (§2.9): la caja recta generaba caras planas que
+        # sobresalían hacia la cavidad ("ruido" visual). No es necesaria: el poste
+        # (cx=±17.5, Ø6.5 → extremo X=±20.75) solapa 0.75 mm con la pared lateral
+        # interior (X=±20) a lo largo de toda su altura Y[-17.5..-9.5] → queda
+        # unido a la pared de forma continua sin material extra.
 
         # Piloto M3: arranca en boss_y_start, crece +Y, longitud pilot_len=4.5 mm
         # → Y[-17.5..-13.0]
