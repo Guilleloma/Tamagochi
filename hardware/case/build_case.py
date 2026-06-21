@@ -127,6 +127,7 @@ P = {
     "boss_id":           1.5,  # M2 self-tap pilot diameter
     "boss_z_bot":        9.0,  # centro Z eje boss inferior (era base Z; reinterpretado)
     "boss_z_top":       61.0,  # centro Z eje boss superior
+    "boss_post_len":    10.0,  # longitud poste corto (Y[-17.5..-7.5])
     "screw_head_d":      4.0,
     "screw_clear_d":     2.4,
     "screw_len":         8.0,  # M2×8 self-tap
@@ -137,6 +138,8 @@ P = {
     "cover_th":          2.5,  # espesor tapa trasera
     "cbore_depth":       2.0,  # counterbore depth (< cover_th → cabeza oculta)
     "cover_lip_h":       4.0,  # labio macho de la tapa (= lip_h)
+    "lip_overlap":       1.0,  # solape labio DENTRO de la placa (mm)
+    "btn_cut_margin":    2.0,  # margen extra alrededor del casquete esférico (mm)
 
     # Lip / ledge
     "lip_h":             4.0,  # ledge recess depth in Body_Main boca -Y
@@ -182,23 +185,32 @@ def derive(P):
     d["ttp_pocket_h"] = P["ttp_h"] + 2*P["clr_fit"]
 
     # -------------------------------------------------------------------------
-    # Boss — eje Y
-    # Coords globales: cara ext frontal Y=+20, cara interior frontal Y=+15 (=+20-5)
-    # Interfaz cuerpo/tapa: Y = -ext_y/2 + cover_th = -20 + 2.5 = -17.5
-    # boss_y0 = cara interior frontal = ext_y/2 - wall_front = 20 - 5 = +15
-    # boss_len_y = boss_y0 - (interfaz Y) = 15 - (-17.5) = 32.5
-    # boss_z_bot / boss_z_top = CENTRO Z del eje del boss
+    # Boss — eje Y (postes CORTOS anclados en zona trasera)
     # boss_off_x = ext_x/2 - boss_r = 22 - 2 = 20 mm
+    # interface_y = -ext_y/2 + cover_th = -20 + 2.5 = -17.5 mm
+    # boss_y_start = interface_y = -17.5 mm (cara trasera del poste)
+    # boss_y_end   = interface_y + boss_post_len = -17.5 + 10 = -7.5 mm
+    # → poste en Y[-17.5..-7.5], GAP de 22.5 mm hasta front_int_y=+15 (NO toca el frente)
+    # boss_z_bot / boss_z_top = CENTRO Z del eje del boss
     # -------------------------------------------------------------------------
     boss_r = P["boss_od"] / 2.0
-    d["boss_off_x"]  = P["ext_x"] / 2.0 - boss_r          # = 20 mm
-    d["boss_r"]      = boss_r
-    d["boss_y0"]     = P["ext_y"] / 2.0 - P["wall_front"] # = 15 mm (arranque hacia -Y)
-    d["interface_y"] = -P["ext_y"] / 2.0 + P["cover_th"]  # = -17.5 mm
-    d["boss_len_y"]  = d["boss_y0"] - d["interface_y"]     # = 32.5 mm
+    d["boss_off_x"]   = P["ext_x"] / 2.0 - boss_r          # = 20 mm
+    d["boss_r"]       = boss_r
+    d["interface_y"]  = -P["ext_y"] / 2.0 + P["cover_th"]  # = -17.5 mm
+    d["boss_y_start"] = d["interface_y"]                     # = -17.5 mm
+    d["boss_y_end"]   = d["interface_y"] + P["boss_post_len"]  # = -7.5 mm
 
-    # Pilot hole: from -Y end of boss toward +Y, length = screw_thread_engage + margin
-    d["pilot_len"]   = P["screw_thread_engage"] + 1.0      # = 6.5 mm
+    # Derived Y refs for cover geometry
+    d["front_ext_y"]  = P["ext_y"] / 2.0                    # = +20 mm
+    d["front_int_y"]  = P["ext_y"] / 2.0 - P["wall_front"] # = +15 mm
+    d["rear_ext_y"]   = -P["ext_y"] / 2.0                   # = -20 mm
+    d["cover_y0"]     = -P["ext_y"] / 2.0                   # = -20 mm
+    d["cover_y1"]     = d["cover_y0"] + P["cover_th"]       # = -17.5 mm
+    d["lip_y_start"]  = d["cover_y1"] - P["lip_overlap"]    # = -18.5 mm
+    d["lip_y_end"]    = d["cover_y1"] + P["cover_lip_h"]    # = -13.5 mm
+
+    # Pilot hole: from boss_y_start toward +Y, length = screw_thread_engage + 1
+    d["pilot_len"]    = P["screw_thread_engage"] + 1.0       # = 6.5 mm
 
     # -------------------------------------------------------------------------
     # Screen window vertical position
@@ -475,22 +487,24 @@ def build_body_main(P, D):
         shell = shell.fuse(rib)
 
     # ------------------------------------------------------------------
-    # 2.9 Bosses (4× M2 self-tap, eje Y, esquinas)
-    # cyl_y(r, h, cx, cz, y0) — cilindro eje Y que arranca en y0 y crece +Y
-    # boss_y0 = cara interior frontal (Y=+15)
-    # Longitud: boss_len_y = 32.5 mm (de +15 hasta interfaz -17.5)
-    # Pero crece desde y0 en DIRECCIÓN +Y, así que arrancamos desde interface_y
-    # y crecemos hacia +Y hasta boss_y0: longitud = boss_len_y
-    # Piloto: desde extremo -Y del boss hacia +Y, longitud pilot_len
-    # boss_z_bot / boss_z_top = CENTRO Z del boss
+    # 2.9 Bosses — postes CORTOS (boss_post_len=10 mm) anclados en zona trasera
+    # Rango Y: [boss_y_start=-17.5 .. boss_y_end=-7.5]
+    # Gap hasta front_int_y=+15: 22.5 mm → NUNCA toca el frente
+    # boss_od=4 mm embebido en el fillet exterior (r=4) de la esquina → fusiona
+    # a las 2 paredes, no flota
+    # Alineación coaxial (±20, z_bot/z_top):
+    #   cover cbore  Y[-20..-18]  Ø4
+    #   caña pasante Y[-20..-13.5] Ø2.4
+    #   poste        Y[-17.5..-7.5] Ø4
+    #   piloto       Y[-17.5..-11.0] Ø1.5
+    #   M2×8 punta:  -20 + 8 = -12  (dentro del piloto -11, OK)
     # ------------------------------------------------------------------
     boss_od  = P["boss_od"]; boss_id = P["boss_id"]
     bx_off   = D["boss_off_x"]        # ±20 mm
-    boss_y0  = D["boss_y0"]           # +15 mm (cara interior frontal)
-    iface_y  = D["interface_y"]       # -17.5 mm
-    boss_len = D["boss_len_y"]        # 32.5 mm
+    by_start = D["boss_y_start"]      # -17.5 mm
+    b_post_l = P["boss_post_len"]     # 10 mm
 
-    # boss_z_bot / boss_z_top son CENTROS Z → ya son posiciones directas
+    # boss_z_bot / boss_z_top son CENTROS Z del eje del boss
     boss_pairs = [
         ( bx_off, P["boss_z_bot"]),   # inf right
         (-bx_off, P["boss_z_bot"]),   # inf left
@@ -499,30 +513,18 @@ def build_body_main(P, D):
     ]
 
     for bx, bz in boss_pairs:
-        # Boss sólido: arranca en iface_y, crece +Y, longitud boss_len
-        boss_solid = cyl_y(boss_od/2, boss_len, cx=bx, cz=bz, y0=iface_y)
+        # Poste sólido: arranca en boss_y_start=-17.5, crece +Y, longitud 10 mm
+        boss_solid = cyl_y(boss_od/2, b_post_l, cx=bx, cz=bz, y0=by_start)
         shell = shell.fuse(boss_solid)
 
-        # Piloto M2: arranca en iface_y, crece +Y, longitud pilot_len
-        pilot = cyl_y(boss_id/2, D["pilot_len"], cx=bx, cz=bz, y0=iface_y)
+        # Piloto M2: arranca en boss_y_start, crece +Y, longitud pilot_len=6.5 mm
+        # → rango Y[-17.5..-11.0]
+        pilot = cyl_y(boss_id/2, D["pilot_len"], cx=bx, cz=bz, y0=by_start)
         shell = shell.cut(pilot)
 
-    # ------------------------------------------------------------------
-    # 2.10 Rib de anclaje boss ↔ pared (1 rib por boss a media profundidad Y)
-    # Rib: caja 1.6 mm espesor Z, conecta boss con pared frontal interior
-    # ------------------------------------------------------------------
-    rib_th   = 1.6
-    rib_h_z  = 4.0    # altura en Z del rib
-    boss_r   = D["boss_r"]
-    rib_y_len = bth    # va desde cara int. frontal (front_int_y) hacia -Y hasta mid boss
-    for bx, bz in boss_pairs:
-        # Rib vertical (en Y) desde frontal hacia el boss
-        # X: [bx-boss_r..bx+boss_r] (mismo ancho que boss)
-        rib = box(boss_od, rib_y_len, rib_th,
-                  cx=bx,
-                  cy=front_int_y - rib_y_len/2,
-                  cz=bz - rib_th/2)
-        shell = shell.fuse(rib)
+    # §2.10 ELIMINADO — ribs de anclaje suprimidos por el plan del arquitecto.
+    # Los postes cortos (boss_od=4 mm) quedan embebidos en el fillet exterior
+    # r=4 de la esquina → anclaje natural en las 2 paredes perimetrales.
 
     # ------------------------------------------------------------------
     # 2.11 Screen window y pockets en cara frontal +Y (bezel integral)
@@ -561,13 +563,31 @@ def build_body_main(P, D):
 
     # ------------------------------------------------------------------
     # 2.12 Concave button dish (desde cara exterior frontal Y=+20 hacia -Y)
+    # BUG 3 FIX: acotar el cortador esfera con una caja local para que no
+    # infle el BoundBox del cuerpo (de X=60.6 → X≈44).
+    # btn_cut_margin=2.0 mm extra alrededor de btn_dia en X/Z
+    # La caja local se intersecta con la esfera → dish = sphere.common(local)
+    # Pared NETA bajo casquete: wall_front - btn_depth - ttp_pocket_d = 1.0 mm ✓
     # ------------------------------------------------------------------
     btn_cz       = D["btn_center_z"]
     sph_r        = D["btn_sphere_r"]
     sph_cy_glob  = D["btn_sphere_cy_global"]   # centro esfera en global Y
 
     btn_sphere_solid = Part.makeSphere(sph_r, App.Vector(0, sph_cy_glob, btn_cz))
-    shell = shell.cut(btn_sphere_solid)
+
+    # Caja acotadora: X/Z = btn_dia + 2*btn_cut_margin, Y = espesor pared frontal
+    # centrada en (0, front_ext_y - wall_front/2, btn_cz)
+    btn_margin = P["btn_cut_margin"]
+    local_w    = P["btn_dia"] + 2.0 * btn_margin      # 12 + 4 = 16 mm
+    local_h    = P["btn_dia"] + 2.0 * btn_margin      # 16 mm en Z
+    local_d    = bth + 0.2                             # algo más que wall_front (clip limpio)
+    btn_local  = box(local_w, local_d, local_h,
+                     cx=0.0,
+                     cy=front_ext_y - bth / 2.0,
+                     cz=btn_cz - local_h / 2.0)
+
+    dish  = btn_sphere_solid.common(btn_local)
+    shell = shell.cut(dish)
 
     # ------------------------------------------------------------------
     # 2.13 TTP223 nervios + pocket (desde cara interior frontal hacia +Y)
@@ -633,71 +653,95 @@ def build_rear_cover(P, D):
     lip_h   = P["cover_lip_h"]   # 4.0 mm
     clr_sl  = P["clr_slide"]     # 0.15 mm
     wall    = P["wall"]
+    lip_ovl = P["lip_overlap"]   # 1.0 mm — solape labio dentro de la placa
 
-    # Refs Y globales
-    cover_y0  = -ey/2.0          # -20 mm  cara ext tapa
-    cover_y1  = cover_y0 + cth   # -17.5 mm  cara int tapa (= interface_y)
-    lip_y_end = cover_y1 + lip_h # -13.5 mm  extremo del labio hacia +Y
+    # Refs Y globales (desde derive, para que sean paramétricas)
+    cover_y0  = D["cover_y0"]    # -20 mm  cara ext tapa
+    cover_y1  = D["cover_y1"]    # -17.5 mm  cara int tapa (= interface_y)
+    lip_y_start = D["lip_y_start"]  # -18.5 mm (arranca 1 mm DENTRO de la placa → solape)
+    lip_y_end   = D["lip_y_end"]    # -13.5 mm  extremo del labio hacia +Y
 
-    rv_blank = min(P["fillet_ext_vert"], cth / 2.0 - 0.05)
-    rh       = P["fillet_ext_horiz"]
+    rv  = P["fillet_ext_vert"]
+    rh  = P["fillet_ext_horiz"]
 
     # ------------------------------------------------------------------
-    # 3.1 Blank (placa plana) — filleted standalone
+    # 3.1 Placa sólida — SIN fillet todavía (fillet-LAST)
+    # BUG 1 FIX: antes se fileteaba el blank solo y luego se fusionaba con
+    # el labio → multi-sólido + fallback silencioso. Ahora: placa plana
+    # pura, sin fillet; fillet se aplica DESPUÉS del fuse.
     # ------------------------------------------------------------------
-    OVERLAP = 0.2
-    blank = Part.makeBox(ex, cth, ez,
+    placa = Part.makeBox(ex, cth, ez,
                          App.Vector(-ex/2, cover_y0, 0))
-
-    blank_vert_e = _vert_edges(blank, min_len=ez * 0.85)
-    if blank_vert_e and rv_blank > 0:
-        try:
-            blank = blank.makeFillet(rv_blank, blank_vert_e)
-            print(f"  [fillet] cover blank vert r={rv_blank:.2f} applied")
-        except Exception as exc:
-            print(f"  [WARN] cover blank vert fillet failed: {exc}")
-
-    top_e_b = _horiz_edges_at_z(blank, ez)
-    bot_e_b = _horiz_edges_at_z(blank, 0.0)
-    if (top_e_b or bot_e_b) and rh > 0:
-        try:
-            blank = blank.makeFillet(rh, top_e_b + bot_e_b)
-            print(f"  [fillet] cover blank horiz r={rh} applied")
-        except Exception as exc:
-            print(f"  [WARN] cover blank horiz fillet failed: {exc}")
+    print(f"  [3.1] placa: {ex}x{cth}x{ez}  Y[{cover_y0:.2f}..{cover_y1:.2f}]")
 
     # ------------------------------------------------------------------
-    # 3.2 Labio macho — protrude desde cara int (cover_y1) hacia +Y
+    # 3.2 Labio macho — protrude desde lip_y_start hacia +Y
+    # lip_y_start = cover_y1 - lip_overlap = -18.5 mm (solape 1 mm dentro de placa)
+    # lip total longitud en Y = lip_overlap + cover_lip_h = 5.0 mm
     # Holgura: ext labio = ext cuerpo - 2*clr_slide
     # Pared labio (ring thickness en X/Z) = wall - clr_slide
     # ------------------------------------------------------------------
-    lip_od_x = ex - 2*clr_sl      # 43.70 mm
-    lip_od_z = ez - 2*clr_sl      # 69.70 mm
-    lip_th_x = wall - clr_sl      # 1.85 mm (pared labio en X)
-    lip_th_z = wall - clr_sl      # 1.85 mm (pared labio en Z)
+    lip_od_x = ex - 2*clr_sl        # 43.70 mm
+    lip_od_z = ez - 2*clr_sl        # 69.70 mm
+    lip_th_x = wall - clr_sl        # 1.85 mm (pared labio en X)
+    lip_th_z = wall - clr_sl        # 1.85 mm (pared labio en Z)
+    lip_len_y = lip_ovl + lip_h     # 1.0 + 4.0 = 5.0 mm
 
-    lip_outer = Part.makeBox(lip_od_x, lip_h + OVERLAP, lip_od_z,
-                             App.Vector(-lip_od_x/2, cover_y1 - OVERLAP, 0))
-    # Interior del labio (hueco): dejamos pared lip_th en X y Z
+    labio_outer = Part.makeBox(lip_od_x, lip_len_y, lip_od_z,
+                               App.Vector(-lip_od_x/2, lip_y_start, 0))
     lip_inner_x = lip_od_x - 2*lip_th_x
     lip_inner_z = lip_od_z - 2*lip_th_z
-    lip_inner = Part.makeBox(lip_inner_x, lip_h + OVERLAP + 0.01, lip_inner_z,
-                             App.Vector(-lip_inner_x/2,
-                                        cover_y1 - OVERLAP - 0.005,
-                                        lip_th_z))
-    lip = lip_outer.cut(lip_inner)
-    cover = blank.fuse(lip)
+    labio_inner = Part.makeBox(lip_inner_x, lip_len_y + 0.01, lip_inner_z,
+                               App.Vector(-lip_inner_x/2,
+                                          lip_y_start - 0.005,
+                                          lip_th_z))
+    labio = labio_outer.cut(labio_inner)
+    print(f"  [3.2] labio: od_x={lip_od_x:.2f}  od_z={lip_od_z:.2f}  "
+          f"Y[{lip_y_start:.2f}..{lip_y_end:.2f}]  len_y={lip_len_y:.2f}mm  "
+          f"wall={lip_th_x:.2f}mm")
 
-    if len(cover.Solids) > 1:
-        try:
-            cover = cover.Solids[0].multiFuse(cover.Solids[1:])
-        except Exception:
-            pass
+    # ------------------------------------------------------------------
+    # Fuse placa + labio (con solape de 1 mm → garantiza manifold)
+    # BUG 1 FIX: abortar explícitamente si Solids!=1 (no fallback silencioso)
+    # ------------------------------------------------------------------
+    cover = placa.fuse(labio)
+    n_solids = len(cover.Solids)
+    if n_solids != 1:
+        raise RuntimeError(
+            f"[ABORT] Rear_Cover fuse placa+labio produjo {n_solids} sólidos "
+            f"(esperado 1). Revisar geometría del labio / solape."
+        )
+    print(f"  [fuse] placa+labio OK — Solids={n_solids}  Volume={cover.Volume:.0f} mm³")
+
+    # ------------------------------------------------------------------
+    # Fillet-LAST sobre el conjunto (no sobre el blank aislado)
+    # BUG 1 FIX: filletear el conjunto garantiza que OCC trabaja sobre
+    # una topología coherente y produce un único sólido filleteado.
+    # Fallback: reducir r si OCC falla con vert r4 (cover_th=2.5 < r=4)
+    # ------------------------------------------------------------------
+    # Verts: máximo r seguro es min(fillet_ext_vert, cover_th + cover_lip_h - 0.1)
+    rv_safe = min(rv, cth + lip_h - 0.1)
+    cover, fv_ok, fh_ok = apply_fillets(cover, rv_safe, rh, ez, label="Rear_Cover")
+    if not fv_ok and rv_safe > 0:
+        # Reintentar con r reducido aún más
+        rv_retry = min(rv_safe, cth - 0.05)
+        print(f"  [fillet] retry vert r={rv_retry:.2f}")
+        cover, fv_ok2, _ = apply_fillets(cover, rv_retry, 0, ez, label="Rear_Cover_retry")
+    if fv_ok: print(f"  [fillet] cover vert r={rv_safe:.2f} applied")
+    if fh_ok: print(f"  [fillet] cover horiz r={rh} applied")
+
+    # Verificar que el fillet no rompió el sólido
+    n_post = len(cover.Solids)
+    if n_post != 1:
+        raise RuntimeError(
+            f"[ABORT] Rear_Cover tras fillets tiene {n_post} sólidos (esperado 1)."
+        )
 
     # ------------------------------------------------------------------
     # 3.3 Screw through-holes + counterbores (eje Y)
-    # Pasante: desde cover_y0 (cara ext) hasta cover_y1+lip_h (extremo labio)
-    # Cbore: desde cover_y0 hacia +Y, prof cbore_depth=2.0
+    # Pasante: desde cover_y0 (cara ext -Y) hasta lip_y_end (extremo labio)
+    # Cbore: desde cover_y0 hacia +Y, prof cbore_depth=2.0 mm
+    # Alineación coaxial con postes en Body_Main (±boss_off_x, boss_z_bot/top)
     # ------------------------------------------------------------------
     bx_off   = D["boss_off_x"]      # ±20 mm
     sc_cl    = P["screw_clear_d"]   # 2.4 mm Ø
@@ -715,21 +759,23 @@ def build_rear_cover(P, D):
     ]
 
     for bx, bz in cover_boss_pairs:
-        # Through-hole (pasante)
+        # Through-hole (pasante): Y[cover_y0 .. lip_y_end]
         through = cyl_y(sc_cl/2, total_hole_len, cx=bx, cz=bz, y0=cover_y0)
         cover = cover.cut(through)
 
         # Counterbore desde cara ext -Y (cover_y0) hacia +Y, prof cbore_depth
+        # Cbore Y[cover_y0 .. cover_y0+cbore_depth] = [-20..-18]  Ø4
         cbore = cyl_y(sc_hd/2, cbore_d, cx=bx, cz=bz, y0=cover_y0)
         cover = cover.cut(cbore)
 
     return cover, {
-        "cover_y0":     cover_y0,
-        "cover_y1":     cover_y1,
-        "lip_y_end":    lip_y_end,
+        "cover_y0":       cover_y0,
+        "cover_y1":       cover_y1,
+        "lip_y_start":    lip_y_start,
+        "lip_y_end":      lip_y_end,
         "total_hole_len": total_hole_len,
-        "lip_od_x":     lip_od_x,
-        "lip_od_z":     lip_od_z,
+        "lip_od_x":       lip_od_x,
+        "lip_od_z":       lip_od_z,
     }
 
 
@@ -803,6 +849,7 @@ def build_spreadsheet(doc, P, D):
         ("boss_id",          P["boss_id"],           "M2 self-tap pilot diameter 1.5 mm"),
         ("boss_z_bot",       P["boss_z_bot"],        "CENTRO Z eje boss inferior 9.0 mm"),
         ("boss_z_top",       P["boss_z_top"],        "CENTRO Z eje boss superior 61.0 mm"),
+        ("boss_post_len",    P["boss_post_len"],     "Longitud poste corto 10 mm (Y[-17.5..-7.5])"),
         ("screw_head_d",     P["screw_head_d"],      "Screw head counterbore dia 4.0 mm"),
         ("screw_clear_d",    P["screw_clear_d"],     "Screw clearance hole dia 2.4 mm"),
         ("screw_len",        P["screw_len"],         "M2x8 self-tap screw length"),
@@ -813,6 +860,8 @@ def build_spreadsheet(doc, P, D):
         ("cbore_depth",      P["cbore_depth"],       "Counterbore depth 2.0 mm (< cover_th)"),
         ("cover_lip_h",      P["cover_lip_h"],       "Cover male lip height 4.0 mm"),
         ("lip_h",            P["lip_h"],             "Body_Main recess depth = cover_lip_h"),
+        ("lip_overlap",      P["lip_overlap"],       "Solape labio dentro de la placa 1.0 mm"),
+        ("btn_cut_margin",   P["btn_cut_margin"],    "Margen extra alrededor del casquete 2.0 mm"),
         ("charge_mode",      P["charge_mode"],       "0=TP4056 dedicated"),
         # Derived
         ("int_x",            D["int_x"],             "= ext_x - 2*wall = 40 mm"),
@@ -827,9 +876,13 @@ def build_spreadsheet(doc, P, D):
         ("bat_pocket_h",     D["bat_pocket_h"],      "= bat_h + 2*clr_fit"),
         ("bat_z0",           D["bat_z0"],            "= bat_center_z - bat_h/2 = 15.5 mm"),
         ("boss_off_x",       D["boss_off_x"],        "= ext_x/2 - boss_r = 20 mm"),
-        ("boss_y0",          D["boss_y0"],           "= ext_y/2 - wall_front = 15 mm (arranque boss en Y)"),
         ("interface_y",      D["interface_y"],       "= -ext_y/2 + cover_th = -17.5 mm"),
-        ("boss_len_y",       D["boss_len_y"],        "= boss_y0 - interface_y = 32.5 mm"),
+        ("boss_y_start",     D["boss_y_start"],      "= interface_y = -17.5 mm (cara trasera poste)"),
+        ("boss_y_end",       D["boss_y_end"],        "= interface_y + boss_post_len = -7.5 mm"),
+        ("cover_y0",         D["cover_y0"],          "= -ext_y/2 = -20 mm (cara ext tapa)"),
+        ("cover_y1",         D["cover_y1"],          "= cover_y0 + cover_th = -17.5 mm (interfaz)"),
+        ("lip_y_start",      D["lip_y_start"],       "= cover_y1 - lip_overlap = -18.5 mm"),
+        ("lip_y_end",        D["lip_y_end"],         "= cover_y1 + cover_lip_h = -13.5 mm"),
         ("pilot_len",        D["pilot_len"],         "= screw_thread_engage + 1 = 6.5 mm"),
         ("win_z_ctr",        D["win_z_ctr"],         "Screen window Z centre (derived)"),
         ("disp_center_z",    D["disp_center_z"],     "Active area Z centre (= win_z_ctr)"),
@@ -869,7 +922,8 @@ def validate_parametric(P_orig):
         bb_main  = shape_main.BoundBox
         bb_cover = shape_cover.BoundBox
         print(f"  cover_th=3.0  interface_y={D_mod['interface_y']:.2f}  "
-              f"boss_len_y={D_mod['boss_len_y']:.2f}  pilot_len={D_mod['pilot_len']:.2f}")
+              f"boss_y_start={D_mod['boss_y_start']:.2f}  boss_y_end={D_mod['boss_y_end']:.2f}  "
+              f"pilot_len={D_mod['pilot_len']:.2f}")
         print(f"  Body_Main  BoundBox: {bb_main.XLength:.2f} x {bb_main.YLength:.2f} x {bb_main.ZLength:.2f}")
         print(f"  Rear_Cover BoundBox: {bb_cover.XLength:.2f} x {bb_cover.YLength:.2f} x {bb_cover.ZLength:.2f}")
         print(f"  body_main valid={shape_main.isValid()}  cover valid={shape_cover.isValid()}")
@@ -1218,6 +1272,7 @@ def main():
     print(f"\n  --- Cover geometry ---")
     print(f"  cover_y0 (ext trasera)  : {cinfo['cover_y0']:.2f} mm")
     print(f"  cover_y1 (int, interfaz): {cinfo['cover_y1']:.2f} mm")
+    print(f"  lip_y_start (solape -Y) : {cinfo['lip_y_start']:.2f} mm")
     print(f"  lip_y_end               : {cinfo['lip_y_end']:.2f} mm")
     print(f"  total hole len          : {cinfo['total_hole_len']:.2f} mm")
 
@@ -1230,14 +1285,19 @@ def main():
     # ------------------------------------------------------------------
     print("\n[4/5] Verification checks ...")
 
-    # V1 — Bosses eje Y: verificar que boss_len_y ≈ 32.5 y CERO bosses eje Z
-    boss_len_y = D["boss_len_y"]
-    boss_y0    = D["boss_y0"]
-    interface_y = D["interface_y"]
-    v1_pass = (abs(boss_len_y - (boss_y0 - interface_y)) < 0.01
-               and abs(boss_y0 - (P["ext_y"]/2 - P["wall_front"])) < 0.01)
-    print(f"  [V1] Bosses eje Y: boss_y0={boss_y0:.2f}  interface_y={interface_y:.2f}  "
-          f"boss_len_y={boss_len_y:.2f}  "
+    # V1 — Bosses eje Y: postes cortos boss_post_len=10 mm, Y[-17.5..-7.5]
+    # boss_y_start = interface_y = -17.5; boss_y_end = -7.5
+    # boss_y_end < front_int_y (+15) → GAP de 22.5 mm (NO toca el frente)
+    boss_y_start = D["boss_y_start"]   # -17.5
+    boss_y_end   = D["boss_y_end"]     # -7.5
+    interface_y  = D["interface_y"]    # -17.5
+    front_int_y_v1 = P["ext_y"]/2 - P["wall_front"]   # +15
+    v1_pass = (abs(boss_y_start - interface_y) < 0.01
+               and abs(boss_y_end - (interface_y + P["boss_post_len"])) < 0.01
+               and boss_y_end < front_int_y_v1)
+    print(f"  [V1] Bosses eje Y: boss_y_start={boss_y_start:.2f}  boss_y_end={boss_y_end:.2f}  "
+          f"interface_y={interface_y:.2f}  front_int_y={front_int_y_v1:.2f}  "
+          f"gap_al_frente={front_int_y_v1 - boss_y_end:.2f}mm  "
           f"(no bosses eje Z — cyl_y() exclusivo)  => {'PASS' if v1_pass else 'FAIL'}")
 
     # V2 — Batería no colisiona con bosses (posición nueva: pared interior fija)
@@ -1252,11 +1312,12 @@ def main():
     x_bat_half  = P["bat_w"] / 2.0    # 17.5 mm
     x_gap_bat   = x_inner - x_bat_half   # 0.5 mm
 
-    # Boss Y range: [interface_y .. boss_y0] = [-17.5 .. +15]
+    # Boss Y range (postes cortos): [boss_y_start=-17.5 .. boss_y_end=-7.5]
     # Battery Y range: [bat_cy - bat_t/2 .. bat_cy + bat_t/2]
     bat_y_min  = bat_cy_new - P["bat_t"]/2
     bat_y_max  = bat_cy_new + P["bat_t"]/2
-    y_gap_bat  = min(bat_y_min - interface_y, boss_y0 - bat_y_max)  # nearest gap
+    boss_y_end_v2 = D["boss_y_end"]   # -7.5 mm
+    y_gap_bat  = bat_y_min - boss_y_end_v2   # batería empieza en +8, boss termina en -7.5 → gap
 
     v2_pass = x_gap_bat > 0   # principal check: no X overlap
     print(f"  [V2] Bat vs boss: bat_cy={bat_cy_new:.1f}  bat_y=[{bat_y_min:.1f}..{bat_y_max:.1f}]")
@@ -1282,11 +1343,11 @@ def main():
           f"=> {'PASS' if v5_pass else 'FAIL'}")
 
     # V6 — Frente Y=+20: solo ventana + concavidad; ningun piloto/cbore perfora +Y
-    # Los bosses van de interface_y a boss_y0=+15, NO llegan a +20 ✓
-    boss_y_max = boss_y0   # = +15 < +20 ✓
-    v6_pass = boss_y_max < P["ext_y"]/2
-    print(f"  [V6] Frente Y=+{P['ext_y']/2:.0f}: boss_y_max={boss_y_max:.1f} < {P['ext_y']/2:.1f}  "
-          f"(bosses no perforan cara ext)  => {'PASS' if v6_pass else 'FAIL'}")
+    # Postes cortos: Y[-17.5..-7.5] → boss_y_end=-7.5 ≪ front_int_y=+15 ✓
+    boss_y_end_v6 = D["boss_y_end"]   # -7.5 mm (extremo del poste hacia +Y)
+    v6_pass = boss_y_end_v6 < P["ext_y"]/2
+    print(f"  [V6] Frente Y=+{P['ext_y']/2:.0f}: boss_y_end={boss_y_end_v6:.1f} < {P['ext_y']/2:.1f}  "
+          f"(postes cortos NO perforan cara ext ni interior)  => {'PASS' if v6_pass else 'FAIL'}")
 
     # V7 — Pared botón NETA = btn_wall = 1.0 mm
     dish_bottom_y_from_front = P["btn_depth"]   # 0.6 mm desde cara ext +Y
@@ -1373,7 +1434,8 @@ def main():
     print(f"  TOPOLOGIA      : Body_Main (frontal +Y macizo) + Rear_Cover (tapa -Y)")
     print(f"  PLANO SEP.     : Y={D['interface_y']:.2f} mm")
     print(f"  BOSSES         : eje Y  off_x=±{D['boss_off_x']:.0f}mm  "
-          f"y0={D['boss_y0']:.1f}→{D['interface_y']:.1f}  len={D['boss_len_y']:.1f}mm")
+          f"Y[{D['boss_y_start']:.1f}..{D['boss_y_end']:.1f}]  post_len={P['boss_post_len']:.1f}mm  "
+          f"pilot_len={D['pilot_len']:.1f}mm")
     print(f"  BOSS Z         : inf={P['boss_z_bot']}  sup={P['boss_z_top']} (CENTRO eje)")
     print(f"  BATERIA        : pared interior fija (front_int_y={front_int_y:.1f})  "
           f"cy={bat_cy_new:.1f}  bat_z0={D['bat_z0']:.1f}")
@@ -1391,7 +1453,7 @@ def main():
     if not cover_valid   : issues.append("Rear_Cover not valid!")
     if cover_vol <= 0    : issues.append("Rear_Cover volume <= 0!")
     if cover_solids != 1 : issues.append(f"Rear_Cover has {cover_solids} solids (expected 1)!")
-    if not v1_pass       : issues.append("Boss eje Y mismatch!")
+    if not v1_pass       : issues.append("Boss eje Y mismatch (boss_y_start/end fuera de rango)!")
     if not v4_pass       : issues.append("Counterbore NOT hidden (cbore_depth >= cover_th)!")
     if not v7_pass       : issues.append("btn_wall NETA mismatch!")
     if issues:
