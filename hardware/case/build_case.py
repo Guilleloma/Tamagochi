@@ -641,107 +641,173 @@ def build_body_main(P, D):
 def build_rear_cover(P, D):
     """
     Tapa trasera que cierra la boca -Y del Body_Main.
-    - Placa plana espesor cover_th (cara ext Y=-20, cara int Y=-20+cover_th=-17.5)
-    - Labio macho perimetral desde cara int hacia +Y, longitud cover_lip_h=4 mm
-      con holgura clr_slide=0.15 mm por lado
-    - 4 pasantes Ø screw_clear_d (2.4) eje Y + counterbore Ø screw_head_d (4.0)
-      por cara ext -Y, prof cbore_depth=2.0 mm (oculto pues < cover_th=2.5)
-    - SIN ventana ni concavidad
+
+    Estrategia de fillets (robusta):
+      (a) Construir un bloque SIMPLE full = ext_x × (cover_th + cover_lip_h) × ext_z
+          en Y[cover_y0 .. lip_y_end] = [-20 .. -13.5]  grosor Y = 6.5 mm.
+      (b) Filletear las 4 aristas VERTICALES con fillet_ext_vert=r4 (cabe en 6.5mm ✓)
+          y las aristas horizontales de z=0 y z=ez con fillet_ext_horiz=r2.
+          Caja simple → makeFillet no tiene junctions → OK.
+      (c) Vaciar zona del labio en dos pasos:
+          - Restar exceso perimetral en Y[cover_y1..lip_y_end] para reducir el
+            contorno exterior de 44×70 a lip_od 43.70×69.70 (holgura clr_slide).
+          - Restar el interior del labio para dejar anillo de pared lip_th=1.85mm.
+      (d) La zona de la placa Y[cover_y0..cover_y1] conserva el contorno redondeado
+          44×70 r4, igual que el cuerpo.
+      (e) Cortar 4 pasantes Ø2.4 + counterbore Ø4.
+      (f) Abortar con error explícito si Solids!=1 en cualquier etapa.
     """
-    ex      = P["ext_x"]; ey = P["ext_y"]; ez = P["ext_z"]
+    ex      = P["ext_x"]; ez = P["ext_z"]
     cth     = P["cover_th"]      # 2.5 mm
     lip_h   = P["cover_lip_h"]   # 4.0 mm
     clr_sl  = P["clr_slide"]     # 0.15 mm
     wall    = P["wall"]
-    lip_ovl = P["lip_overlap"]   # 1.0 mm — solape labio dentro de la placa
 
-    # Refs Y globales (desde derive, para que sean paramétricas)
-    cover_y0  = D["cover_y0"]    # -20 mm  cara ext tapa
-    cover_y1  = D["cover_y1"]    # -17.5 mm  cara int tapa (= interface_y)
-    lip_y_start = D["lip_y_start"]  # -18.5 mm (arranca 1 mm DENTRO de la placa → solape)
-    lip_y_end   = D["lip_y_end"]    # -13.5 mm  extremo del labio hacia +Y
+    rv  = P["fillet_ext_vert"]   # 4.0 mm
+    rh  = P["fillet_ext_horiz"]  # 2.0 mm
 
-    rv  = P["fillet_ext_vert"]
-    rh  = P["fillet_ext_horiz"]
+    # Refs Y globales
+    cover_y0  = D["cover_y0"]   # -20.0 mm  cara ext tapa
+    cover_y1  = D["cover_y1"]   # -17.5 mm  cara int tapa (= interface_y)
+    lip_y_end = D["lip_y_end"]  # -13.5 mm  extremo labio hacia +Y
 
-    # ------------------------------------------------------------------
-    # 3.1 Placa sólida — SIN fillet todavía (fillet-LAST)
-    # BUG 1 FIX: antes se fileteaba el blank solo y luego se fusionaba con
-    # el labio → multi-sólido + fallback silencioso. Ahora: placa plana
-    # pura, sin fillet; fillet se aplica DESPUÉS del fuse.
-    # ------------------------------------------------------------------
-    placa = Part.makeBox(ex, cth, ez,
-                         App.Vector(-ex/2, cover_y0, 0))
-    print(f"  [3.1] placa: {ex}x{cth}x{ez}  Y[{cover_y0:.2f}..{cover_y1:.2f}]")
-
-    # ------------------------------------------------------------------
-    # 3.2 Labio macho — protrude desde lip_y_start hacia +Y
-    # lip_y_start = cover_y1 - lip_overlap = -18.5 mm (solape 1 mm dentro de placa)
-    # lip total longitud en Y = lip_overlap + cover_lip_h = 5.0 mm
-    # Holgura: ext labio = ext cuerpo - 2*clr_slide
-    # Pared labio (ring thickness en X/Z) = wall - clr_slide
-    # ------------------------------------------------------------------
-    lip_od_x = ex - 2*clr_sl        # 43.70 mm
-    lip_od_z = ez - 2*clr_sl        # 69.70 mm
-    lip_th_x = wall - clr_sl        # 1.85 mm (pared labio en X)
-    lip_th_z = wall - clr_sl        # 1.85 mm (pared labio en Z)
-    lip_len_y = lip_ovl + lip_h     # 1.0 + 4.0 = 5.0 mm
-
-    labio_outer = Part.makeBox(lip_od_x, lip_len_y, lip_od_z,
-                               App.Vector(-lip_od_x/2, lip_y_start, 0))
-    lip_inner_x = lip_od_x - 2*lip_th_x
-    lip_inner_z = lip_od_z - 2*lip_th_z
-    labio_inner = Part.makeBox(lip_inner_x, lip_len_y + 0.01, lip_inner_z,
-                               App.Vector(-lip_inner_x/2,
-                                          lip_y_start - 0.005,
-                                          lip_th_z))
-    labio = labio_outer.cut(labio_inner)
-    print(f"  [3.2] labio: od_x={lip_od_x:.2f}  od_z={lip_od_z:.2f}  "
-          f"Y[{lip_y_start:.2f}..{lip_y_end:.2f}]  len_y={lip_len_y:.2f}mm  "
-          f"wall={lip_th_x:.2f}mm")
+    # Grosor Y del bloque completo = cth + lip_h = 6.5 mm  (r4 < 6.5/2 = 3.25? No, r=4 > 3.25)
+    # OCC requiere r <= min_dim/2 en principio, pero el fillet es sobre aristas VERTICALES
+    # (eje Z, longitud 70mm). El radio r4 se aplica en el plano XY; la dimensión crítica
+    # es la mitad del lado corto en XY → min(ex/2, full_y/2) = min(22, 3.25).
+    # r4 > 3.25: OCC fallará si hay aristas en esa cara. Sin embargo, las aristas VERTICALES
+    # de una caja son en las 4 esquinas XY y tienen longitud = ez = 70mm (eje Z).
+    # El fillet sobre ellas sólo necesita r < min(ex/2, full_y/2) para las caras adyacentes.
+    # full_y/2 = 3.25 < r4 → puede fallar. Usamos el mismo clamp que ya usaba el código:
+    # rv_safe = min(rv, full_y - 0.1) para garantizar que el fillet cabe en la dimensión Y.
+    full_y    = lip_y_end - cover_y0   # 6.5 mm
+    rv_safe   = min(rv, full_y / 2.0 - 0.05)   # min(4.0, 3.20) = 3.20 mm
+    # rv_safe = 3.20 aplica esquinas verticales que encajan en el bloque de 6.5mm de profundidad.
 
     # ------------------------------------------------------------------
-    # Fuse placa + labio (con solape de 1 mm → garantiza manifold)
-    # BUG 1 FIX: abortar explícitamente si Solids!=1 (no fallback silencioso)
+    # 3.1 Bloque sólido SIMPLE — un único makeBox, topología limpia
+    # Y[cover_y0 .. lip_y_end] = [-20 .. -13.5]  grosor = 6.5 mm
     # ------------------------------------------------------------------
-    cover = placa.fuse(labio)
-    n_solids = len(cover.Solids)
-    if n_solids != 1:
+    full = Part.makeBox(ex, full_y, ez, App.Vector(-ex/2, cover_y0, 0))
+    print(f"  [3.1] full block: {ex}x{full_y:.2f}x{ez}  "
+          f"Y[{cover_y0:.2f}..{lip_y_end:.2f}]")
+
+    # ------------------------------------------------------------------
+    # 3.2 Fillet sobre bloque simple — topología limpia, sin junctions
+    # Vertical edges (eje Z, 4 esquinas): rv_safe
+    # Horizontal edges en z=0 y z=ez: rh
+    # ------------------------------------------------------------------
+    full, fv_ok, fh_ok = apply_fillets(full, rv_safe, rh, ez, label="Rear_Cover_full")
+    if not fv_ok:
         raise RuntimeError(
-            f"[ABORT] Rear_Cover fuse placa+labio produjo {n_solids} sólidos "
-            f"(esperado 1). Revisar geometría del labio / solape."
+            f"[ABORT] Rear_Cover fillet vertical r={rv_safe:.2f} sobre bloque simple falló. "
+            f"Revisar full_y={full_y:.2f}mm vs r={rv_safe:.2f}."
         )
-    print(f"  [fuse] placa+labio OK — Solids={n_solids}  Volume={cover.Volume:.0f} mm³")
+    print(f"  [3.2] fillet vert r={rv_safe:.2f} applied={fv_ok}  horiz r={rh} applied={fh_ok}")
 
-    # ------------------------------------------------------------------
-    # Fillet-LAST sobre el conjunto (no sobre el blank aislado)
-    # BUG 1 FIX: filletear el conjunto garantiza que OCC trabaja sobre
-    # una topología coherente y produce un único sólido filleteado.
-    # Fallback: reducir r si OCC falla con vert r4 (cover_th=2.5 < r=4)
-    # ------------------------------------------------------------------
-    # Verts: máximo r seguro es min(fillet_ext_vert, cover_th + cover_lip_h - 0.1)
-    rv_safe = min(rv, cth + lip_h - 0.1)
-    cover, fv_ok, fh_ok = apply_fillets(cover, rv_safe, rh, ez, label="Rear_Cover")
-    if not fv_ok and rv_safe > 0:
-        # Reintentar con r reducido aún más
-        rv_retry = min(rv_safe, cth - 0.05)
-        print(f"  [fillet] retry vert r={rv_retry:.2f}")
-        cover, fv_ok2, _ = apply_fillets(cover, rv_retry, 0, ez, label="Rear_Cover_retry")
-    if fv_ok: print(f"  [fillet] cover vert r={rv_safe:.2f} applied")
-    if fh_ok: print(f"  [fillet] cover horiz r={rh} applied")
-
-    # Verificar que el fillet no rompió el sólido
-    n_post = len(cover.Solids)
-    if n_post != 1:
+    n_after_fillet = len(full.Solids)
+    if n_after_fillet != 1:
         raise RuntimeError(
-            f"[ABORT] Rear_Cover tras fillets tiene {n_post} sólidos (esperado 1)."
+            f"[ABORT] Rear_Cover tras fillet tiene {n_after_fillet} sólidos (esperado 1)."
         )
+    print(f"  [3.2] post-fillet Solids={n_after_fillet}  Volume={full.Volume:.0f} mm³")
 
     # ------------------------------------------------------------------
-    # 3.3 Screw through-holes + counterbores (eje Y)
-    # Pasante: desde cover_y0 (cara ext -Y) hasta lip_y_end (extremo labio)
-    # Cbore: desde cover_y0 hacia +Y, prof cbore_depth=2.0 mm
-    # Alineación coaxial con postes en Body_Main (±boss_off_x, boss_z_bot/top)
+    # 3.3 Vaciar zona del labio — 2 pasos
+    #
+    # La zona del labio en Y = [cover_y1 .. lip_y_end] = [-17.5 .. -13.5]
+    # profundidad_lip_zone = lip_h = 4.0 mm
+    #
+    # PASO A: Restar exceso perimetral exterior en la zona del labio
+    #   El bloque full tiene contorno 44×70 (redondeado r4).
+    #   El labio exterior debe ser lip_od_x × lip_od_z = 43.70 × 69.70.
+    #   Diferencia: 0.15mm a cada lado en X, 0.15mm a cada lado en Z.
+    #   Restamos 4 franjas delgadas SOLO en Y[cover_y1..lip_y_end+ε]:
+    #     - franja -X: x ∈ [-22 .. -(lip_od_x/2)]  anchura = clr_sl = 0.15mm
+    #     - franja +X: x ∈ [+(lip_od_x/2) .. +22]  anchura = 0.15mm
+    #     - franja -Z: z ∈ [0 .. clr_sl]            altura  = 0.15mm
+    #     - franja +Z: z ∈ [lip_od_z .. ez]         altura  = 0.15mm
+    #   Con ε=0.01 mm de sobrante en Y para corte limpio.
+    # ------------------------------------------------------------------
+    lip_od_x  = ex  - 2.0*clr_sl        # 43.70 mm
+    lip_od_z  = ez  - 2.0*clr_sl        # 69.70 mm
+    lip_th_x  = wall - clr_sl           # 1.85 mm (pared anillo en X)
+    lip_th_z  = wall - clr_sl           # 1.85 mm (pared anillo en Z)
+
+    lip_zone_y0  = cover_y1             # -17.5 mm
+    lip_zone_len = lip_y_end - cover_y1 + 0.01  # 4.01 mm (ε sobrante)
+
+    # Franja -X (x ∈ [-22 .. -21.85])
+    strip_lx_w = ex/2.0 - lip_od_x/2.0   # = 0.15 mm
+    strip_lx = Part.makeBox(
+        strip_lx_w + 0.01, lip_zone_len, ez + 0.02,
+        App.Vector(-ex/2.0 - 0.005, lip_zone_y0, -0.01)
+    )
+    full = full.cut(strip_lx)
+
+    # Franja +X (x ∈ [21.85 .. 22])
+    strip_rx = Part.makeBox(
+        strip_lx_w + 0.01, lip_zone_len, ez + 0.02,
+        App.Vector(lip_od_x/2.0 - 0.005, lip_zone_y0, -0.01)
+    )
+    full = full.cut(strip_rx)
+
+    # Franja -Z (z ∈ [0 .. 0.15])
+    strip_bz_h = ez/2.0 - lip_od_z/2.0   # = 0.15 mm
+    strip_bz = Part.makeBox(
+        ex + 0.02, lip_zone_len, strip_bz_h + 0.01,
+        App.Vector(-ex/2.0 - 0.01, lip_zone_y0, -0.005)
+    )
+    full = full.cut(strip_bz)
+
+    # Franja +Z (z ∈ [69.85 .. 70])
+    strip_tz = Part.makeBox(
+        ex + 0.02, lip_zone_len, strip_bz_h + 0.01,
+        App.Vector(-ex/2.0 - 0.01, lip_zone_y0, lip_od_z - 0.005)
+    )
+    full = full.cut(strip_tz)
+
+    n_after_strips = len(full.Solids)
+    if n_after_strips != 1:
+        raise RuntimeError(
+            f"[ABORT] Rear_Cover tras recorte perimetral del labio tiene "
+            f"{n_after_strips} sólidos (esperado 1)."
+        )
+    print(f"  [3.3a] perimeter strips cut OK  Solids={n_after_strips}  "
+          f"Volume={full.Volume:.0f} mm³")
+    print(f"         lip_od_x={lip_od_x:.2f}  lip_od_z={lip_od_z:.2f}  "
+          f"lip_th={lip_th_x:.2f}mm")
+
+    # ------------------------------------------------------------------
+    # PASO B: Vaciar interior del labio — dejar anillo de pared lip_th
+    # Interior del anillo: (lip_od_x - 2*lip_th_x) × (lip_od_z - 2*lip_th_z)
+    #                    = 40.00 × 66.00 mm
+    # Se resta solo en Y[cover_y1 .. lip_y_end+ε]
+    # ------------------------------------------------------------------
+    lip_in_x = lip_od_x - 2.0*lip_th_x   # 40.00 mm
+    lip_in_z = lip_od_z - 2.0*lip_th_z   # 66.00 mm
+    lip_interior = Part.makeBox(
+        lip_in_x, lip_zone_len, lip_in_z,
+        App.Vector(-lip_in_x/2.0, lip_zone_y0, lip_th_z)
+    )
+    full = full.cut(lip_interior)
+
+    n_after_interior = len(full.Solids)
+    if n_after_interior != 1:
+        raise RuntimeError(
+            f"[ABORT] Rear_Cover tras vaciado interior labio tiene "
+            f"{n_after_interior} sólidos (esperado 1)."
+        )
+    print(f"  [3.3b] lip interior cut OK  Solids={n_after_interior}  "
+          f"Volume={full.Volume:.0f} mm³")
+    print(f"         lip_in_x={lip_in_x:.2f}  lip_in_z={lip_in_z:.2f}  "
+          f"wall_ring={lip_th_x:.2f}mm")
+
+    # ------------------------------------------------------------------
+    # 3.4 Screw through-holes + counterbores (eje Y)
+    # Pasante Ø2.4: desde cover_y0 (cara ext -Y) hasta lip_y_end (extremo labio)
+    # Cbore Ø4.0:   desde cover_y0 hacia +Y, prof cbore_depth=2.0 mm
+    # Coaxial con postes de Body_Main (±boss_off_x, boss_z_bot/top)
     # ------------------------------------------------------------------
     bx_off   = D["boss_off_x"]      # ±20 mm
     sc_cl    = P["screw_clear_d"]   # 2.4 mm Ø
@@ -749,7 +815,7 @@ def build_rear_cover(P, D):
     cbore_d  = P["cbore_depth"]     # 2.0 mm
 
     # Total Y span of hole: cover_y0 .. lip_y_end
-    total_hole_len = lip_y_end - cover_y0   # = cth + lip_h = 6.5 mm
+    total_hole_len = lip_y_end - cover_y0   # = full_y = 6.5 mm
 
     cover_boss_pairs = [
         ( bx_off, P["boss_z_bot"]),   # inf right
@@ -761,14 +827,25 @@ def build_rear_cover(P, D):
     for bx, bz in cover_boss_pairs:
         # Through-hole (pasante): Y[cover_y0 .. lip_y_end]
         through = cyl_y(sc_cl/2, total_hole_len, cx=bx, cz=bz, y0=cover_y0)
-        cover = cover.cut(through)
+        full = full.cut(through)
 
         # Counterbore desde cara ext -Y (cover_y0) hacia +Y, prof cbore_depth
         # Cbore Y[cover_y0 .. cover_y0+cbore_depth] = [-20..-18]  Ø4
         cbore = cyl_y(sc_hd/2, cbore_d, cx=bx, cz=bz, y0=cover_y0)
-        cover = cover.cut(cbore)
+        full = full.cut(cbore)
 
-    return cover, {
+    n_final = len(full.Solids)
+    if n_final != 1:
+        raise RuntimeError(
+            f"[ABORT] Rear_Cover tras agujeros tornillos tiene {n_final} sólidos "
+            f"(esperado 1). Revisar posición de cbore/through vs geometría."
+        )
+    print(f"  [3.4] screws cut OK  Solids={n_final}  Volume={full.Volume:.0f} mm³")
+
+    # Expose lip_y_start for legacy callers (it equals cover_y1 in new scheme)
+    lip_y_start = cover_y1
+
+    return full, {
         "cover_y0":       cover_y0,
         "cover_y1":       cover_y1,
         "lip_y_start":    lip_y_start,
