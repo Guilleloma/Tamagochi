@@ -595,13 +595,14 @@ void setup() {
     // Render inmediato del primer frame (sustituye el splash de texto).
     renderer->render();
 
-    // ── InputHandler — botón BOOT / GPIO0 ─────────────────────────────────────
-    // active-LOW (GPIO0 lleva pull-up interno; en reposo HIGH, pulsado LOW).
+    // ── InputHandler — TTP223 / GPIO4 ────────────────────────────────────────
+    // active-HIGH (módulo TTP223 drivea OUT; en reposo LOW, al tocar HIGH).
+    // Sin pull-up interno — el módulo impone el nivel de salida.
     inputHandler = new InputHandler(bus, PIN_BUTTON,
                                     BUTTON_ACTIVE_LOW,
                                     BUTTON_PULLUP_ACTIVE);
     inputHandler->begin();
-    LOG_INFO("Boton BOOT configurado en GPIO%d (activeLow=%s, pullup=%s)",
+    LOG_INFO("TTP223 configurado en GPIO%d (activeLow=%s, pullup=%s)",
              PIN_BUTTON,
              BUTTON_ACTIVE_LOW    ? "true" : "false",
              BUTTON_PULLUP_ACTIVE ? "true" : "false");

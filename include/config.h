@@ -13,15 +13,11 @@
 
 // ── Configuración de botón — condicional por plataforma ─────────────────────
 //
-// ESP32-S3 Zero: GPIO0 es el botón BOOT físico de la placa.
-//   - Active-LOW con pull-up interno (INPUT_PULLUP).
-//   - AVISO STRAPPING: GPIO0 es pin de strapping del ESP32-S3. Si está LOW
-//     durante el ciclo de reset/arranque, el chip entra en bootloader USB/UART
-//     en lugar de arrancar el firmware. En runtime (después del boot) se puede
-//     leer y usar libremente. NO mantener pulsado el botón BOOT al alimentar
-//     la placa ni al pulsar RESET — si lo haces, entrará en bootloader y el
-//     firmware no arrancará hasta liberar el botón y resetear de nuevo.
-//   - activeLow=true, pullupActive=true.
+// ESP32-S3 Zero: TTP223 (sensor touch capacitivo) en GPIO4.
+//   - Salida push-pull active-HIGH: en reposo LOW, al tocar HIGH.
+//   - No requiere INPUT_PULLUP (el módulo TTP223 drivea la salida OUT).
+//   - GPIO4 es pin seguro (no es pin de strapping).
+//   - activeLow=false, pullupActive=false.
 //
 // ESP8266 (TTP223 en GPIO4): sensor touch capacitivo.
 //   - Salida push-pull active-HIGH: en reposo LOW, al tocar HIGH.
@@ -29,10 +25,10 @@
 //   - InputHandler debe instanciarse con activeLow=false, pullupActive=false.
 
 #if defined(ARDUINO_ARCH_ESP32)
-  // BOOT / GPIO0 del ESP32-S3 Zero — active-LOW, pull-up interno.
-  #define PIN_BUTTON           0
-  #define BUTTON_ACTIVE_LOW    true
-  #define BUTTON_PULLUP_ACTIVE true
+  // TTP223 en GPIO4 del ESP32-S3 Zero — active-HIGH, sin pull-up interno.
+  #define PIN_BUTTON           4
+  #define BUTTON_ACTIVE_LOW    false
+  #define BUTTON_PULLUP_ACTIVE false
 #else
   // TTP223 en GPIO4 del ESP8266 — active-HIGH, sin pull-up externo.
   #define PIN_BUTTON           4
