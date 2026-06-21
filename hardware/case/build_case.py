@@ -119,25 +119,23 @@ P = {
     "ttp_t":             1.6,
     "ttp_clip_clr":      0.3,
 
-    # Boss / screws — 4× M3×5 countersunk (avellanado 90°, al ras), eje Y
+    # Boss / screws — 4× M3×6 countersunk (avellanado 90°, al ras), eje Y
     # boss_od derivado = boss_id + 2*2.0 = 6.5 mm
     # boss_off_x = 17.5 mm (fijo — margen cabeza 1.5 mm al borde, poste solapa pared lateral)
     # boss_z_bot / boss_z_top = CENTRO Z del eje del boss (no base)
     "boss_id":           2.5,   # M3 self-tap pilot diameter (PLA)
     "boss_z_bot":        9.0,   # centro Z eje boss inferior
     "boss_z_top":       61.0,   # centro Z eje boss superior
-    "boss_post_len":     8.0,   # longitud poste (Y[-18.5..-10.5])
+    "boss_post_len":     8.0,   # longitud poste (Y[-17.5..-9.5])
     "screw_head_d":      6.0,   # Ø cabeza/avellanado M3
     "screw_clear_d":     3.4,   # pasante M3 en tapa
-    "screw_len":         5.0,   # M3×5
+    "screw_len":         6.0,   # M3×6 (tapa uniforme 2.5mm sin isla rebajada)
     "screw_thread_engage": 3.5, # engage mínimo en boss
     "n_screws":          4,
     # Avellanado countersunk 90°
     "cs_angle":         90.0,   # ángulo del cono avellanado (grados)
     "cs_depth":          1.3,   # prof cono = (screw_head_d - screw_clear_d) / 2 = 1.3 mm
-    # Isla rebajada en tapa (Opción A)
-    "cover_th_screw_island": 1.5,  # espesor tapa en la isla (mínimo material)
-    "screw_island_d":   10.0,   # Ø isla rebajada en tapa
+    # Isla rebajada ELIMINADA — tapa uniforme 2.5 mm en toda la superficie
 
     # Rear cover
     "cover_th":          2.5,  # espesor tapa trasera
@@ -189,14 +187,16 @@ def derive(P):
     d["ttp_pocket_h"] = P["ttp_h"] + 2*P["clr_fit"]
 
     # -------------------------------------------------------------------------
-    # Boss — eje Y M3×5 avellanado al ras + isla rebajada (Opción A)
+    # Boss — eje Y M3×6 avellanado al ras; tapa UNIFORME 2.5 mm (sin isla)
     # boss_od = boss_id + 2*2.0 = 6.5 mm (pared 2.0 alrededor del piloto)
     # boss_off_x = 17.5 mm (fijo: margen cabeza 1.5 mm al borde + poste solapa pared lateral 0.75 mm)
     # cover_th = 2.5 mm  → cover_y0=-20, cover_y1=-17.5
-    # isla rebajada: cover_th_screw_island=1.5 mm queda Y[-20..-18.5]; rebaje Y[-18.5..-17.5]
-    # boss_y_start = -ext_y/2 + cover_th_screw_island = -20 + 1.5 = -18.5 mm (cara interior isla)
-    # boss_y_end   = boss_y_start + boss_post_len = -18.5 + 8.0 = -10.5 mm
-    # pilot_len    = screw_thread_engage + 1.0 = 4.5 mm → Y[-18.5..-14.0]
+    # Tapa uniforme: material Y[-20..-17.5] = 2.5 mm en toda la superficie
+    # boss_y_start = -ext_y/2 + cover_th = -20 + 2.5 = -17.5 mm (cara interior tapa)
+    # boss_y_end   = boss_y_start + boss_post_len = -17.5 + 8.0 = -9.5 mm
+    # pilot_len    = screw_thread_engage + 1.0 = 4.5 mm → Y[-17.5..-13.0]
+    # M3×6 punta: cover_y0 + screw_len = -20 + 6 = -14.0 mm (dentro piloto -13.0, aire 1.0 mm ✓)
+    # Engage: punta(-14.0) − boss_y_start(-17.5) = 3.5 mm ✓
     # boss_z_bot / boss_z_top = CENTRO Z del eje del boss
     # -------------------------------------------------------------------------
     d["boss_od"]      = P["boss_id"] + 2 * 2.0              # = 6.5 mm
@@ -205,9 +205,9 @@ def derive(P):
     d["boss_off_x"]   = 17.5                                 # fijo (margen+solape pared)
 
     d["interface_y"]  = -P["ext_y"] / 2.0 + P["cover_th"]  # = -17.5 mm
-    # boss_y_start arranca en cara INTERIOR de la isla (no en cover_y1)
-    d["boss_y_start"] = -P["ext_y"] / 2.0 + P["cover_th_screw_island"]  # = -18.5 mm
-    d["boss_y_end"]   = d["boss_y_start"] + P["boss_post_len"]           # = -10.5 mm
+    # boss_y_start arranca en cara INTERIOR de la tapa (interfaz cuerpo/tapa)
+    d["boss_y_start"] = -P["ext_y"] / 2.0 + P["cover_th"]  # = -17.5 mm
+    d["boss_y_end"]   = d["boss_y_start"] + P["boss_post_len"]           # = -9.5 mm
 
     # Derived Y refs for cover geometry
     d["front_ext_y"]  = P["ext_y"] / 2.0                    # = +20 mm
@@ -501,19 +501,19 @@ def build_body_main(P, D):
         shell = shell.fuse(rib)
 
     # ------------------------------------------------------------------
-    # 2.9 Bosses M3×5 — postes (boss_post_len=8 mm) anclados en zona trasera
+    # 2.9 Bosses M3×6 — postes (boss_post_len=8 mm) anclados en zona trasera
     # boss_od = boss_id + 2*2.0 = 6.5 mm (derivado en D)
     # boss_off_x = 17.5 mm (fijo; poste solapa pared lateral ext_x/2=22 → ancla)
-    # Rango Y: [boss_y_start=-18.5 .. boss_y_end=-10.5]
-    # Gap hasta front_int_y=+15: 26.5 mm → NUNCA toca el frente
-    # Poste Ø6.5 en X=±17.5 → extremo exterior X=17.5+3.25=20.75 > pared_ext=20.0 → solapa
+    # Rango Y: [boss_y_start=-17.5 .. boss_y_end=-9.5]  (tapa uniforme, sin isla)
+    # Gap hasta front_int_y=+15: 25.5 mm → NUNCA toca el frente
+    # Poste Ø6.5 en X=±17.5 → extremo exterior X=17.5+3.25=20.75 > pared_int=20.0 → solapa
     # Alineación coaxial (±17.5, z_bot/z_top):
     #   avellanado cono  Y[-20..-18.7]  Ø6→Ø3.4 (r1=3.0→r2=1.7, cs_depth=1.3)
-    #   isla rebajada    Y[-18.5..-17.5] Ø10 (rebaje en tapa)
     #   pasante          Y[-20..-13.5] Ø3.4
-    #   poste            Y[-18.5..-10.5] Ø6.5
-    #   piloto M3        Y[-18.5..-14.0] Ø2.5
-    #   M3×5 punta:      -20 + 5 = -15.0  (dentro del piloto -14, aire 1.0 mm OK)
+    #   poste            Y[-17.5..-9.5] Ø6.5
+    #   piloto M3        Y[-17.5..-13.0] Ø2.5
+    #   M3×6 punta:      -20 + 6 = -14.0  (dentro del piloto -13.0, aire 1.0 mm ✓)
+    #   engage: -14.0 − (−17.5) = 3.5 mm ✓
     # ------------------------------------------------------------------
     boss_od  = D["boss_od"]           # 6.5 mm (derivado)
     boss_id  = P["boss_id"]           # 2.5 mm
@@ -819,23 +819,17 @@ def build_rear_cover(P, D):
           f"wall_ring={lip_th_x:.2f}mm")
 
     # ------------------------------------------------------------------
-    # 3.4 Tornillos M3×5 avellanado al ras + isla rebajada (Opción A)
+    # 3.4 Tornillos M3×6 avellanado al ras — tapa UNIFORME 2.5 mm (sin isla)
     #
     # Por tornillo (±boss_off_x=±17.5, boss_z_bot=9, boss_z_top=61):
     #
-    # A) Isla rebajada — rebaja la tapa desde cara INTERIOR (Y=-17.5) hacia -Y
-    #    hasta que queden solo cover_th_screw_island=1.5 mm de material.
-    #    La isla ocupa Y[-18.5..-17.5] (1.0 mm de rebaje) → en la isla:
-    #    tapa en Y[-20..-18.5] = 1.5 mm.
-    #    Cortar cilindro Ø screw_island_d=10, Y[-18.5..-17.5] del cover.
-    #    (boss_y_start = -18.5 mm = cover_y0 + cover_th_screw_island)
-    #
-    # B) Avellanado cónico 90° — desde cara ext Y=-20 hacia +Y, prof cs_depth=1.3 mm.
+    # A) Avellanado cónico 90° — desde cara ext Y=-20 hacia +Y, prof cs_depth=1.3 mm.
     #    Cono: r1=screw_head_d/2=3.0 (en Y=-20), r2=screw_clear_d/2=1.7 (en Y=-18.7).
     #    makeCone origin en (±17.5, -20, z_boss), dir (0,1,0).
-    #    Cabeza queda al ras (cs_depth=1.3 ≤ cover_th_island=1.5 → V-CS7 ✓).
+    #    Tapa uniforme 2.5mm → cono Y[-20..-18.7], queda 1.2mm pasante hasta Y=-17.5.
+    #    Cabeza al ras: cs_depth=1.3 < cover_th=2.5 ✓.
     #
-    # C) Pasante Ø screw_clear_d=3.4: desde Y=-20 hasta Y=-13.5 (lip_y_end),
+    # B) Pasante Ø screw_clear_d=3.4: desde Y=-20 hasta Y=-13.5 (lip_y_end),
     #    atraviesa toda la tapa+labio para llegar al piloto.
     #
     # Total_hole_len = lip_y_end - cover_y0 = -13.5 - (-20) = 6.5 mm
@@ -844,10 +838,6 @@ def build_rear_cover(P, D):
     sc_cl    = P["screw_clear_d"]          # 3.4 mm Ø pasante
     sc_hd    = P["screw_head_d"]           # 6.0 mm Ø cabeza
     cs_d     = P["cs_depth"]              # 1.3 mm prof cono
-    isl_d    = P["screw_island_d"]         # 10.0 mm Ø isla
-    boss_y_st = D["boss_y_start"]          # -18.5 mm (cara interior isla)
-    # Profundidad del rebaje: cover_y1 - boss_y_start = -17.5 - (-18.5) = 1.0 mm
-    island_rebaje_len = D["cover_y1"] - boss_y_st   # 1.0 mm
 
     # Total Y span of through-hole: cover_y0 .. lip_y_end
     total_hole_len = lip_y_end - cover_y0   # = full_y = 6.5 mm
@@ -860,19 +850,7 @@ def build_rear_cover(P, D):
     ]
 
     for bx, bz in cover_boss_pairs:
-        # --- A) Isla rebajada ---
-        # Cilindro Ø10 de boss_y_start(-18.5) a cover_y1(-17.5), 1.0 mm
-        island_cut = cyl_y(isl_d/2, island_rebaje_len, cx=bx, cz=bz, y0=boss_y_st)
-        full = full.cut(island_cut)
-
-        n_isl = len(full.Solids)
-        if n_isl != 1:
-            raise RuntimeError(
-                f"[ABORT] Rear_Cover tras isla rebajada (bx={bx}, bz={bz}) "
-                f"tiene {n_isl} sólidos (esperado 1)."
-            )
-
-        # --- B) Avellanado cónico 90° ---
+        # --- A) Avellanado cónico 90° ---
         # Cono: desde cara ext (Y=cover_y0=-20) hacia +Y, longitud cs_depth=1.3 mm
         # r1 = screw_head_d/2 = 3.0 en Y=-20 (cara ext)
         # r2 = screw_clear_d/2 = 1.7 en Y=-18.7 (fondo del cono)
@@ -910,10 +888,9 @@ def build_rear_cover(P, D):
             f"[ABORT] Rear_Cover tras agujeros tornillos tiene {n_final} sólidos "
             f"(esperado 1). Revisar posición de avellanado/pasante vs geometría."
         )
-    print(f"  [3.4] M3x5 countersunk + isla rebajada OK  "
+    print(f"  [3.4] M3x6 countersunk (tapa uniforme 2.5mm, sin isla) OK  "
           f"Solids={n_final}  Volume={full.Volume:.0f} mm³")
-    print(f"        bx_off=±{bx_off:.1f}  island_rebaje={island_rebaje_len:.1f}mm Ø{isl_d}  "
-          f"cs_depth={cs_d:.1f}mm r1={r1_cs:.1f}→r2={r2_cs:.1f}  "
+    print(f"        bx_off=±{bx_off:.1f}  cs_depth={cs_d:.1f}mm r1={r1_cs:.1f}→r2={r2_cs:.1f}  "
           f"through_len={total_hole_len:.1f}mm Ø{sc_cl}")
 
     # Expose lip_y_start for legacy callers (it equals cover_y1 in new scheme)
@@ -995,20 +972,18 @@ def build_spreadsheet(doc, P, D):
         ("ttp_h",            P["ttp_h"],             "TTP223 height 11 mm"),
         ("ttp_t",            P["ttp_t"],             "TTP223 thickness 1.6 mm"),
         ("ttp_clip_clr",     P["ttp_clip_clr"],      "TTP223 clip clearance"),
-        # Bosses / screws — 4× M3×5 avellanado 90° al ras + isla rebajada (Opción A)
+        # Bosses / screws — 4× M3×6 avellanado 90° al ras; tapa uniforme 2.5mm (sin isla)
         ("boss_id",          P["boss_id"],           "M3 self-tap pilot dia 2.5 mm (PLA)"),
         ("boss_z_bot",       P["boss_z_bot"],        "CENTRO Z eje boss inferior 9.0 mm"),
         ("boss_z_top",       P["boss_z_top"],        "CENTRO Z eje boss superior 61.0 mm"),
-        ("boss_post_len",    P["boss_post_len"],     "Longitud poste 8 mm (Y[-18.5..-10.5])"),
+        ("boss_post_len",    P["boss_post_len"],     "Longitud poste 8 mm (Y[-17.5..-9.5])"),
         ("screw_head_d",     P["screw_head_d"],      "Screw head/avellanado dia 6.0 mm (M3)"),
         ("screw_clear_d",    P["screw_clear_d"],     "Screw clearance hole dia 3.4 mm (M3)"),
-        ("screw_len",        P["screw_len"],         "M3x5 self-tap screw length"),
+        ("screw_len",        P["screw_len"],         "M3x6 self-tap screw length (tapa uniforme 2.5mm)"),
         ("screw_thread_engage", P["screw_thread_engage"], "Engage mínimo en boss 3.5 mm"),
         ("n_screws",         P["n_screws"],          "Number of fasteners (4)"),
         ("cs_angle",         P["cs_angle"],          "Countersunk angle 90 grados"),
         ("cs_depth",         P["cs_depth"],          "Countersunk cone depth 1.3 mm"),
-        ("cover_th_screw_island", P["cover_th_screw_island"], "Espesor tapa en isla rebajada 1.5 mm"),
-        ("screw_island_d",   P["screw_island_d"],   "Diametro isla rebajada 10.0 mm"),
         # Rear cover
         ("cover_th",         P["cover_th"],          "Rear cover thickness 2.5 mm"),
         ("cover_lip_h",      P["cover_lip_h"],       "Cover male lip height 4.0 mm"),
@@ -1031,8 +1006,8 @@ def build_spreadsheet(doc, P, D):
         ("boss_od",          D["boss_od"],            "= boss_id + 2*2.0 = 6.5 mm (derivado)"),
         ("boss_off_x",       D["boss_off_x"],        "= 17.5 mm fijo (margen cabeza + solape pared)"),
         ("interface_y",      D["interface_y"],       "= -ext_y/2 + cover_th = -17.5 mm"),
-        ("boss_y_start",     D["boss_y_start"],      "= -ext_y/2 + cover_th_screw_island = -18.5 mm"),
-        ("boss_y_end",       D["boss_y_end"],        "= boss_y_start + boss_post_len = -10.5 mm"),
+        ("boss_y_start",     D["boss_y_start"],      "= -ext_y/2 + cover_th = -17.5 mm (cara int tapa uniforme)"),
+        ("boss_y_end",       D["boss_y_end"],        "= boss_y_start + boss_post_len = -9.5 mm"),
         ("cover_y0",         D["cover_y0"],          "= -ext_y/2 = -20 mm (cara ext tapa)"),
         ("cover_y1",         D["cover_y1"],          "= cover_y0 + cover_th = -17.5 mm (interfaz)"),
         ("lip_y_start",      D["lip_y_start"],       "= cover_y1 - lip_overlap = -18.5 mm"),
@@ -1447,8 +1422,8 @@ def main():
 
     bx_off   = D["boss_off_x"]        # 17.5 mm
     boss_r   = D["boss_r"]            # 3.25 mm
-    boss_y_start = D["boss_y_start"]  # -18.5 mm
-    boss_y_end   = D["boss_y_end"]    # -10.5 mm
+    boss_y_start = D["boss_y_start"]  # -17.5 mm (cara int tapa uniforme)
+    boss_y_end   = D["boss_y_end"]    # -9.5 mm
     front_int_y = P["ext_y"]/2 - P["wall_front"]  # +15 mm
 
     # V-CS1 — Cabeza íntegra: boss_off_x + screw_head_d/2 ≤ ext_x/2 - 1.5 (margen 1.5 mm)
@@ -1503,32 +1478,34 @@ def main():
           f"=> {'PASS' if vcs5_pass else 'FAIL'}")
 
     # V-CS6 — Engage ≥ 3.5 mm
-    # Punta tornillo: cover_y0 + screw_len = -20 + 5 = -15.0 mm
-    # Piloto arranca en boss_y_start = -18.5 → engage = -15.0 - (-18.5) = 3.5 mm
-    screw_tip_y   = D["cover_y0"] + P["screw_len"]    # -20 + 5 = -15.0
-    engage_actual = screw_tip_y - boss_y_start          # -15.0 - (-18.5) = 3.5
+    # Punta tornillo: cover_y0 + screw_len = -20 + 6 = -14.0 mm (M3×6)
+    # Piloto arranca en boss_y_start = -17.5 → engage = -14.0 - (-17.5) = 3.5 mm
+    screw_tip_y   = D["cover_y0"] + P["screw_len"]    # -20 + 6 = -14.0
+    engage_actual = screw_tip_y - boss_y_start          # -14.0 - (-17.5) = 3.5
     vcs6_pass = engage_actual >= P["screw_thread_engage"] - 0.001
     print(f"  [V-CS6] Engage: cover_y0({D['cover_y0']:.1f}) + screw_len({P['screw_len']:.1f}) = "
           f"punta_y={screw_tip_y:.1f}  boss_y_start={boss_y_start:.1f}  "
           f"engage={engage_actual:.1f}mm (min={P['screw_thread_engage']:.1f})  "
           f"=> {'PASS' if vcs6_pass else 'FAIL'}")
 
-    # V-CS7 — Avellanado al ras: cs_depth ≤ cover_th_island; cono NO perfora cara interior isla
-    # cs_depth=1.3 ≤ cover_th_island=1.5 ✓; cono llega a Y=-20+1.3=-18.7 < isla_interior Y=-18.5
+    # V-CS7 — Avellanado al ras: cono NO perfora cara interior tapa (cover_th=2.5)
+    # cs_depth=1.3 < cover_th=2.5 ✓; cono llega a Y=-20+1.3=-18.7; interfaz tapa Y=-17.5
+    # Queda 1.2mm de pasante limpio (Y[-18.7..-17.5]) antes de entrar en el labio
     cs_cone_tip_y  = D["cover_y0"] + P["cs_depth"]    # -20 + 1.3 = -18.7
-    island_int_y   = boss_y_start                       # -18.5 mm (cara interior isla)
-    vcs7_pass = (P["cs_depth"] <= P["cover_th_screw_island"] and
-                 cs_cone_tip_y <= island_int_y + 0.001)
-    print(f"  [V-CS7] Avellanado al ras: cs_depth({P['cs_depth']:.1f}) ≤ "
-          f"cover_th_island({P['cover_th_screw_island']:.1f})  "
-          f"cono_tip_y={cs_cone_tip_y:.2f} ≤ isla_int_y={island_int_y:.1f}  "
+    cover_int_y    = D["cover_y1"]                     # -17.5 mm (cara interior tapa uniforme)
+    vcs7_pass = (P["cs_depth"] < P["cover_th"] and
+                 cs_cone_tip_y <= cover_int_y + 0.001)
+    print(f"  [V-CS7] Avellanado al ras (tapa uniforme): cs_depth({P['cs_depth']:.1f}) < "
+          f"cover_th({P['cover_th']:.1f})  "
+          f"cono_tip_y={cs_cone_tip_y:.2f} ≤ cover_int_y={cover_int_y:.1f}  "
+          f"aire_cono={cover_int_y - cs_cone_tip_y:.2f}mm  "
           f"=> {'PASS' if vcs7_pass else 'FAIL'}")
 
     # V-CS8 — Punta tornillo NO toca fondo del piloto: punta_y > fin_piloto
-    # pilot_len = 4.5 → fin_piloto = boss_y_start + pilot_len = -18.5 + 4.5 = -14.0 mm
-    # punta_y = -15.0 < fin_piloto = -14.0 → aire = 1.0 mm ✓
-    fin_piloto_y  = boss_y_start + D["pilot_len"]      # -18.5 + 4.5 = -14.0
-    aire_punta    = fin_piloto_y - screw_tip_y          # -14.0 - (-15.0) = 1.0
+    # pilot_len = 4.5 → fin_piloto = boss_y_start + pilot_len = -17.5 + 4.5 = -13.0 mm
+    # punta_y = -14.0 < fin_piloto = -13.0 → aire = 1.0 mm ✓
+    fin_piloto_y  = boss_y_start + D["pilot_len"]      # -17.5 + 4.5 = -13.0
+    aire_punta    = fin_piloto_y - screw_tip_y          # -13.0 - (-14.0) = 1.0
     vcs8_pass = aire_punta > 0
     print(f"  [V-CS8] Punta vs fondo piloto: punta_y={screw_tip_y:.1f}  "
           f"fin_piloto={fin_piloto_y:.1f}  aire={aire_punta:.1f}mm  "
@@ -1562,6 +1539,52 @@ def main():
     print(f"          vertex BB  : {vbb_cover[0]:.2f}x{vbb_cover[1]:.2f}x{vbb_cover[2]:.2f}  "
           f"X[{vbb_cover[3]:.2f}..{vbb_cover[4]:.2f}]  envelope={'OK' if env_cover else 'WARN'}")
     print(f"          => {'PASS' if vcs9_pass else 'FAIL'}")
+
+    # V-CS9b — Tapa uniforme: grosor 2.5 mm en las 4 zonas de tornillo
+    # Sonda a r=4mm del centro de cada tornillo en dirección HACIA EL CENTRO (−X para boss+X)
+    # Esta zona corresponde al interior del antiguo Ø10 de isla.
+    # La tapa tiene material en Y[-20..-17.5] = 2.5 mm exacto.
+    # Método: cilindro aguja Ø0.8 en Y[-20.1..-17.4] → intersectar con cover → medir span Y.
+    print(f"  [V-CS9b] Tapa uniforme — grosor en zona ex-isla (r=4mm del eje, hacia centro):")
+    vcs9b_results = []
+    cover_y0_v = D["cover_y0"]   # -20.0
+    cover_y1_v = D["cover_y1"]   # -17.5
+    expected_th = P["cover_th"]  # 2.5
+    for bx, bz_boss in [(D["boss_off_x"], P["boss_z_bot"]),
+                         (-D["boss_off_x"], P["boss_z_bot"]),
+                         (D["boss_off_x"], P["boss_z_top"]),
+                         (-D["boss_off_x"], P["boss_z_top"])]:
+        # r=4mm hacia el centro (−sign(bx)*4)
+        px = bx + (-4.0 if bx > 0 else +4.0)  # toward X=0
+        pz = bz_boss
+        # Aguja a lo largo de Y desde Y=-20.1 a Y=-17.4 (cubre rango tapa + 0.1mm sobrante)
+        needle_len = expected_th + 0.2   # 2.7 mm
+        needle = cyl_y(0.4, needle_len,
+                       cx=px, cz=pz,
+                       y0=cover_y0_v - 0.1)
+        try:
+            inter = cover_shape.common(needle)
+            if inter.Solids or inter.Shells:
+                # Use vertex Y range — OCC common may return face soup; grab all Y
+                iy_min = min(v.Y for v in inter.Vertexes)
+                iy_max = max(v.Y for v in inter.Vertexes)
+                th_probe = iy_max - iy_min
+            elif inter.Faces:
+                iy_min = min(v.Y for v in inter.Vertexes)
+                iy_max = max(v.Y for v in inter.Vertexes)
+                th_probe = iy_max - iy_min
+            else:
+                th_probe = 0.0
+        except Exception as ex_probe:
+            th_probe = -1.0
+            print(f"    probe ({px:.1f},{pz}) err: {ex_probe}")
+        ok = abs(th_probe - expected_th) < 0.08
+        vcs9b_results.append(ok)
+        print(f"    boss({bx:+.1f}, z={bz_boss}) probe_x={px:+.2f}: "
+              f"th={th_probe:.3f}mm (expected {expected_th:.1f})  "
+              f"{'OK' if ok else 'FAIL — grosor incorrecto'}")
+    vcs9b_pass = all(vcs9b_results)
+    print(f"  [V-CS9b] => {'PASS — tapa uniforme 2.5mm' if vcs9b_pass else 'FAIL'}")
 
     # V-CS10 — Parametricidad: validado en validate_parametric()
     validate_parametric(P)
@@ -1608,16 +1631,15 @@ def main():
     print(f"  BOSS Z         : inf={P['boss_z_bot']}  sup={P['boss_z_top']} (CENTRO eje)")
     print(f"  BATERIA        : pared interior fija (front_int_y={front_int_y:.1f})  "
           f"cy={bat_cy_v:.1f}  bat_z0={D['bat_z0']:.1f}")
-    print(f"  COVER          : th={P['cover_th']}  lip_h={P['cover_lip_h']}  "
-          f"isla_rebajada=Ø{P['screw_island_d']}mm th={P['cover_th_screw_island']}mm  "
-          f"cs_depth={P['cs_depth']}mm (cono 90°)")
+    print(f"  COVER          : th={P['cover_th']} UNIFORME (sin isla)  lip_h={P['cover_lip_h']}  "
+          f"cs_depth={P['cs_depth']}mm (cono 90°)  boss_y_start={D['boss_y_start']:.1f}")
     wall_neta = P["wall_front"] - P["btn_depth"] - D["ttp_pocket_d"]
     print(f"  BOTON          : dia={P['btn_dia']}mm  depth={P['btn_depth']}mm  "
           f"wall_NETO={wall_neta:.2f}mm  center_z={D['btn_center_z']:.1f}")
     print(f"  TORNILLOS M3   : M3x{P['screw_len']}  avellanado 90° al ras  "
           f"engage={engage_actual:.1f}mm  clear_d={P['screw_clear_d']}  head_d={P['screw_head_d']}")
     print(f"  V-CS1 margen_cabeza={margen_cabeza:.1f}mm  V-CS2 solape_pared={boss_outer_x-pared_int_x:.2f}mm  "
-          f"V-CS6 engage={engage_actual:.1f}mm  V-CS7 aire_cs={P['cover_th_screw_island']-P['cs_depth']:.1f}mm  "
+          f"V-CS6 engage={engage_actual:.1f}mm  V-CS7 aire_cono={cover_int_y-cs_cone_tip_y:.2f}mm  "
           f"V-CS8 aire_punta={aire_punta:.1f}mm")
 
     issues = []
@@ -1632,9 +1654,10 @@ def main():
     if not vcs3_pass     : issues.append(f"V-CS3 FAIL: poste colisiona con batería (Y_gap={y_gap_cs3:.1f}mm)!")
     if not vcs4_pass     : issues.append(f"V-CS4 FAIL: poste colisiona con MCU (X_gap={x_gap_mcu:.2f}mm)!")
     if not vcs6_pass     : issues.append(f"V-CS6 FAIL: engage={engage_actual:.1f}mm < {P['screw_thread_engage']:.1f}mm!")
-    if not vcs7_pass     : issues.append(f"V-CS7 FAIL: avellanado perfora isla (cs_depth={P['cs_depth']} > island={P['cover_th_screw_island']})!")
+    if not vcs7_pass     : issues.append(f"V-CS7 FAIL: avellanado perfora cara interior tapa (cs_depth={P['cs_depth']} >= cover_th={P['cover_th']})!")
     if not vcs8_pass     : issues.append(f"V-CS8 FAIL: punta toca fondo piloto (aire={aire_punta:.1f}mm)!")
     if not vcs9_pass     : issues.append("V-CS9 FAIL: geometria invalida (Solids!=1 o isValid=False)!")
+    if not vcs9b_pass    : issues.append("V-CS9b FAIL: tapa NO uniforme — revisar isla o material faltante!")
     if not abs(P["wall_front"] - P["btn_depth"] - D["ttp_pocket_d"] - P["btn_wall"]) < 0.01:
         issues.append("btn_wall NETA mismatch!")
     if issues:
