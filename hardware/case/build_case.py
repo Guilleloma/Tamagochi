@@ -571,13 +571,10 @@ def build_body_main(P, D):
                      cz=pcb_z_bot)
     shell = shell.cut(pcb_pocket)
 
-    # Header clearance pocket (behind PCB toward +Y)
-    hdr_clr   = P["header_clr"]
-    hdr_pocket = box(spw, hdr_clr, 8.0,
-                     cx=0,
-                     cy=front_int_y + spd + hdr_clr/2,
-                     cz=pcb_z_bot)
-    shell = shell.cut(hdr_pocket)
+    # Header clearance pocket ELIMINADO: el header de 8 pines sobresale hacia
+    # -Y (cavidad abierta) → tiene espacio libre sin necesidad de pocket.
+    # El pocket anterior cortaba hacia +Y atravesando la pared frontal (cuadrado
+    # visible desde el frente).
 
     # ------------------------------------------------------------------
     # 2.12 Concave button dish (desde cara exterior frontal Y=+20 hacia -Y)
