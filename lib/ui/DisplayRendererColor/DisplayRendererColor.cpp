@@ -2,6 +2,7 @@
  * DisplayRendererColor.cpp — renderer a color para ESP32-S3 + TFT JD9853.
  *
  * FASE 6: sprites reales por etapa de vida.
+ * FASE 4 (menú): icono + label en HUD inferior.
  *
  * Decisiones de diseño:
  *
@@ -24,6 +25,16 @@
  *    etapa si el mood no tiene frames (e.g. egg/ghost solo tienen idle).
  *
  * 5. drawDeadScreen_(): usa spritesByStage_[Dead].frames[Idle] (ghost real).
+ *
+ * 6. Iconos del menú de acciones (loadMenuIcons_):
+ *    Feed→ic-apple, Play→ic-ball, Discipline→ic-disc, Sleep→ic-moon,
+ *    Heal→ic-heal, Stats→ic-stats. Todos 24×24, 1 frame "idle".
+ *    Clean y Medicate usan primitivas (drawMenuIconPrimitive_): sus assets
+ *    anim-broom/anim-syringe son 48×48 — no caben en el HUD de 60 px junto
+ *    al texto size 2 (que requiere 16 px + márgenes). Se dibujan como iconos
+ *    simbólicos con las mismas primitivas que los overlay badges.
+ *    Si loadMenuIcons_() falla (LittleFS no flasheado), drawHudBottom_() cae
+ *    a label solo — el menú sigue navegable.
  */
 
 #include "DisplayRendererColor.h"
@@ -111,6 +122,49 @@ static const StageLoadSpec kSpriteLoad[] = {
     },
 };
 
+// ─── Tabla de carga de iconos de menú ─────────────────────────────────────────
+//
+// Cada entrada mapea un ActionKind a su sprite icon en LittleFS.
+// Índice del array = índice en menuIcons_[] (ver kMenuIconSlot enumeración).
+// Clean y Medicate NO están en esta tabla — se pintan con primitivas.
+//
+// UUIDs coinciden con el manifest. Los .bin se generan por el pipeline de assets
+// (tools/export-esp32.mjs) y se flashean vía `pio -t uploadfs`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct MenuIconSpec {
+    ActionKind  action;
+    const char* spriteId;  // UUID del manifest
+};
+
+// Orden fijo que define el índice en menuIcons_[].
+// Usar menuIconSlot_() para resolver ActionKind → índice.
+// UUIDs reales del manifest (feature/color-assets — fuente de verdad).
+static const MenuIconSpec kMenuIconSpecs[] = {
+    { ActionKind::Feed,       "cdccb195-6db4-43fd-886c-093d8c04b541" },  // ic-apple
+    { ActionKind::Play,       "1bd2767f-f5dd-478f-b2bb-94e3d8c0f871" },  // ic-ball
+    { ActionKind::Discipline, "7793e238-9159-465a-9965-5d8c83458a5a" },  // ic-disc
+    { ActionKind::Sleep,      "2196aed8-2ebe-4dba-a7c6-58ea65a1ce97" },  // ic-moon
+    { ActionKind::Heal,       "db816c90-28ad-4ffe-80bc-832517c57b29" },  // ic-heal
+    { ActionKind::Stats,      "03fc9466-8147-4c78-8c2b-b8932e355103" },  // ic-stats
+};
+static constexpr uint8_t kMenuIconSpecCount =
+    sizeof(kMenuIconSpecs) / sizeof(kMenuIconSpecs[0]);
+
+// Resuelve ActionKind → índice en menuIcons_[].
+// Devuelve 0xFF si la acción no tiene asset (Clean, Medicate → primitivas).
+static uint8_t menuIconSlot_(ActionKind action) {
+    for (uint8_t i = 0; i < kMenuIconSpecCount; i++) {
+        if (kMenuIconSpecs[i].action == action) return i;
+    }
+    return 0xFF;  // sin slot: Clean o Medicate
+}
+
+// Devuelve true si la acción tiene icono dibujado con primitivas.
+static bool menuIconIsPrimitive_(ActionKind action) {
+    return action == ActionKind::Clean || action == ActionKind::Medicate;
+}
+
 // ─── Etiquetas de etapa de vida ───────────────────────────────────────────────
 static const char* lifeStageLabel(LifeStage stage) {
     switch (stage) {
@@ -148,6 +202,7 @@ DisplayRendererColor::DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus,
     : canvas_(canvas), bus_(bus), sprites_(sprites)
 {
     memset(spritesByStage_, 0, sizeof(spritesByStage_));
+    memset(menuIcons_,      0, sizeof(menuIcons_));
 }
 
 // =============================================================================
@@ -173,6 +228,8 @@ void DisplayRendererColor::begin() {
     if (!spritesLoaded_) {
         LOG_ERROR("DisplayRendererColor::begin() — no se pudieron cargar sprites");
     }
+    // Los iconos se cargan después — un fallo aquí no es fatal (degradación suave).
+    menuIconsLoaded_        = loadMenuIcons_();
 }
 
 // =============================================================================
@@ -257,6 +314,37 @@ bool DisplayRendererColor::loadSprites_() {
     }
 
     LOG_INFO("DisplayRendererColor: precarga completa. PSRAM libre: %u B",
+             ESP.getFreePsram());
+    return allOk;
+}
+
+// =============================================================================
+// loadMenuIcons_ — precarga los 6 iconos de menú (24×24, 1 frame idle).
+//
+// Se llama desde begin() justo después de loadSprites_().
+// Si el LittleFS no está flasheado (dev sin assets) devuelve false; en ese
+// caso drawHudBottom_() cae a label solo — degradación suave.
+//
+// Uso de PSRAM por icono: 24×24×2 = 1 152 B. Total 6 iconos ≈ 7 KB.
+// =============================================================================
+
+bool DisplayRendererColor::loadMenuIcons_() {
+    memset(menuIcons_, 0, sizeof(menuIcons_));
+    bool allOk = true;
+
+    for (uint8_t i = 0; i < kMenuIconSpecCount; i++) {
+        bool ok = sprites_.loadAnimation(kMenuIconSpecs[i].spriteId, "idle",
+                                         menuIcons_[i]);
+        if (!ok) {
+            LOG_WARN("loadMenuIcons_: fallo cargando icono accion=%u id=%.8s...",
+                     static_cast<unsigned>(kMenuIconSpecs[i].action),
+                     kMenuIconSpecs[i].spriteId);
+            allOk = false;
+        }
+    }
+
+    LOG_INFO("loadMenuIcons_: %s. PSRAM libre: %u B",
+             allOk ? "OK" : "parcial",
              ESP.getFreePsram());
     return allOk;
 }
@@ -690,42 +778,145 @@ void DisplayRendererColor::drawStatusIconsTop_() {
 }
 
 // =============================================================================
-// drawHudBottom_ — HUD inferior: acción activa (label + cursor dots).
+// drawMenuIconPrimitive_ — icono simbólico con primitivas para Clean/Medicate.
 //
-// Texto flotante sobre fondo azul (COL_BG), sin card de fondo.
-//   Label centrado (size 2) a cardY+8, respetando safe-area inferior.
-//   Cursor dots centrados en x, a 10 px del borde inferior de la zona.
+// Se usa cuando la acción no tiene asset .bin dedicado de 24×24 en LittleFS.
+//   Clean:    escoba esquemática (mango diagonal + cerdas)
+//   Medicate: cápsula ovalada dividida al centro (2 mitades de color)
+//
+// cx/cy: centro del área de icono 24×24 px.
+// =============================================================================
+
+void DisplayRendererColor::drawMenuIconPrimitive_(ActionKind action,
+                                                  int16_t cx, int16_t cy) {
+    if (action == ActionKind::Clean) {
+        // Escoba: mango diagonal (línea) de arriba-derecha a abajo-izquierda.
+        // Cerdas: pequeño rectángulo en el extremo inferior.
+        static constexpr uint16_t COL_WOOD  = 0xC640;  // marrón claro RGB565
+        static constexpr uint16_t COL_STRAW = 0xFFE0;  // amarillo (paja/cerdas)
+        // Mango — 3 líneas paralelas para dar grosor (diagonal /)
+        canvas_.drawLine(cx - 8, cy + 8, cx + 6, cy - 8, COL_WOOD);
+        canvas_.drawLine(cx - 7, cy + 8, cx + 7, cy - 8, COL_WOOD);
+        canvas_.drawLine(cx - 6, cy + 8, cx + 8, cy - 8, COL_WOOD);
+        // Cerdas — bloque en el extremo inferior-izquierdo
+        canvas_.fillRect(cx - 12, cy + 4, 12, 6, COL_STRAW);
+        // Detalle: separaciones verticales en las cerdas
+        canvas_.drawLine(cx - 8, cy + 4, cx - 8, cy + 10, COL_BG);
+        canvas_.drawLine(cx - 4, cy + 4, cx - 4, cy + 10, COL_BG);
+
+    } else if (action == ActionKind::Medicate) {
+        // Cápsula: óvalo horizontal dividido en dos mitades de color.
+        // Mitad izquierda: roja; mitad derecha: blanca.
+        // Implementado como dos fillRect dentro de un marco drawRoundRect.
+        const int16_t rx = cx - 10, ry = cy - 5, rw = 20, rh = 10;
+        canvas_.fillRoundRect(rx, ry, rw / 2, rh, 4, COL_RED);
+        canvas_.fillRoundRect(rx + rw / 2, ry, rw / 2, rh, 4, COL_WHITE);
+        // Marco exterior
+        canvas_.drawRoundRect(rx, ry, rw, rh, 4, COL_GRAY);
+        // Línea divisoria central
+        canvas_.drawFastVLine(cx, ry, rh, COL_GRAY);
+    }
+}
+
+// =============================================================================
+// drawHudBottom_ — HUD inferior: icono + label de la acción seleccionada.
+//
+// Layout (60 px de alto, cardY = kScreenH - kEdgeInset - kHudBottomH):
+//   Bloque [icono 24×24 | gap 6 | label size 2] centrado horizontalmente.
+//   Icono centrado verticalmente en la mitad superior (y = cardY + 8..32).
+//   Label centrado verticalmente en la mitad superior (y = cardY + 14).
+//   Cursor dots en la franja inferior (y = cardY + 44).
+//
+// Si el sprite icon no está cargado (LittleFS no flasheado), se omite el icono
+// y el label se centra en x normal — degradación sin crash.
 // =============================================================================
 
 void DisplayRendererColor::drawHudBottom_() {
-    // Origen Y de la zona HUD inferior — sin card de fondo; kEdgeInset marca
-    // el margen mínimo respecto a la curvatura del borde físico.
+    // Origen Y de la zona HUD inferior
     const int16_t cardY = kScreenH - kEdgeInset - kHudBottomH;
 
     if (visibleCount_ == 0) return;
 
-    uint8_t cursor = (selectedIndex_ < visibleCount_) ? selectedIndex_ : 0u;
+    uint8_t    cursor = (selectedIndex_ < visibleCount_) ? selectedIndex_ : 0u;
     ActionKind action = visibleActions_[cursor];
 
-    // Label de la acción seleccionada — size 2 (12×16 px/char), centrado en x.
-    // El clamp mínimo usa kSafeTextX para no salir de la card.
-    const char* label = actionLabelColor(action, stats_.isSleeping);
+    // ── Determinar si hay icono disponible para esta acción ──────────────────
+    const bool hasPrimitive = menuIconIsPrimitive_(action);
+    uint8_t    iconSlot     = menuIconSlot_(action);
+    const bool hasSpriteIcon = !hasPrimitive
+                             && menuIconsLoaded_
+                             && iconSlot < kMenuIconCount
+                             && menuIcons_[iconSlot].count > 0
+                             && menuIcons_[iconSlot].w > 0;
+    const bool hasIcon = hasPrimitive || hasSpriteIcon;
+
+    // ── Dimensiones del bloque icono + label ─────────────────────────────────
+    // Icono siempre renderizado en 24×24 px (escala ×1 para sprite, área fija
+    // para primitivas). Label size 2: cada char es 12 px ancho, 16 px alto.
+    const char*   label     = actionLabelColor(action, stats_.isSleeping);
+    const int16_t charW     = 12;
+    const int16_t labelW    = static_cast<int16_t>(strlen(label)) * charW;
+    const int16_t iconW     = 24;
+    const int16_t iconGap   = 6;   // separación icono → label
+
+    // Ancho total del bloque: icono + gap + texto (o solo texto si sin icono).
+    int16_t blockW = hasIcon ? (iconW + iconGap + labelW) : labelW;
+    // Clamp: no puede exceder el ancho seguro de la card.
+    const int16_t maxBlockW = kScreenW - 2 * kSafeTextX;
+    if (blockW > maxBlockW) blockW = maxBlockW;
+
+    // Coordenada X del inicio del bloque (centrado en pantalla).
+    int16_t blockX = (kScreenW - blockW) / 2;
+    if (blockX < kSafeTextX) blockX = kSafeTextX;
+
+    // ── Centro Y del contenido (zona superior de la card) ────────────────────
+    // La card tiene 60 px. Reservamos ~16 px en la franja inferior para los
+    // cursor dots. El contenido (max 24 px de icono) se centra en los 44 px
+    // superiores: contentCY = cardY + 44/2 = cardY + 22.
+    const int16_t contentAreaH = kHudBottomH - 16;  // 44 px para contenido
+    const int16_t contentCY    = cardY + contentAreaH / 2;
+
+    // ── Dibujar icono ─────────────────────────────────────────────────────────
+    if (hasIcon) {
+        const int16_t iconX  = blockX;
+        const int16_t iconCX = iconX + iconW / 2;
+        const int16_t iconCY = contentCY;
+
+        if (hasPrimitive) {
+            // Icono con primitivas (Clean / Medicate)
+            drawMenuIconPrimitive_(action, iconCX, iconCY);
+        } else {
+            // Icono cargado desde SpriteStore — frame 0 (estático)
+            const ColorSpriteFrames& ic = menuIcons_[iconSlot];
+            const uint16_t* pixels = ic.frames[0];
+            if (pixels != nullptr) {
+                // Esquina superior-izquierda del área de icono centrada en iconCX/iconCY
+                const int16_t destX = iconCX - static_cast<int16_t>(ic.w) / 2;
+                const int16_t destY = iconCY - static_cast<int16_t>(ic.h) / 2;
+                drawSpriteScaled_(&canvas_, destX, destY,
+                                  ic.w, ic.h, pixels,
+                                  /*scale=*/1, kKeyColor);
+            }
+        }
+    }
+
+    // ── Dibujar label ────────────────────────────────────────────────────────
+    // Centrado verticalmente respecto al contenido (16 px alto, size 2).
     canvas_.setTextColor(COL_WHITE);
     canvas_.setTextSize(2);
-    int16_t labelX = (kScreenW - static_cast<int16_t>(strlen(label)) * 12) / 2;
-    if (labelX < kSafeTextX) labelX = kSafeTextX;
-    // Y del label: tercio superior de la card (cardY + 8 px de margen interno)
-    canvas_.setCursor(labelX, cardY + 8);
+    const int16_t labelX = hasIcon ? (blockX + iconW + iconGap) : blockX;
+    // Centrar verticalmente el texto (16 px) dentro de contentAreaH
+    const int16_t labelY = contentCY - 8;  // -8 = mitad de la altura de la fuente
+    canvas_.setCursor(labelX, labelY);
     canvas_.print(label);
 
-    // Cursor dots — cuadrados 6×6 px centrados en x, en la parte baja de la card.
-    // Se sitúan a 10 px del borde inferior de la card para quedar bien dentro.
+    // ── Cursor dots ──────────────────────────────────────────────────────────
+    // Franja inferior de la card: 6 px de alto, a 10 px del borde inferior.
     if (visibleCount_ > 1) {
         const int16_t dotSize = 6;
         const int16_t dotGap  = 3;
         int16_t totalW = visibleCount_ * (dotSize + dotGap) - dotGap;
         int16_t startX = (kScreenW - totalW) / 2;
-        // dotY: borde inferior de la card menos margen interno (10 px) menos tamaño dot
         int16_t dotY   = cardY + kHudBottomH - 10 - dotSize;
 
         for (uint8_t i = 0; i < visibleCount_; i++) {

@@ -6,6 +6,14 @@
  * framesForMood_() resuelve (lifeStage_, mood) a la animación correcta,
  * con fallback a idle de la etapa si el mood no tiene animación propia.
  *
+ * FASE 4 (menú): drawHudBottom_() pinta icono 24×24 + label de la acción
+ * seleccionada, centrados como bloque horizontal en la card inferior.
+ * Iconos para 6 acciones (Feed/Play/Discipline/Sleep/Heal/Stats) cargados vía
+ * SpriteStore desde LittleFS (carpetas ic-apple, ic-ball, ic-disc, ic-moon,
+ * ic-heal, ic-stats). Clean y Medicate usan primitivas dibujadas en render
+ * (sin assets separados: anim-broom y anim-syringe son 48×48, no caben en
+ * los 60 px del HUD junto al texto size 2; ver drawMenuIconPrimitive_()).
+ *
  * Layout portrait 240×296 (safe-area con cards redondeadas):
  *   Margen físico   kEdgeInset=8 px por todos los bordes (curva del cristal IPS)
  *   Corner safe     kCornerSafe=28 px: clearance diagonal para esquinas del cristal
@@ -13,7 +21,7 @@
  *                   (24px×2 = 48px, gap=8, bloque centrado en 240px). WiFi en (212,28).
  *                   Etapa+edad movidas a StatsView.
  *   Personaje       y=(8+52)..(296-8-60) : sprite 48×48 × 4 = 192×192, centrado
- *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : label acción (size 2) + cursor dots
+ *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : icono(24px) + label(size 2) + dots
  *
  * Constructor: DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus, SpriteStore& sprites)
  * render()    : compone frame completo y llama canvas.flush().
@@ -200,6 +208,16 @@ private:
     ColorSpriteFrames overlaySyringe_;
     ColorSpriteFrames overlayBall_;
 
+    // ── Iconos del menú de acciones (HUD inferior) ───────────────────────────
+    // Iconos 24×24 RGB565, uno por ActionKind que tiene asset de icono dedicado.
+    // Orden: Feed=0, Play=1, Discipline=2, Sleep=3, Heal=4, Stats=5.
+    // Clean e Medicate se dibujan con primitivas (ver drawMenuIconPrimitive_()).
+    // Cargados en loadMenuIcons_(); si falla, drawHudBottom_() omite el icono
+    // para esa acción y pinta solo el label (degradación suave).
+    static constexpr uint8_t kMenuIconCount = 6;
+    ColorSpriteFrames menuIcons_[kMenuIconCount];
+    bool menuIconsLoaded_ = false;
+
     // Color key de transparencia (0xF81F = magenta en RGB565).
     static constexpr uint16_t kKeyColor = 0xF81F;
 
@@ -253,6 +271,7 @@ private:
     // ── Helpers internos ─────────────────────────────────────────────────────
     MoodColor computeMood_() const;
     bool      loadSprites_();
+    bool      loadMenuIcons_();
 
     // Devuelve el puntero al ColorSpriteFrames correcto para (stage, mood).
     // Fallback a idle de la etapa si el mood no tiene frames cargados.
@@ -285,4 +304,9 @@ private:
 
     // Overlay badge: "Z" animada de sueño sobre el personaje (única que permanece).
     void drawBadgeSleep_(int16_t cx, int16_t cy);
+
+    // Icono de menú de acción dibujado con primitivas (sin asset .bin).
+    // Usado para Clean y Medicate, cuyos assets 48×48 no caben en el HUD de 60 px.
+    // cx/cy: centro del área de icono (24×24 px).
+    void drawMenuIconPrimitive_(ActionKind action, int16_t cx, int16_t cy);
 };
