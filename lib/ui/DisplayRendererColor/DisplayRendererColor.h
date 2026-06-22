@@ -167,6 +167,30 @@ private:
     StageSprites spritesByStage_[6];   // índice = LifeStage enum value (0-5)
     bool spritesLoaded_ = false;
 
+    // ── Canal de overlay one-shot (escoba/jeringa/pelota) ───────────────────
+    // Segundo canal de animación independiente del mood del personaje.
+    // Se pinta ENCIMA del personaje durante kActionAnimDurationMs y luego
+    // se apaga solo. Feed NO usa overlay (solo cambia mood a Eat).
+    //
+    // overlayAnimFrames_: puntero a los ColorSpriteFrames del overlay activo
+    //   (apunta a uno de los 3 sprites precarados abajo). nullptr = sin overlay.
+    // overlayAnimRemainingMs_: ms restantes de overlay; se drena en render().
+    // overlayAnimFrame_: contador de frame propio del overlay, avanzado según
+    //   el fps declarado en el manifest (desacoplado de animFrame_ del personaje).
+    // overlayAnimLastTickMs_: millis() del último avance de overlayAnimFrame_.
+    const ColorSpriteFrames* overlayAnimFrames_       = nullptr;
+    uint32_t                 overlayAnimRemainingMs_   = 0;
+    uint32_t                 overlayAnimFrame_         = 0;
+    uint32_t                 overlayAnimLastTickMs_    = 0;
+
+    // Sprites de overlay precargados en PSRAM al boot (~8 KB total):
+    //   broom_   → Clean   (48×48, 6 frames)
+    //   syringe_ → Heal + Medicate (48×48, 3 frames)
+    //   ball_    → Play    (48×48, 3 frames)
+    ColorSpriteFrames overlayBroom_;
+    ColorSpriteFrames overlaySyringe_;
+    ColorSpriteFrames overlayBall_;
+
     // Color key de transparencia (0xF81F = magenta en RGB565).
     static constexpr uint16_t kKeyColor = 0xF81F;
 

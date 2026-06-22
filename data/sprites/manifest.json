@@ -259,6 +259,57 @@
           ]
         }
       }
+    },
+    {
+      "id": "anim-broom",
+      "folder": "anim-broom",
+      "w": 48,
+      "h": 48,
+      "animations": {
+        "broom": {
+          "fps": 8,
+          "frames": [
+            "broom/0.bin",
+            "broom/1.bin",
+            "broom/2.bin",
+            "broom/3.bin",
+            "broom/4.bin",
+            "broom/5.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "anim-syringe",
+      "folder": "anim-syringe",
+      "w": 48,
+      "h": 48,
+      "animations": {
+        "syringe": {
+          "fps": 8,
+          "frames": [
+            "syringe/0.bin",
+            "syringe/1.bin",
+            "syringe/2.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "anim-ball",
+      "folder": "anim-ball",
+      "w": 48,
+      "h": 48,
+      "animations": {
+        "ball": {
+          "fps": 8,
+          "frames": [
+            "ball/0.bin",
+            "ball/1.bin",
+            "ball/2.bin"
+          ]
+        }
+      }
     }
   ]
 }
