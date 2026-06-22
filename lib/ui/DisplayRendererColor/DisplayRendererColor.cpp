@@ -50,6 +50,15 @@ static constexpr uint16_t COL_PURPLE   = 0x780F;
 // Fondo de pantalla — negro puro.
 static constexpr uint16_t COL_BG = 0x0000;
 
+// ─── IDs de los iconos de estado (banda superior) ─────────────────────────────
+//
+// Sprites 24×24 px, animación "idle" de 1 frame. Se escalan ×2 (48×48) en pantalla.
+// Los IDs deben coincidir con el campo "id" del manifest.json.
+// Orden: 0=hunger, 1=poop, 2=sick — coincide con kStatusIconOrder[].
+static constexpr const char* kIconHungerId = "ic-hunger-0001-0000-0000-000000000001";
+static constexpr const char* kIconPoopId   = "ic-poop-00001-0000-0000-000000000002";
+static constexpr const char* kIconSickId   = "ic-sick-00001-0000-0000-000000000003";
+
 // ─── Tabla de carga de sprites por etapa ──────────────────────────────────────
 //
 // Fase 6: cada etapa tiene su propio sprite real (folder corto ≤31 chars).
@@ -202,6 +211,22 @@ bool DisplayRendererColor::loadSprites_() {
                           stageIdx, mi, animName);
                 allOk = false;
             }
+        }
+    }
+
+    // ── Iconos de estado (banda superior) ─────────────────────────────────────
+    // Sprites 24×24 escalados ×2 (48×48) en pantalla. Se cargan los 3 iconos aquí
+    // para que drawStatusIconsTop_() los tenga disponibles en O(1) sin LittleFS.
+    const char* iconIds[kStatusIconCount] = {
+        kIconHungerId, kIconPoopId, kIconSickId
+    };
+    statusIconsLoaded_ = true;
+    for (uint8_t i = 0; i < kStatusIconCount; i++) {
+        bool ok = sprites_.loadAnimation(iconIds[i], "idle", statusIcons_[i]);
+        if (!ok) {
+            LOG_ERROR("Fallo cargando icono estado idx=%u id=%.10s...", i, iconIds[i]);
+            statusIconsLoaded_ = false;
+            allOk = false;
         }
     }
 
@@ -450,46 +475,14 @@ void DisplayRendererColor::drawSpriteScaled_(Arduino_GFX* display,
 }
 
 // =============================================================================
-// drawHudTop_ — HUD superior: etapa de vida, edad, icono WiFi.
+// drawHudTop_ — HUD superior: solo icono WiFi en esquina sup-der.
 //
-// Texto flotante sobre fondo azul (COL_BG), sin card de fondo.
-//   Título (etapa, size 2)   en x=kCornerSafe, y=kCornerSafe
-//   Subtítulo (edad, size 1) en x=kCornerSafe, y=kCornerSafe+18
-//   Icono WiFi centrado en cx=kScreenW-kCornerSafe, cy=kCornerSafe
-//
-// kCornerSafe desplaza ambos elementos (texto e icono) lo suficiente para
-// quedar fuera del cuarto de círculo recortado por la curvatura del cristal.
+// D1: la banda superior se reserva para los iconos de estado grandes
+// (drawStatusIconsTop_). Etapa y edad se muestran en StatsView.
+// Solo el WiFi permanece aquí para no perder el indicador de conectividad.
 // =============================================================================
 
 void DisplayRendererColor::drawHudTop_() {
-    // Sin card de fondo — el texto flota sobre el azul de COL_BG (pintado por
-    // drawIdleMain_ con fillScreen).
-
-    // Etapa de vida — título size 2 (12×16 px/char).
-    // kCornerSafe en x e y garantiza que ningún píxel quede dentro de la
-    // zona curvada de la esquina superior-izquierda del cristal.
-    canvas_.setTextColor(COL_WHITE);
-    canvas_.setTextSize(2);
-    canvas_.setCursor(kCornerSafe, kCornerSafe);
-    canvas_.print(lifeStageLabel(lifeStage_));
-
-    // Edad — subtítulo size 1 (6×8 px), a 18 px bajo el baseline del título
-    // (1 línea size 2 = 16 px alto; 2 px de gap).
-    char ageBuf[12];
-    if (ageMinutes_ < 60) {
-        snprintf(ageBuf, sizeof(ageBuf), "%um", static_cast<unsigned>(ageMinutes_));
-    } else {
-        uint32_t h = ageMinutes_ / 60;
-        uint32_t m = ageMinutes_ % 60;
-        if (h > 99) h = 99;
-        snprintf(ageBuf, sizeof(ageBuf), "%uh%um",
-                 static_cast<unsigned>(h), static_cast<unsigned>(m));
-    }
-    canvas_.setTextColor(COL_GRAY);
-    canvas_.setTextSize(1);
-    canvas_.setCursor(kCornerSafe, kCornerSafe + 18);
-    canvas_.print(ageBuf);
-
     drawWifiIcon_();
 }
 
@@ -531,6 +524,85 @@ void DisplayRendererColor::drawWifiIcon_() {
     if (wifiState_ == WifiState::Disconnected) {
         canvas_.drawLine(cx - 4, cy - 4, cx + 4, cy + 4, COL_RED);
         canvas_.drawLine(cx - 4, cy + 4, cx + 4, cy - 4, COL_RED);
+    }
+}
+
+// =============================================================================
+// drawStatusIconsTop_ — iconos de estado grandes centrados en la banda superior.
+//
+// Muestra hasta 3 iconos 24×24 escalados ×2 (48×48 px) en la franja superior.
+// Solo los needs activos aparecen; el bloque se centra horizontalmente en 240 px.
+//
+//   Orden fijo izq→der: ic-hunger (cubiertos) · ic-poop (caca) · ic-sick (cruz)
+//   Umbrales: hunger>=80, poopCount>0, isSick
+//   Gap entre iconos: kIconGap = 8 px
+//   Y de los iconos: centrado verticalmente en la banda [kEdgeInset, kEdgeInset+kHudTopH]
+//
+// Fallback si los sprites no están cargados: dibuja primitivas simples
+// (mismo estilo que los badges antiguos) para no perder la información de estado.
+// =============================================================================
+
+void DisplayRendererColor::drawStatusIconsTop_() {
+    // Determinar cuáles needs están activos y en qué orden.
+    // activeIdx[] guarda los índices en statusIcons_[] de los iconos a mostrar.
+    static constexpr int16_t kIconSize = 48;   // 24px fuente × 2 escala
+    static constexpr int16_t kIconGap  = 8;    // gap horizontal entre iconos
+    static constexpr int16_t kIconSrcW = 24;   // ancho fuente del sprite
+
+    uint8_t activeIdx[kStatusIconCount];
+    uint8_t activeCount = 0;
+
+    // Orden: hunger(0) · poop(1) · sick(2) — siempre este orden si activos
+    if (stats_.hunger >= 80 && !stats_.isSleeping) activeIdx[activeCount++] = 0;
+    if (stats_.poopCount > 0)                      activeIdx[activeCount++] = 1;
+    if (stats_.isSick)                             activeIdx[activeCount++] = 2;
+
+    if (activeCount == 0) return;  // ningún need activo — banda vacía
+
+    // Centro vertical de la banda superior
+    const int16_t bandCenterY = kEdgeInset + kHudTopH / 2;
+    const int16_t iconY = bandCenterY - kIconSize / 2;
+
+    // Ancho total del bloque centrado
+    const int16_t blockW = activeCount * kIconSize + (activeCount - 1) * kIconGap;
+    int16_t iconX = (kScreenW - blockW) / 2;
+
+    for (uint8_t i = 0; i < activeCount; i++) {
+        uint8_t idx = activeIdx[i];
+
+        if (statusIconsLoaded_ && statusIcons_[idx].count > 0 && statusIcons_[idx].w > 0) {
+            // Sprite real: escalar ×2 (24px → 48px) con colorkey
+            const uint16_t* pixels = statusIcons_[idx].frames[0];
+            if (pixels != nullptr) {
+                drawSpriteScaled_(&canvas_, iconX, iconY,
+                                  kIconSrcW, kIconSrcW,
+                                  pixels, 2, kKeyColor);
+            }
+        } else {
+            // Fallback con primitivas si el sprite no se pudo cargar en runtime
+            switch (idx) {
+                case 0:  // hunger — signo "!" ámbar
+                    canvas_.fillRect(iconX + 18, iconY + 4,  12, 22, COL_AMBER);
+                    canvas_.fillRect(iconX + 18, iconY + 30, 12, 10, COL_AMBER);
+                    break;
+                case 1:  // poop — círculo marrón
+                    {
+                        static constexpr uint16_t COL_BROWN = 0x6220;
+                        canvas_.fillCircle(iconX + 24, iconY + 24, 16, COL_BROWN);
+                        canvas_.fillCircle(iconX + 24, iconY + 24, 10, COL_BG);
+                        canvas_.fillCircle(iconX + 24, iconY + 24,  6, COL_BROWN);
+                    }
+                    break;
+                case 2:  // sick — cruz roja
+                    canvas_.fillRect(iconX + 18, iconY + 4,  12, 40, COL_RED);
+                    canvas_.fillRect(iconX + 4,  iconY + 18, 40, 12, COL_RED);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        iconX += kIconSize + kIconGap;
     }
 }
 
@@ -637,51 +709,24 @@ void DisplayRendererColor::drawSprite_() {
 }
 
 // =============================================================================
-// drawOverlayBadges_ — iconos de estado activos sobre el personaje.
+// drawOverlayBadges_ — overlay de sueño sobre el personaje.
 //
-// Los badges se dibujan después del sprite, en la esquina superior derecha
-// de la zona de personaje (x=192..239, y=40..80), de 20×20 px cada uno.
-// Se apilan verticalmente si hay varios activos.
-//
-// Badges implementados con primitivas (sin assets separados):
-//   SICK:    calavera simplificada (círculo + marcas ojos)
-//   SLEEP:   "Z" grande
-//   HUNGRY:  signo de exclamación (!)
-//   POOP:    espiral (círculo concéntrico marrón)
+// D1: sick/hungry/poop se muestran como iconos grandes en la banda superior
+// (drawStatusIconsTop_). Solo la "Z" de sueño permanece aquí como overlay
+// pequeño sobre el personaje, ya que contextualmente va con el sprite dormido.
 // =============================================================================
 
 void DisplayRendererColor::drawOverlayBadges_() {
-    // badgeX: suficientemente a la izquierda del borde derecho para quedar
-    // dentro del safe-area (kScreenW - kEdgeInset - 30 da 202 con inset=8).
-    int16_t badgeX = kScreenW - kEdgeInset - 30;
-    // badgeY: justo bajo la card superior (kEdgeInset + kHudTopH + gap)
-    int16_t badgeY = kEdgeInset + kHudTopH + 8;
-    const int16_t badgeStep = 26;
+    if (!stats_.isSleeping) return;
 
-    if (stats_.isSick) {
-        drawBadgeSick_(badgeX, badgeY);
-        badgeY += badgeStep;
-    }
-    if (stats_.isSleeping) {
-        drawBadgeSleep_(badgeX, badgeY);
-        badgeY += badgeStep;
-    }
-    if (stats_.hunger >= 80 && !stats_.isSleeping) {
-        drawBadgeHungry_(badgeX, badgeY);
-        badgeY += badgeStep;
-    }
-    if (stats_.poopCount > 0) {
-        drawBadgePoop_(badgeX, badgeY);
-    }
+    // "Z" flotante en la esquina superior derecha del área de personaje.
+    // badgeX/badgeY se sitúan dentro del safe-area y sobre el sprite.
+    const int16_t badgeX = kScreenW - kEdgeInset - 30;
+    const int16_t badgeY = kEdgeInset + kHudTopH + 8;
+    drawBadgeSleep_(badgeX, badgeY);
 }
 
-// Badge: cruz roja (símbolo de enfermedad)
-void DisplayRendererColor::drawBadgeSick_(int16_t cx, int16_t cy) {
-    canvas_.fillRect(cx - 3, cy - 8, 6, 16, COL_RED);
-    canvas_.fillRect(cx - 8, cy - 3, 16, 6, COL_RED);
-}
-
-// Badge: "Z" para dormir (blanco sobre fondo oscuro)
+// Badge: "Z" cian parpadeante para sueño — overlay pequeño sobre el personaje.
 void DisplayRendererColor::drawBadgeSleep_(int16_t cx, int16_t cy) {
     // Parpadea al ritmo del sprite (animFrame_/2 % 2)
     if ((animFrame_ / 2) % 2 == 0) {
@@ -689,29 +734,6 @@ void DisplayRendererColor::drawBadgeSleep_(int16_t cx, int16_t cy) {
         canvas_.setTextSize(2);
         canvas_.setCursor(cx - 6, cy - 8);
         canvas_.print("Z");
-    }
-}
-
-// Badge: "!" ámbar para hambre
-void DisplayRendererColor::drawBadgeHungry_(int16_t cx, int16_t cy) {
-    canvas_.fillRect(cx - 3, cy - 8, 6, 10, COL_AMBER);
-    canvas_.fillRect(cx - 3, cy + 4, 6, 5, COL_AMBER);
-}
-
-// Badge: espiral marrón para caca (círculos concéntricos)
-void DisplayRendererColor::drawBadgePoop_(int16_t cx, int16_t cy) {
-    static constexpr uint16_t COL_BROWN = 0x6220;
-    canvas_.fillCircle(cx, cy, 8, COL_BROWN);
-    canvas_.fillCircle(cx, cy, 5, COL_BG);
-    canvas_.fillCircle(cx, cy, 3, COL_BROWN);
-    // Número de cacas si hay más de 1
-    if (stats_.poopCount > 1) {
-        canvas_.setTextColor(COL_WHITE);
-        canvas_.setTextSize(1);
-        canvas_.setCursor(cx - 3, cy - 3);
-        char buf[3];
-        snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(stats_.poopCount));
-        canvas_.print(buf);
     }
 }
 
@@ -776,8 +798,12 @@ void DisplayRendererColor::drawIdleMain_() {
     // Fondo de toda la pantalla
     canvas_.fillScreen(COL_BG);
 
+    // D1: iconos de estado grandes en banda superior + WiFi en esquina
+    drawStatusIconsTop_();
     drawHudTop_();
+
     drawSprite_();
+    // Overlay de sueño ("Z") — único badge que permanece sobre el personaje
     drawOverlayBadges_();
     drawHudBottom_();
 
@@ -788,8 +814,10 @@ void DisplayRendererColor::drawIdleMain_() {
 // =============================================================================
 // drawStatsView_ — vista densa con las stats.
 //
+// D1: etapa de vida y edad se muestran aquí (se movieron desde drawHudTop_).
 // Layout portrait 240×296 (safe-area):
-//   HUD top card (reutilizado — ya respeta safe-area)
+//   Etapa (size 2) en kCornerSafe,kCornerSafe  +  edad (size 1) bajo la etapa
+//   WiFi (drawHudTop_) en esquina sup-der
 //   Título "STATS" a kSafeTextX, bajo la card top
 //   Barras de stats a kSafeTextX con ancho ajustado al safe-area
 //   Flags booleanos, edad y deathCount también a kSafeTextX
@@ -798,6 +826,31 @@ void DisplayRendererColor::drawIdleMain_() {
 void DisplayRendererColor::drawStatsView_() {
     canvas_.fillScreen(COL_BG);
 
+    // ── Etapa de vida + edad en esquina superior izquierda ────────────────────
+    // D1: movidas desde drawHudTop_ (que ahora solo contiene el WiFi).
+    // kCornerSafe en x e y garantiza que ningún píxel quede dentro de la
+    // zona curvada de la esquina superior-izquierda del cristal.
+    canvas_.setTextColor(COL_WHITE);
+    canvas_.setTextSize(2);
+    canvas_.setCursor(kCornerSafe, kCornerSafe);
+    canvas_.print(lifeStageLabel(lifeStage_));
+
+    char headerAgeBuf[12];
+    if (ageMinutes_ < 60) {
+        snprintf(headerAgeBuf, sizeof(headerAgeBuf), "%um", static_cast<unsigned>(ageMinutes_));
+    } else {
+        uint32_t h = ageMinutes_ / 60;
+        uint32_t m = ageMinutes_ % 60;
+        if (h > 99) h = 99;
+        snprintf(headerAgeBuf, sizeof(headerAgeBuf), "%uh%um",
+                 static_cast<unsigned>(h), static_cast<unsigned>(m));
+    }
+    canvas_.setTextColor(COL_GRAY);
+    canvas_.setTextSize(1);
+    canvas_.setCursor(kCornerSafe, kCornerSafe + 18);
+    canvas_.print(headerAgeBuf);
+
+    // WiFi en esquina sup-der (sigue en drawHudTop_)
     drawHudTop_();
 
     // Título — respeta la safe-area en X y arranca bajo la card superior
@@ -928,7 +981,29 @@ void DisplayRendererColor::drawOtaProgress_() {
 void DisplayRendererColor::drawDeadScreen_() {
     canvas_.fillScreen(COL_BLACK);
 
-    // HUD top — mantiene el nombre de etapa "DEAD" y la edad (ya usa safe-area)
+    // Etapa "DEAD" + edad en esquina superior izquierda (igual que StatsView).
+    // drawHudTop_ solo tiene WiFi; aquí reproducimos el texto de etapa/edad.
+    canvas_.setTextColor(COL_RED);
+    canvas_.setTextSize(2);
+    canvas_.setCursor(kCornerSafe, kCornerSafe);
+    canvas_.print("DEAD");
+
+    char deadAgeBuf[12];
+    if (ageMinutes_ < 60) {
+        snprintf(deadAgeBuf, sizeof(deadAgeBuf), "%um", static_cast<unsigned>(ageMinutes_));
+    } else {
+        uint32_t h = ageMinutes_ / 60;
+        uint32_t m = ageMinutes_ % 60;
+        if (h > 99) h = 99;
+        snprintf(deadAgeBuf, sizeof(deadAgeBuf), "%uh%um",
+                 static_cast<unsigned>(h), static_cast<unsigned>(m));
+    }
+    canvas_.setTextColor(COL_GRAY);
+    canvas_.setTextSize(1);
+    canvas_.setCursor(kCornerSafe, kCornerSafe + 18);
+    canvas_.print(deadAgeBuf);
+
+    // WiFi en esquina sup-der
     drawHudTop_();
 
     // Zona libre bajo la card top: arrancar en kEdgeInset + kHudTopH

@@ -259,6 +259,48 @@
           ]
         }
       }
+    },
+    {
+      "id": "ic-hunger-0001-0000-0000-000000000001",
+      "folder": "ic-hunger",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 1,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ic-poop-00001-0000-0000-000000000002",
+      "folder": "ic-poop",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 1,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ic-sick-00001-0000-0000-000000000003",
+      "folder": "ic-sick",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 1,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
     }
   ]
 }
