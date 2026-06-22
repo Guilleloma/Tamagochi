@@ -259,6 +259,169 @@
           ]
         }
       }
+    },
+    {
+      "id": "5965792e-71e6-4b56-9624-5ec6800f0767",
+      "folder": "ic-hunger",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 8,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "bbe58be2-24f8-4f02-b791-01035929519c",
+      "folder": "ic-poop",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 8,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "6d0893e1-1910-4dc5-9dc5-9049c144cb9d",
+      "folder": "ic-sick",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 8,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "cdccb195-6db4-43fd-886c-093d8c04b541",
+      "folder": "ic-apple",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 8,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "1bd2767f-f5dd-478f-b2bb-94e3d8c0f871",
+      "folder": "ic-ball",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 8,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "2196aed8-2ebe-4dba-a7c6-58ea65a1ce97",
+      "folder": "ic-moon",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 8,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "db816c90-28ad-4ffe-80bc-832517c57b29",
+      "folder": "ic-heal",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 8,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "193263fd-34bb-41d7-9baf-d4f913f5605d",
+      "folder": "ic-disc",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 8,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "03fc9466-8147-4c78-8c2b-b8932e355103",
+      "folder": "ic-stats",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 8,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "6c900d53-e937-4c89-8789-457db84c7517",
+      "folder": "anim-broom",
+      "w": 48,
+      "h": 48,
+      "animations": {
+        "broom": {
+          "fps": 8,
+          "frames": [
+            "broom/0.bin",
+            "broom/1.bin",
+            "broom/2.bin",
+            "broom/3.bin",
+            "broom/4.bin",
+            "broom/5.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "c97cb14d-ad92-4f39-a27a-cf0617ebe40b",
+      "folder": "anim-syringe",
+      "w": 48,
+      "h": 48,
+      "animations": {
+        "syringe": {
+          "fps": 8,
+          "frames": [
+            "syringe/0.bin",
+            "syringe/1.bin",
+            "syringe/2.bin",
+            "syringe/3.bin",
+            "syringe/4.bin"
+          ]
+        }
+      }
     }
   ]
 }
