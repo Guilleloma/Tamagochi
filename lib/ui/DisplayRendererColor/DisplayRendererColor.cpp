@@ -55,9 +55,10 @@ static constexpr uint16_t COL_BG = 0x0000;
 // Sprites 24×24 px, animación "idle" de 1 frame. Se escalan ×2 (48×48) en pantalla.
 // Los IDs deben coincidir con el campo "id" del manifest.json.
 // Orden: 0=hunger, 1=poop, 2=sick — coincide con kStatusIconOrder[].
-static constexpr const char* kIconHungerId = "ic-hunger-0001-0000-0000-000000000001";
-static constexpr const char* kIconPoopId   = "ic-poop-00001-0000-0000-000000000002";
-static constexpr const char* kIconSickId   = "ic-sick-00001-0000-0000-000000000003";
+// UUIDs reales del manifest (feature/color-assets — fuente de verdad).
+static constexpr const char* kIconHungerId = "b886364b-e81f-471f-adc4-bbcf83088632";
+static constexpr const char* kIconPoopId   = "bbe58be2-24f8-4f02-b791-01035929519c";
+static constexpr const char* kIconSickId   = "6d0893e1-1910-4dc5-9dc5-9049c144cb9d";
 
 // ─── Tabla de carga de sprites por etapa ──────────────────────────────────────
 //
@@ -161,6 +162,11 @@ void DisplayRendererColor::begin() {
     actionAnimMood_         = MoodColor::Idle;
     hatchAnimRemainingMs_   = 0;
     evolveAnimRemainingMs_  = 0;
+    // Canal overlay: resetear estado antes de cargar sprites
+    overlayAnimFrames_      = nullptr;
+    overlayAnimRemainingMs_ = 0;
+    overlayAnimFrame_       = 0;
+    overlayAnimLastTickMs_  = millis();
     visibleCount_           = 0;
     selectedIndex_          = 0;
     spritesLoaded_          = loadSprites_();
@@ -230,6 +236,26 @@ bool DisplayRendererColor::loadSprites_() {
         }
     }
 
+    // ── Sprites de overlay de acción (48×48, precargados una sola vez) ───────
+    // Se usan como segundo canal de animación encima del personaje.
+    // UUIDs reales del manifest (feature/color-assets — fuente de verdad).
+    memset(&overlayBroom_,   0, sizeof(overlayBroom_));
+    memset(&overlaySyringe_, 0, sizeof(overlaySyringe_));
+    memset(&overlayBall_,    0, sizeof(overlayBall_));
+
+    if (!sprites_.loadAnimation("6c900d53-e937-4c89-8789-457db84c7517", "broom",   overlayBroom_)) {
+        LOG_ERROR("Overlay: fallo cargando broom (Clean)");
+        allOk = false;
+    }
+    if (!sprites_.loadAnimation("4b24e182-adb8-486c-b4bd-7133927b7af6", "syringe", overlaySyringe_)) {
+        LOG_ERROR("Overlay: fallo cargando syringe (Heal/Medicate)");
+        allOk = false;
+    }
+    if (!sprites_.loadAnimation("29bf7686-c479-4176-ac8d-4e8460100d83", "ball",    overlayBall_)) {
+        LOG_ERROR("Overlay: fallo cargando ball (Play)");
+        allOk = false;
+    }
+
     LOG_INFO("DisplayRendererColor: precarga completa. PSRAM libre: %u B",
              ESP.getFreePsram());
     return allOk;
@@ -253,19 +279,47 @@ void DisplayRendererColor::setWifiState(WifiState state)      { wifiState_ = sta
 // Triggers de animación one-shot
 // =============================================================================
 
-// Mapeo acción → MoodColor para la animación one-shot.
-// framesForMood_() aplicará el fallback a Idle si la etapa no tiene ese mood
+// Mapeo acción → MoodColor para la animación one-shot del personaje (canal 1)
+// y → overlay sprite para el canal de overlay (canal 2).
+//
+// Canal 1 (mood del personaje):
+//   Feed       → Eat   (masticar — único que no tiene overlay)
+//   Play       → Happy
+//   Heal       → Happy
+//   Medicate   → Happy
+//   Discipline → Sad
+//   Clean      → Idle  (badge de caca ya desapareció por applyClean())
+//
+// Canal 2 (overlay encima del personaje):
+//   Clean      → broom   (escoba)
+//   Heal       → syringe (jeringa)
+//   Medicate   → syringe (jeringa — misma animación que Heal)
+//   Play       → ball    (pelota)
+//   Feed       → sin overlay (la animación de comer es suficiente)
+//
+// framesForMood_() aplicará fallback a Idle si la etapa no tiene ese mood
 // (e.g. Egg/Ghost no tienen happy/sad/eat — muestran idle igualmente).
 void DisplayRendererColor::triggerActionAnimation(ActionKind action) {
     MoodColor mood = MoodColor::Idle;
+    // Pointer al ColorSpriteFrames del overlay, nullptr si esta acción no tiene.
+    const ColorSpriteFrames* overlay = nullptr;
+
     switch (action) {
         case ActionKind::Feed:
+            // Solo cambia el mood a Eat; sin overlay para no tapar la animación de comer.
             mood = MoodColor::Eat;
             break;
         case ActionKind::Play:
+            mood    = MoodColor::Happy;
+            overlay = (overlayBall_.count > 0) ? &overlayBall_ : nullptr;
+            break;
         case ActionKind::Heal:
+            mood    = MoodColor::Happy;
+            overlay = (overlaySyringe_.count > 0) ? &overlaySyringe_ : nullptr;
+            break;
         case ActionKind::Medicate:
-            mood = MoodColor::Happy;
+            mood    = MoodColor::Happy;
+            overlay = (overlaySyringe_.count > 0) ? &overlaySyringe_ : nullptr;
             break;
         case ActionKind::Discipline:
             mood = MoodColor::Sad;
@@ -273,7 +327,8 @@ void DisplayRendererColor::triggerActionAnimation(ActionKind action) {
         case ActionKind::Clean:
             // Idle: la animación neutral refleja la limpieza; el badge de caca
             // desaparece porque poopCount ya fue reseteado por applyClean().
-            mood = MoodColor::Idle;
+            mood    = MoodColor::Idle;
+            overlay = (overlayBroom_.count > 0) ? &overlayBroom_ : nullptr;
             break;
         case ActionKind::Sleep:
         case ActionKind::Stats:
@@ -281,11 +336,20 @@ void DisplayRendererColor::triggerActionAnimation(ActionKind action) {
             return;
     }
 
+    // Canal 1: mood del personaje
     actionAnimMood_        = mood;
     actionAnimRemainingMs_ = kActionAnimDurationMs;
-    LOG_INFO("[anim] triggerActionAnimation action=%u mood=%u dur=%ums",
+
+    // Canal 2: overlay one-shot (puede ser nullptr si la acción no lo usa)
+    overlayAnimFrames_      = overlay;
+    overlayAnimRemainingMs_ = (overlay != nullptr) ? kActionAnimDurationMs : 0u;
+    overlayAnimFrame_       = 0;
+    overlayAnimLastTickMs_  = millis();
+
+    LOG_INFO("[anim] triggerActionAnimation action=%u mood=%u overlay=%s dur=%ums",
              static_cast<unsigned>(action),
              static_cast<unsigned>(mood),
+             overlay ? "yes" : "no",
              static_cast<unsigned>(kActionAnimDurationMs));
 }
 
@@ -353,6 +417,25 @@ void DisplayRendererColor::render() {
     if (evolveAnimRemainingMs_ > 0) {
         evolveAnimRemainingMs_ = (evolveAnimRemainingMs_ > dtMs)
                                ? (evolveAnimRemainingMs_ - dtMs) : 0u;
+    }
+    // Canal overlay: drenar timer y apagar cuando expire
+    if (overlayAnimRemainingMs_ > 0) {
+        overlayAnimRemainingMs_ = (overlayAnimRemainingMs_ > dtMs)
+                                ? (overlayAnimRemainingMs_ - dtMs) : 0u;
+        if (overlayAnimRemainingMs_ == 0) {
+            overlayAnimFrames_ = nullptr;  // apagar overlay al expirar
+        }
+    }
+
+    // ── Avanzar frame del overlay con su propio fps (desacoplado del personaje) ─
+    // El overlay usa un contador de frame propio (overlayAnimFrame_) con el fps
+    // declarado en sus ColorSpriteFrames, igual que el canal principal del personaje.
+    if (overlayAnimFrames_ != nullptr && overlayAnimFrames_->fps > 0) {
+        uint32_t overlayMsPerFrame = 1000u / overlayAnimFrames_->fps;
+        if (now - overlayAnimLastTickMs_ >= overlayMsPerFrame) {
+            overlayAnimLastTickMs_ = now;
+            overlayAnimFrame_++;
+        }
     }
 
     // ── Avanzar animFrame_ según fps del sprite activo (desacoplado del FPS de render) ─
@@ -696,16 +779,68 @@ void DisplayRendererColor::drawSprite_() {
                               pixels,
                               kScale,
                               kKeyColor);
-            return;
         }
+    } else {
+        // Fallback: rectángulo con "?" cuando no hay sprites
+        canvas_.drawRect(spriteX, spriteY, spriteW, spriteH, COL_GRAY);
+        canvas_.setTextColor(COL_GRAY);
+        canvas_.setTextSize(4);
+        canvas_.setCursor(spriteX + spriteW / 2 - 12, spriteY + spriteH / 2 - 16);
+        canvas_.print("?");
     }
 
-    // Fallback: rectángulo con "?" cuando no hay sprites
-    canvas_.drawRect(spriteX, spriteY, spriteW, spriteH, COL_GRAY);
-    canvas_.setTextColor(COL_GRAY);
-    canvas_.setTextSize(4);
-    canvas_.setCursor(spriteX + spriteW / 2 - 12, spriteY + spriteH / 2 - 16);
-    canvas_.print("?");
+    // ── Canal overlay: pinta el sprite de acción encima del personaje ────────
+    // El overlay se renderiza a escala 2 (48×48 → 96×96 px) para ser visible
+    // sin tapar el cuerpo completo del personaje (192×192 px a escala 4).
+    // Posición por tipo de acción (elegida para resultar natural):
+    //   broom   (Clean)           → pies del personaje, alineado al borde izq
+    //                               del sprite: la escoba barre desde abajo-izq.
+    //   syringe (Heal/Medicate)   → costado derecho a media altura: el médico
+    //                               aplica la inyección en el brazo.
+    //   ball    (Play)            → borde inferior-derecho: la pelota rebota
+    //                               frente al personaje.
+    if (overlayAnimRemainingMs_ > 0 && overlayAnimFrames_ != nullptr
+            && overlayAnimFrames_->count > 0) {
+
+        constexpr uint8_t kOverlayScale = 2;  // 48×48 → 96×96 px
+
+        // Seleccionar frame cíclico con el contador propio del overlay
+        uint8_t ovFrameIdx = static_cast<uint8_t>(
+            overlayAnimFrame_ % overlayAnimFrames_->count);
+        const uint16_t* ovPixels = overlayAnimFrames_->frames[ovFrameIdx];
+
+        if (ovPixels != nullptr) {
+            const int16_t ovW = static_cast<int16_t>(overlayAnimFrames_->w) * kOverlayScale;
+            const int16_t ovH = static_cast<int16_t>(overlayAnimFrames_->h) * kOverlayScale;
+
+            int16_t ovX, ovY;
+
+            if (overlayAnimFrames_ == &overlayBroom_) {
+                // Escoba: pies del personaje, esquina inferior izquierda del sprite.
+                // spriteX es el borde izquierdo del personaje (24 px desde el borde
+                // de pantalla); anclar el overlay ahí para que la escoba quede
+                // visualmente a los pies del bicho.
+                ovX = spriteX;
+                ovY = spriteY + spriteH - ovH;
+            } else if (overlayAnimFrames_ == &overlaySyringe_) {
+                // Jeringa: costado derecho a media altura del personaje.
+                // Se posiciona solapando el brazo derecho (lado derecho del sprite).
+                ovX = spriteX + spriteW - ovW / 2;
+                ovY = spriteY + (spriteH - ovH) / 2;
+            } else {
+                // Pelota (ball): esquina inferior-derecha, delante del personaje.
+                ovX = spriteX + spriteW - ovW;
+                ovY = spriteY + spriteH - ovH;
+            }
+
+            drawSpriteScaled_(&canvas_,
+                              ovX, ovY,
+                              overlayAnimFrames_->w, overlayAnimFrames_->h,
+                              ovPixels,
+                              kOverlayScale,
+                              kKeyColor);
+        }
+    }
 }
 
 // =============================================================================
