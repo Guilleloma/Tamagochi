@@ -9,7 +9,9 @@
  * Layout portrait 240×296 (safe-area con cards redondeadas):
  *   Margen físico   kEdgeInset=8 px por todos los bordes (curva del cristal IPS)
  *   Corner safe     kCornerSafe=28 px: clearance diagonal para esquinas del cristal
- *   HUD top         texto flotante h=52: BABY en (28,28), edad en (28,46), WiFi en (212,28)
+ *   HUD top (D1)    iconos de estado centrados h=52: ic-hunger · ic-poop · ic-sick
+ *                   (24px×2 = 48px, gap=8, bloque centrado en 240px). WiFi en (212,28).
+ *                   Etapa+edad movidas a StatsView.
  *   Personaje       y=(8+52)..(296-8-60) : sprite 48×48 × 4 = 192×192, centrado
  *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : label acción (size 2) + cursor dots
  *
@@ -167,6 +169,13 @@ private:
     StageSprites spritesByStage_[6];   // índice = LifeStage enum value (0-5)
     bool spritesLoaded_ = false;
 
+    // ── Iconos de estado (banda superior) — precargados en PSRAM al boot ────
+    // Orden fijo: [0]=ic-hunger, [1]=ic-poop, [2]=ic-sick. Sprites 24×24, 1 frame idle.
+    // Se renderizan escalados ×2 (48×48) centrados en la banda superior de IdleMain.
+    static constexpr uint8_t kStatusIconCount = 3;
+    ColorSpriteFrames statusIcons_[kStatusIconCount];
+    bool statusIconsLoaded_ = false;
+
     // Color key de transparencia (0xF81F = magenta en RGB565).
     static constexpr uint16_t kKeyColor = 0xF81F;
 
@@ -231,11 +240,12 @@ private:
     void drawOtaProgress_();
     void drawDeadScreen_();
 
-    void drawHudTop_();      // nombre/etapa + edad + WiFi
-    void drawHudBottom_();   // acción seleccionada
-    void drawSprite_();      // personaje centrado
-    void drawOverlayBadges_(); // iconos de estado sobre el personaje (sick/sleep/hungry/poop)
-    void drawWifiIcon_();    // icono WiFi esquina sup-der
+    void drawHudTop_();            // WiFi en esquina sup-der (etapa/edad movidas a StatsView)
+    void drawHudBottom_();         // acción seleccionada
+    void drawSprite_();            // personaje centrado
+    void drawStatusIconsTop_();    // iconos de estado grandes centrados en banda superior
+    void drawOverlayBadges_();     // overlay sleep "Z" sobre el personaje
+    void drawWifiIcon_();          // icono WiFi esquina sup-der
 
     // Dibuja el sprite escalado con color key. Reutiliza drawSpriteScaled de bringup.
     static void drawSpriteScaled_(Arduino_GFX* display,
@@ -249,9 +259,6 @@ private:
     void drawStatBar_(int16_t x, int16_t y, int16_t barW, int16_t barH,
                       int value, int valueMax, const char* label);
 
-    // Overlay badge: pequeño icono simbólico sobre el personaje.
-    void drawBadgeSick_(int16_t cx, int16_t cy);
+    // Overlay badge: "Z" animada de sueño sobre el personaje (única que permanece).
     void drawBadgeSleep_(int16_t cx, int16_t cy);
-    void drawBadgeHungry_(int16_t cx, int16_t cy);
-    void drawBadgePoop_(int16_t cx, int16_t cy);
 };
