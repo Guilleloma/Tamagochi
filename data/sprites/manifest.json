@@ -261,7 +261,7 @@
       }
     },
     {
-      "id": "5965792e-71e6-4b56-9624-5ec6800f0767",
+      "id": "b886364b-e81f-471f-adc4-bbcf83088632",
       "folder": "ic-hunger",
       "w": 24,
       "h": 24,
@@ -359,7 +359,7 @@
       }
     },
     {
-      "id": "193263fd-34bb-41d7-9baf-d4f913f5605d",
+      "id": "7793e238-9159-465a-9965-5d8c83458a5a",
       "folder": "ic-disc",
       "w": 24,
       "h": 24,
@@ -406,7 +406,7 @@
       }
     },
     {
-      "id": "c97cb14d-ad92-4f39-a27a-cf0617ebe40b",
+      "id": "4b24e182-adb8-486c-b4bd-7133927b7af6",
       "folder": "anim-syringe",
       "w": 48,
       "h": 48,
@@ -416,9 +416,23 @@
           "frames": [
             "syringe/0.bin",
             "syringe/1.bin",
-            "syringe/2.bin",
-            "syringe/3.bin",
-            "syringe/4.bin"
+            "syringe/2.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "29bf7686-c479-4176-ac8d-4e8460100d83",
+      "folder": "anim-ball",
+      "w": 48,
+      "h": 48,
+      "animations": {
+        "ball": {
+          "fps": 8,
+          "frames": [
+            "ball/0.bin",
+            "ball/1.bin",
+            "ball/2.bin"
           ]
         }
       }
