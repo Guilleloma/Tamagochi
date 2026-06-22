@@ -259,6 +259,90 @@
           ]
         }
       }
+    },
+    {
+      "id": "a1c3e5f7-1234-4abc-8def-000011112222",
+      "folder": "ic-apple",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 1,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "b2d4f6a8-5678-4bcd-9ef0-333344445555",
+      "folder": "ic-ball",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 1,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "c3e5a7b9-9abc-4cde-af01-666677778888",
+      "folder": "ic-disc",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 1,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "d4f6b8ca-def0-4def-b012-99990000aaaa",
+      "folder": "ic-moon",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 1,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "e5a7c9db-0123-4ef0-c123-bbbbccccdddd",
+      "folder": "ic-heal",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 1,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
+    },
+    {
+      "id": "f6b8daec-4567-4f01-d234-eeeeffff0000",
+      "folder": "ic-stats",
+      "w": 24,
+      "h": 24,
+      "animations": {
+        "idle": {
+          "fps": 1,
+          "frames": [
+            "idle/0.bin"
+          ]
+        }
+      }
     }
   ]
 }
