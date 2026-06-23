@@ -9,10 +9,14 @@
       "h": 48,
       "animations": {
         "idle": {
-          "fps": 2,
+          "fps": 8,
           "frames": [
             "idle/0.bin",
-            "idle/1.bin"
+            "idle/1.bin",
+            "idle/2.bin",
+            "idle/3.bin",
+            "idle/4.bin",
+            "idle/5.bin"
           ]
         }
       }

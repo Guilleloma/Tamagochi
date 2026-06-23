@@ -945,21 +945,23 @@ void DisplayRendererColor::drawSprite_() {
     //   Top card termina en: kEdgeInset + kHudTopH
     //   Bottom card empieza en: kScreenH - kEdgeInset - kHudBottomH
     //   Gap total disponible: (kScreenH - kEdgeInset - kHudBottomH) - (kEdgeInset + kHudTopH)
-    // El sprite 192×192 se centra verticalmente en ese gap.
+    // El sprite se centra en ese gap usando su tamaño real (w/h * kScale).
     const int16_t zoneTop    = kEdgeInset + kHudTopH;
     const int16_t zoneBottom = kScreenH - kEdgeInset - kHudBottomH;
     const int16_t zoneH      = zoneBottom - zoneTop;
-    // Centrado horizontal en 240 px y vertical en la zona libre.
-    const int16_t spriteX = (kScreenW - 192) / 2;
-    const int16_t spriteY = zoneTop + (zoneH - 192) / 2;
 
     // Prioridad de selección de mood:
     //   1. Animación one-shot de acción activa (actionAnimRemainingMs_ > 0)
     //   2. Mood calculado por computeMood_() (isSleeping → Sleep, etc.)
     MoodColor mood = (actionAnimRemainingMs_ > 0) ? actionAnimMood_ : computeMood_();
     const ColorSpriteFrames* frames = framesForMood_(lifeStage_, mood);
-    const int16_t spriteW = (frames && frames->w > 0) ? frames->w * kScale : 192;
-    const int16_t spriteH = (frames && frames->h > 0) ? frames->h * kScale : 192;
+    const int16_t spriteW = (frames && frames->w > 0) ? frames->w * kScale : 48 * kScale;
+    const int16_t spriteH = (frames && frames->h > 0) ? frames->h * kScale : 48 * kScale;
+
+    // Centrado horizontal en 240 px y vertical en la zona libre, con el tamaño
+    // REAL del sprite — antes se usaba un 192 fijo que descentraba al cambiar kScale.
+    const int16_t spriteX = (kScreenW - spriteW) / 2;
+    const int16_t spriteY = zoneTop + (zoneH - spriteH) / 2;
 
     if (frames != nullptr && frames->count > 0 && frames->w > 0) {
         uint8_t frameIdx = static_cast<uint8_t>(animFrame_ % frames->count);
