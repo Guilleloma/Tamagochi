@@ -20,7 +20,7 @@
  *   HUD top (D1)    iconos de estado centrados h=52: ic-hunger · ic-poop · ic-sick
  *                   (24px×2 = 48px, gap=8, bloque centrado en 240px). WiFi en (212,28).
  *                   Etapa+edad movidas a StatsView.
- *   Personaje       y=(8+52)..(296-8-60) : sprite 48×48 × 4 = 192×192, centrado
+ *   Personaje       y=(8+52)..(296-8-60) : sprite 48×48 × 3 = 144×144, centrado
  *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : icono(24px) + label(size 2) + dots
  *
  * Constructor: DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus, SpriteStore& sprites)
@@ -182,7 +182,8 @@ private:
     // Se renderizan escalados ×2 (48×48) centrados en la banda superior de IdleMain.
     static constexpr uint8_t kStatusIconCount = 3;
     ColorSpriteFrames statusIcons_[kStatusIconCount];
-    bool statusIconsLoaded_ = false;
+    // statusIconsLoaded_ eliminado: la degradación es por icono individual
+    // (statusIcons_[i].count > 0 actúa como flag per-slot; ver Fix 1b).
 
     // ── Canal de overlay one-shot (escoba/jeringa/pelota) ───────────────────
     // Segundo canal de animación independiente del mood del personaje.
@@ -221,8 +222,10 @@ private:
     // Color key de transparencia (0xF81F = magenta en RGB565).
     static constexpr uint16_t kKeyColor = 0xF81F;
 
-    // Escala de renderizado: 48×48 × 4 = 192×192 px.
-    static constexpr uint8_t kScale = 4;
+    // Escala de renderizado: 48×48 × 3 = 144×144 px.
+    // Con kScale=3 el personaje ocupa y≈60..204 (zona=236px) dejando ~12px de
+    // aire respecto a la banda de iconos (y=60) y el HUD inferior (y=228).
+    static constexpr uint8_t kScale = 3;
 
     // ── Safe-area: márgenes para respetar las esquinas físicas redondeadas ───
     // El cristal IPS 240×296 tiene esquinas redondeadas que recortan el contenido

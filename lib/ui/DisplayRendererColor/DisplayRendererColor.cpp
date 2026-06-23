@@ -67,7 +67,7 @@ static constexpr uint16_t COL_BG = 0x0000;
 // Los IDs deben coincidir con el campo "id" del manifest.json.
 // Orden: 0=hunger, 1=poop, 2=sick — coincide con kStatusIconOrder[].
 // UUIDs reales del manifest (feature/color-assets — fuente de verdad).
-static constexpr const char* kIconHungerId = "b886364b-e81f-471f-adc4-bbcf83088632";
+static constexpr const char* kIconHungerId = "5965792e-71e6-4b56-9624-5ec6800f0767";
 static constexpr const char* kIconPoopId   = "bbe58be2-24f8-4f02-b791-01035929519c";
 static constexpr const char* kIconSickId   = "6d0893e1-1910-4dc5-9dc5-9049c144cb9d";
 
@@ -283,12 +283,13 @@ bool DisplayRendererColor::loadSprites_() {
     const char* iconIds[kStatusIconCount] = {
         kIconHungerId, kIconPoopId, kIconSickId
     };
-    statusIconsLoaded_ = true;
     for (uint8_t i = 0; i < kStatusIconCount; i++) {
         bool ok = sprites_.loadAnimation(iconIds[i], "idle", statusIcons_[i]);
         if (!ok) {
-            LOG_ERROR("Fallo cargando icono estado idx=%u id=%.10s...", i, iconIds[i]);
-            statusIconsLoaded_ = false;
+            LOG_ERROR("Fallo cargando icono estado idx=%u id=%.10s... (degradacion por icono)", i, iconIds[i]);
+            // Solo dejamos ese slot con count=0 — los otros iconos siguen disponibles.
+            // drawStatusIconsTop_() comprueba statusIcons_[idx].count > 0 por icono,
+            // por lo que el fallback con primitivas se activa solo para este índice.
             allOk = false;
         }
     }
@@ -741,7 +742,7 @@ void DisplayRendererColor::drawStatusIconsTop_() {
     for (uint8_t i = 0; i < activeCount; i++) {
         uint8_t idx = activeIdx[i];
 
-        if (statusIconsLoaded_ && statusIcons_[idx].count > 0 && statusIcons_[idx].w > 0) {
+        if (statusIcons_[idx].count > 0 && statusIcons_[idx].w > 0) {
             // Sprite real: escalar ×2 (24px → 48px) con colorkey
             const uint16_t* pixels = statusIcons_[idx].frames[0];
             if (pixels != nullptr) {
