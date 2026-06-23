@@ -6,12 +6,22 @@
  * framesForMood_() resuelve (lifeStage_, mood) a la animación correcta,
  * con fallback a idle de la etapa si el mood no tiene animación propia.
  *
+ * FASE 4 (menú): drawHudBottom_() pinta icono 24×24 + label de la acción
+ * seleccionada, centrados como bloque horizontal en la card inferior.
+ * Iconos para 6 acciones (Feed/Play/Discipline/Sleep/Heal/Stats) cargados vía
+ * SpriteStore desde LittleFS (carpetas ic-apple, ic-ball, ic-disc, ic-moon,
+ * ic-heal, ic-stats). Clean y Medicate usan primitivas dibujadas en render
+ * (sin assets separados: anim-broom y anim-syringe son 48×48, no caben en
+ * los 60 px del HUD junto al texto size 2; ver drawMenuIconPrimitive_()).
+ *
  * Layout portrait 240×296 (safe-area con cards redondeadas):
  *   Margen físico   kEdgeInset=8 px por todos los bordes (curva del cristal IPS)
  *   Corner safe     kCornerSafe=28 px: clearance diagonal para esquinas del cristal
- *   HUD top         texto flotante h=52: BABY en (28,28), edad en (28,46), WiFi en (212,28)
- *   Personaje       y=(8+52)..(296-8-60) : sprite 48×48 × 4 = 192×192, centrado
- *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : label acción (size 2) + cursor dots
+ *   HUD top (D1)    iconos de estado centrados h=52: ic-hunger · ic-poop · ic-sick
+ *                   (24px×2 = 48px, gap=8, bloque centrado en 240px). WiFi en (212,28).
+ *                   Etapa+edad movidas a StatsView.
+ *   Personaje       y=(8+52)..(296-8-60) : sprite 48×48 × 3 = 144×144, centrado
+ *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : icono(24px) + label(size 2) + dots
  *
  * Constructor: DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus, SpriteStore& sprites)
  * render()    : compone frame completo y llama canvas.flush().
@@ -167,11 +177,55 @@ private:
     StageSprites spritesByStage_[6];   // índice = LifeStage enum value (0-5)
     bool spritesLoaded_ = false;
 
+    // ── Iconos de estado (banda superior) — precargados en PSRAM al boot ────
+    // Orden fijo: [0]=ic-hunger, [1]=ic-poop, [2]=ic-sick. Sprites 24×24, 1 frame idle.
+    // Se renderizan escalados ×2 (48×48) centrados en la banda superior de IdleMain.
+    static constexpr uint8_t kStatusIconCount = 3;
+    ColorSpriteFrames statusIcons_[kStatusIconCount];
+    // statusIconsLoaded_ eliminado: la degradación es por icono individual
+    // (statusIcons_[i].count > 0 actúa como flag per-slot; ver Fix 1b).
+
+    // ── Canal de overlay one-shot (escoba/jeringa/pelota) ───────────────────
+    // Segundo canal de animación independiente del mood del personaje.
+    // Se pinta ENCIMA del personaje durante kActionAnimDurationMs y luego
+    // se apaga solo. Feed NO usa overlay (solo cambia mood a Eat).
+    //
+    // overlayAnimFrames_: puntero a los ColorSpriteFrames del overlay activo
+    //   (apunta a uno de los 3 sprites precarados abajo). nullptr = sin overlay.
+    // overlayAnimRemainingMs_: ms restantes de overlay; se drena en render().
+    // overlayAnimFrame_: contador de frame propio del overlay, avanzado según
+    //   el fps declarado en el manifest (desacoplado de animFrame_ del personaje).
+    // overlayAnimLastTickMs_: millis() del último avance de overlayAnimFrame_.
+    const ColorSpriteFrames* overlayAnimFrames_       = nullptr;
+    uint32_t                 overlayAnimRemainingMs_   = 0;
+    uint32_t                 overlayAnimFrame_         = 0;
+    uint32_t                 overlayAnimLastTickMs_    = 0;
+
+    // Sprites de overlay precargados en PSRAM al boot (~8 KB total):
+    //   overlayBroom_   → Clean   (48×48, 6 frames)
+    //   overlaySyringe_ → Heal + Medicate (48×48, 3 frames)
+    //   overlayBall_    → Play    (48×48, 3 frames)
+    ColorSpriteFrames overlayBroom_;
+    ColorSpriteFrames overlaySyringe_;
+    ColorSpriteFrames overlayBall_;
+
+    // ── Iconos del menú de acciones (HUD inferior) ───────────────────────────
+    // Iconos 24×24 RGB565, uno por ActionKind que tiene asset de icono dedicado.
+    // Orden: Feed=0, Play=1, Discipline=2, Sleep=3, Heal=4, Stats=5.
+    // Clean e Medicate se dibujan con primitivas (ver drawMenuIconPrimitive_()).
+    // Cargados en loadMenuIcons_(); si falla, drawHudBottom_() omite el icono
+    // para esa acción y pinta solo el label (degradación suave).
+    static constexpr uint8_t kMenuIconCount = 6;
+    ColorSpriteFrames menuIcons_[kMenuIconCount];
+    bool menuIconsLoaded_ = false;
+
     // Color key de transparencia (0xF81F = magenta en RGB565).
     static constexpr uint16_t kKeyColor = 0xF81F;
 
-    // Escala de renderizado: 48×48 × 4 = 192×192 px.
-    static constexpr uint8_t kScale = 4;
+    // Escala de renderizado: 48×48 × 3 = 144×144 px.
+    // Con kScale=3 el personaje ocupa y≈60..204 (zona=236px) dejando ~12px de
+    // aire respecto a la banda de iconos (y=60) y el HUD inferior (y=228).
+    static constexpr uint8_t kScale = 3;
 
     // ── Safe-area: márgenes para respetar las esquinas físicas redondeadas ───
     // El cristal IPS 240×296 tiene esquinas redondeadas que recortan el contenido
@@ -220,6 +274,7 @@ private:
     // ── Helpers internos ─────────────────────────────────────────────────────
     MoodColor computeMood_() const;
     bool      loadSprites_();
+    bool      loadMenuIcons_();
 
     // Devuelve el puntero al ColorSpriteFrames correcto para (stage, mood).
     // Fallback a idle de la etapa si el mood no tiene frames cargados.
@@ -231,11 +286,12 @@ private:
     void drawOtaProgress_();
     void drawDeadScreen_();
 
-    void drawHudTop_();      // nombre/etapa + edad + WiFi
-    void drawHudBottom_();   // acción seleccionada
-    void drawSprite_();      // personaje centrado
-    void drawOverlayBadges_(); // iconos de estado sobre el personaje (sick/sleep/hungry/poop)
-    void drawWifiIcon_();    // icono WiFi esquina sup-der
+    void drawHudTop_();            // WiFi en esquina sup-der (etapa/edad movidas a StatsView)
+    void drawHudBottom_();         // acción seleccionada
+    void drawSprite_();            // personaje centrado
+    void drawStatusIconsTop_();    // iconos de estado grandes centrados en banda superior
+    void drawOverlayBadges_();     // overlay sleep "Z" sobre el personaje
+    void drawWifiIcon_();          // icono WiFi esquina sup-der
 
     // Dibuja el sprite escalado con color key. Reutiliza drawSpriteScaled de bringup.
     static void drawSpriteScaled_(Arduino_GFX* display,
@@ -249,9 +305,11 @@ private:
     void drawStatBar_(int16_t x, int16_t y, int16_t barW, int16_t barH,
                       int value, int valueMax, const char* label);
 
-    // Overlay badge: pequeño icono simbólico sobre el personaje.
-    void drawBadgeSick_(int16_t cx, int16_t cy);
+    // Overlay badge: "Z" animada de sueño sobre el personaje (única que permanece).
     void drawBadgeSleep_(int16_t cx, int16_t cy);
-    void drawBadgeHungry_(int16_t cx, int16_t cy);
-    void drawBadgePoop_(int16_t cx, int16_t cy);
+
+    // Icono de menú de acción dibujado con primitivas (sin asset .bin).
+    // Usado para Clean y Medicate, cuyos assets 48×48 no caben en el HUD de 60 px.
+    // cx/cy: centro del área de icono (24×24 px).
+    void drawMenuIconPrimitive_(ActionKind action, int16_t cx, int16_t cy);
 };
