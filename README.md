@@ -263,6 +263,8 @@ Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vid
 | Librería display | Arduino_GFX v1.3.7 (fijada por compatibilidad con arduino-esp32 core 2.0.17 / IDF4) |
 | Botón | BOOT / GPIO0 (active-LOW — **no mantener pulsado en reset**: pin de strapping) |
 
+**Medidor de batería:** firmware, icono TFT y API listos (`batteryValid`/`batteryPercent`/`batteryCharging` en `/api/v1/state`); la soldadura del divisor (GPIO1) y del sensado de carga (GPIO2) está **pendiente** — hasta entonces el icono permanece oculto. Guía completa de soldadura en [`docs/hardware-battery.md`](docs/hardware-battery.md).
+
 #### Cableado TFT JD9853
 
 | Pin TFT | GPIO ESP32-S3 |
