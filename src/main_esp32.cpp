@@ -354,14 +354,13 @@ static void onOtaError(const Event& ev) {
 
 // BatteryStateChanged: decodifica el payload empaquetado por BatteryMonitor
 // (ver comentario de codificación en EventBus.h) y lo deja listo para la UI.
-// TODO(battery-ui): conectar con renderer->setBattery(pct, charging, valid)
-// en el commit de UI — el setter aún no existe en DisplayRendererColor.
 static void onBatteryStateChanged(const Event& e) {
     uint8_t percent  = static_cast<uint8_t>(e.payload & 0x7F);
     bool    charging = (e.payload & (1 << 7)) != 0;
     bool    valid    = (e.payload & (1 << 8)) != 0;
     LOG_DEBUG("[battery] evento valid=%d percent=%u%% charging=%d",
               valid ? 1 : 0, percent, charging ? 1 : 0);
+    if (renderer) renderer->setBattery(percent, charging, valid);
 }
 
 // Acciones publicadas por el HUD → aplicar a StatsEngine + persistir.

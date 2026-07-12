@@ -104,6 +104,7 @@ public:
     void setAgeMinutes(uint32_t mins);
     void setDeathCount(uint16_t count);
     void setWifiState(WifiState state);
+    void setBattery(uint8_t percent, bool charging, bool valid);
 
     // ── Triggers de animación one-shot ───────────────────────────────────────
     // triggerActionAnimation: reproduce la animación asociada a la acción
@@ -150,6 +151,12 @@ private:
     uint32_t   ageMinutes_     = 0;
     uint16_t   deathCount_     = 0;
     WifiState  wifiState_      = WifiState::Disabled;
+
+    // Batería — Unknown por defecto (icono oculto) hasta que BatteryMonitor
+    // confirme lectura válida. Ver setBattery() / drawBatteryIcon_().
+    uint8_t    batteryPercent_  = 0;
+    bool       batteryCharging_ = false;
+    bool       batteryValid_    = false;
 
     // ── Animación ────────────────────────────────────────────────────────────
     // animFrame_ avanza según millis() y el fps declarado en el manifest
@@ -286,12 +293,13 @@ private:
     void drawOtaProgress_();
     void drawDeadScreen_();
 
-    void drawHudTop_();            // WiFi en esquina sup-der (etapa/edad movidas a StatsView)
+    void drawHudTop_();            // WiFi + batería en esquina sup (etapa/edad movidas a StatsView)
     void drawHudBottom_();         // acción seleccionada
     void drawSprite_();            // personaje centrado
     void drawStatusIconsTop_();    // iconos de estado grandes centrados en banda superior
     void drawOverlayBadges_();     // overlay sleep "Z" sobre el personaje
     void drawWifiIcon_();          // icono WiFi esquina sup-der
+    void drawBatteryIcon_();       // icono batería esquina sup-izq (primitivas, ver .cpp)
 
     // Dibuja el sprite escalado con color key. Reutiliza drawSpriteScaled de bringup.
     static void drawSpriteScaled_(Arduino_GFX* display,

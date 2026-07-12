@@ -364,6 +364,14 @@ void DisplayRendererColor::setAgeMinutes(uint32_t mins)       { ageMinutes_ = mi
 void DisplayRendererColor::setDeathCount(uint16_t count)      { deathCount_ = count; }
 void DisplayRendererColor::setWifiState(WifiState state)      { wifiState_ = state; }
 
+// setBattery: el renderer no lee EventBus/dominio (patrón setters existente) —
+// BatteryMonitor decodifica su evento en main_esp32.cpp y llama este setter.
+void DisplayRendererColor::setBattery(uint8_t percent, bool charging, bool valid) {
+    batteryPercent_  = percent;
+    batteryCharging_ = charging;
+    batteryValid_    = valid;
+}
+
 // =============================================================================
 // Triggers de animación one-shot
 // =============================================================================
@@ -647,15 +655,17 @@ void DisplayRendererColor::drawSpriteScaled_(Arduino_GFX* display,
 }
 
 // =============================================================================
-// drawHudTop_ — HUD superior: solo icono WiFi en esquina sup-der.
+// drawHudTop_ — HUD superior: WiFi (sup-der) + batería (sup-izq).
 //
 // D1: la banda superior se reserva para los iconos de estado grandes
 // (drawStatusIconsTop_). Etapa y edad se muestran en StatsView.
-// Solo el WiFi permanece aquí para no perder el indicador de conectividad.
+// WiFi y batería son los únicos iconos que permanecen aquí para no perder
+// los indicadores de conectividad/energía.
 // =============================================================================
 
 void DisplayRendererColor::drawHudTop_() {
     drawWifiIcon_();
+    drawBatteryIcon_();
 }
 
 // =============================================================================
@@ -696,6 +706,57 @@ void DisplayRendererColor::drawWifiIcon_() {
     if (wifiState_ == WifiState::Disconnected) {
         canvas_.drawLine(cx - 4, cy - 4, cx + 4, cy + 4, COL_RED);
         canvas_.drawLine(cx - 4, cy + 4, cx + 4, cy - 4, COL_RED);
+    }
+}
+
+// =============================================================================
+// drawBatteryIcon_ — icono de batería en esquina superior izquierda.
+//
+// Primitivas, NO sprites: LittleFS está al límite de capacidad (commit
+// a238adf). Espejo del WiFi (sup-der) en la esquina sup-izq.
+//
+// Guards: oculto si !batteryValid_ (sin hardware soldado — ver
+// docs/hardware-battery.md), en OtaProgress (mismo patrón que drawWifiIcon_)
+// y en StatsView (esa escena muestra el % como texto en el footer, ver
+// drawStatsView_, para no duplicar la información). Parpadeo si batería
+// crítica (<=10%) y sin cargar — mismo patrón que WiFi Connecting.
+//
+// Geometría: cuerpo drawRect(16,22,22,12) + borne fillRect(38,25,3,6).
+// Relleno interior 18×8 en (18,24), ancho proporcional a batteryPercent_
+// (mínimo 1 px si percent>0, para que "1%" siga siendo visible).
+// Colores por umbral: COL_GREEN >50 / COL_AMBER 21-50 / COL_RED <=20.
+// Rayo de carga (2 fillTriangle amarillos) centrado ~(27,28) si
+// batteryCharging_ — geometría aproximada, afinar en placa real.
+// =============================================================================
+
+void DisplayRendererColor::drawBatteryIcon_() {
+    if (!batteryValid_)                    return;
+    if (scene_ == SceneColor::OtaProgress) return;
+    if (scene_ == SceneColor::StatsView)   return;
+
+    // Parpadeo si batería crítica y no está cargando (patrón WiFi Connecting).
+    if (batteryPercent_ <= 10 && !batteryCharging_ && (animFrame_ % 2) != 0) return;
+
+    uint16_t fillColor;
+    if      (batteryPercent_ > 50) fillColor = COL_GREEN;
+    else if (batteryPercent_ > 20) fillColor = COL_AMBER;
+    else                            fillColor = COL_RED;
+
+    // Cuerpo + borne, blancos.
+    canvas_.drawRect(16, 22, 22, 12, COL_WHITE);
+    canvas_.fillRect(38, 25, 3, 6, COL_WHITE);
+
+    // Relleno interior proporcional al percent (mínimo 1 px si percent>0).
+    int16_t fillW = static_cast<int16_t>(batteryPercent_) * 18 / 100;
+    if (fillW <= 0 && batteryPercent_ > 0) fillW = 1;
+    if (fillW > 0) {
+        canvas_.fillRect(18, 24, fillW, 8, fillColor);
+    }
+
+    // Rayo de carga: 2 triángulos amarillos superpuestos formando un zigzag.
+    if (batteryCharging_) {
+        canvas_.fillTriangle(27, 23, 22, 29, 27, 29, COL_YELLOW);
+        canvas_.fillTriangle(25, 26, 25, 33, 30, 26, COL_YELLOW);
     }
 }
 
@@ -1251,6 +1312,25 @@ void DisplayRendererColor::drawStatsView_() {
         snprintf(ripBuf, sizeof(ripBuf), "RIPs: %u", static_cast<unsigned>(deathCount_));
         canvas_.setCursor(kSafeTextX, rowY);
         canvas_.print(ripBuf);
+    }
+
+    // Batería — solo si hay lectura válida (icono del HUD se oculta en esta
+    // escena, ver drawBatteryIcon_). Mismo estilo tipográfico (size 1) que el
+    // header de edad de arriba; " CHG" en amarillo si está cargando.
+    if (batteryValid_) {
+        rowY += 16;
+        if (rowY < kScreenH - kEdgeInset - 8) {
+            char batBuf[12];
+            snprintf(batBuf, sizeof(batBuf), "Bat: %u%%", static_cast<unsigned>(batteryPercent_));
+            canvas_.setTextColor(COL_WHITE);
+            canvas_.setTextSize(1);
+            canvas_.setCursor(kSafeTextX, rowY);
+            canvas_.print(batBuf);
+            if (batteryCharging_) {
+                canvas_.setTextColor(COL_YELLOW);
+                canvas_.print(" CHG");
+            }
+        }
     }
 
     canvas_.flush();
