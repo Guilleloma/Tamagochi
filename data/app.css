@@ -60,6 +60,12 @@ body {
   text-transform: uppercase;
 }
 
+.header__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ============================================================
    Badges genéricos
    ============================================================ */
