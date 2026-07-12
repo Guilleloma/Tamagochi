@@ -32,6 +32,7 @@
 #include "StatsEngine.h"
 #include "LifeFSM.h"
 #include "WifiManager.h"
+#include "BatteryMonitor.h"
 #include "JsonCodec.h"
 #include "AuthChecker.h"
 
@@ -40,11 +41,12 @@
 // =============================================================================
 
 WebUI::WebUI(EventBus& bus, const StatsEngine& engine, const LifeFSM& fsm,
-             const WifiManager& wifi)
+             const WifiManager& wifi, const BatteryMonitor& battery)
     : bus_(bus)
     , engine_(engine)
     , fsm_(fsm)
     , wifi_(wifi)
+    , battery_(battery)
     , server_(80)
     , rateLimiter_()
     , running_(false)
@@ -182,6 +184,7 @@ void WebUI::handleGetState_(AsyncWebServerRequest* req) {
         deathCount,
         turbo,
         millis(),
+        battery_.snapshot(),
         buf,
         sizeof(buf)
     );
@@ -207,6 +210,7 @@ void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
         millis(),
         ESP.getFreeHeap(),
         WiFi.RSSI(),
+        battery_.snapshot(),
         buf,
         sizeof(buf)
     );
@@ -336,6 +340,7 @@ void WebUI::sendActionResponse_(AsyncWebServerRequest* req,
         millis(),
         actionType,
         actionValue,
+        battery_.snapshot(),
         buf,
         sizeof(buf)
     );

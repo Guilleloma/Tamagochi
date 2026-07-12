@@ -4,7 +4,9 @@
 //
 // Endpoints (hito 5):
 //   GET  /api/v1/state        → estado completo del Tamagochi (stats + stage + age)
+//                                + batteryPercent/batteryCharging/batteryValid
 //   GET  /api/v1/info         → telemetría del dispositivo (firmware, heap, RSSI)
+//                                + battery* (igual que /state) + batteryMillivolts
 //
 // Endpoints (hito 6 — acciones de juego):
 //   POST /api/v1/feed         → body: {"amount":1-100}  publica ActionFeedRequested
@@ -40,11 +42,12 @@ class EventBus;
 class StatsEngine;
 class LifeFSM;
 class WifiManager;
+class BatteryMonitor;
 
 class WebUI {
 public:
     WebUI(EventBus& bus, const StatsEngine& engine, const LifeFSM& fsm,
-          const WifiManager& wifi);
+          const WifiManager& wifi, const BatteryMonitor& battery);
 
     // Arranca el servidor HTTP en el puerto 80. Idempotente.
     // Llamar solo cuando WiFi.state() == Connected.
@@ -59,11 +62,12 @@ public:
     void loop();
 
 private:
-    EventBus&          bus_;
-    const StatsEngine& engine_;
-    const LifeFSM&     fsm_;
-    const WifiManager& wifi_;
-    AsyncWebServer     server_;
+    EventBus&             bus_;
+    const StatsEngine&    engine_;
+    const LifeFSM&        fsm_;
+    const WifiManager&    wifi_;
+    const BatteryMonitor& battery_;
+    AsyncWebServer        server_;
     RateLimiter        rateLimiter_;
     bool               running_ = false;
 

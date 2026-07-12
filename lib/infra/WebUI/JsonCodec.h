@@ -18,6 +18,7 @@
 #include <stddef.h>
 #include "Persistence.h"    // LifeStage enum
 #include "StatsEngine.h"    // Stats struct
+#include "BatteryGauge.h"   // BatterySnapshot — puro, compatible con env:native
 
 namespace JsonCodec {
 
@@ -29,14 +30,20 @@ namespace JsonCodec {
 // Devuelve bytes escritos (sin contar el null terminator).
 // out debe tener al menos 512 bytes; el JSON real cabe en ~320.
 // Formato: { "data": {...}, "meta": { "apiVersion": "v1", "timestamp": <uptimeMs> } }
+// Campos de batería siempre presentes en data: batteryPercent, batteryCharging,
+// batteryValid (batteryPercent/batteryCharging valen 0/false si !battery.valid).
 size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                       uint16_t deathCount, bool turbo, uint32_t uptimeMs,
+                      const BatterySnapshot& battery,
                       char* out, size_t outSize);
 
 // Serializa info de telemetría del dispositivo.
 // Formato: { "data": { "firmwareVersion", "uptimeMs", "freeHeap", "wifiRssi", ... } }
+// Además de batteryPercent/batteryCharging/batteryValid, incluye batteryMillivolts
+// (mV crudos del gauge) — /info es el endpoint canónico de telemetría detallada.
 size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
                      uint32_t freeHeap, int8_t wifiRssi,
+                     const BatterySnapshot& battery,
                      char* out, size_t outSize);
 
 // Serializa respuesta de acción: state completo + actionApplied.
@@ -45,6 +52,7 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
 size_t serializeActionResponse(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                                uint16_t deathCount, bool turbo, uint32_t uptimeMs,
                                const char* actionType, int32_t actionValue,
+                               const BatterySnapshot& battery,
                                char* out, size_t outSize);
 
 // Serializa formato de error estándar (cumple api-conventions.md).

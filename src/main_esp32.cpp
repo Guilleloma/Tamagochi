@@ -623,7 +623,7 @@ void setup() {
     // ── WebUI — construir en heap tras renderer y bus para inyectar dependencias ─
     // WebUI publica eventos al bus; los handlers de acción en main los procesan.
     // Se activa solo cuando WiFi Connected (en onWifiStateChanged).
-    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi);
+    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi, battery);
 
     // ── Suscripciones EventBus ────────────────────────────────────────────────
     // Llamar en setup(), nunca en loop() — EventBus no es thread-safe.
