@@ -48,6 +48,11 @@ enum class EventType : uint8_t {
     ActionMedicateRequested,    // payload = 0
     ActionDisciplineRequested,  // payload = amount (1-100)
     ActionSleepRequested,       // payload = 0 (off) / 1 (on)
+    // BatteryStateChanged: publicado por BatteryMonitor cuando cambia el
+    // snapshot {valid, percent, charging} de BatteryGauge. Payload empaquetado
+    // en los 9 bits bajos: bits 0-6 = percent (0-100), bit 7 = charging,
+    // bit 8 = valid. Con valid=0 (Unknown) percent/charging deben ignorarse.
+    BatteryStateChanged,
     EventTypeCount      // centinela — mantener al final siempre
 };
 

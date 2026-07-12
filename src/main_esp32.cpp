@@ -53,6 +53,7 @@
 #include "OTAManager.h"
 #include "WebUI.h"
 #include "BootSplash.h"
+#include "BatteryMonitor.h"
 
 // =============================================================================
 // Verificación de versión de firmware en compile-time.
@@ -100,6 +101,10 @@ static DisplayRendererColor*  renderer     = nullptr;
 // y el juego funciona completamente offline sin intentar conectar.
 static WifiManager wifi(bus);
 static OTAManager  ota(bus);
+// BatteryMonitor: ADC del divisor de batería (aún sin soldar, ver
+// docs/hardware-battery.md) — hasta entonces se autodetecta como Unknown.
+// No depende de WiFi; funciona igual online/offline.
+static BatteryMonitor battery(bus);
 // WebUI se construye en heap en setup() para acceder a renderer/engine ya inicializados.
 // Declaramos un puntero aquí; la instancia se crea en setup().
 static WebUI*      webUI = nullptr;
@@ -345,6 +350,18 @@ static void onOtaError(const Event& ev) {
     LOG_ERROR("[ota] error code=%d", static_cast<int>(ev.payload));
     if (renderer) renderer->setScene(SceneColor::IdleMain);
     currentScene = SceneColor::IdleMain;
+}
+
+// BatteryStateChanged: decodifica el payload empaquetado por BatteryMonitor
+// (ver comentario de codificación en EventBus.h) y lo deja listo para la UI.
+// TODO(battery-ui): conectar con renderer->setBattery(pct, charging, valid)
+// en el commit de UI — el setter aún no existe en DisplayRendererColor.
+static void onBatteryStateChanged(const Event& e) {
+    uint8_t percent  = static_cast<uint8_t>(e.payload & 0x7F);
+    bool    charging = (e.payload & (1 << 7)) != 0;
+    bool    valid    = (e.payload & (1 << 8)) != 0;
+    LOG_DEBUG("[battery] evento valid=%d percent=%u%% charging=%d",
+              valid ? 1 : 0, percent, charging ? 1 : 0);
 }
 
 // Acciones publicadas por el HUD → aplicar a StatsEngine + persistir.
@@ -617,6 +634,7 @@ void setup() {
     bus.subscribe(EventType::PersistRequested,         onPersistRequested);
     bus.subscribe(EventType::LifeStateChanged,         onLifeStateChanged);
     bus.subscribe(EventType::WifiStateChanged,         onWifiStateChanged);
+    bus.subscribe(EventType::BatteryStateChanged,       onBatteryStateChanged);
     // OTA events — Fase 5
     bus.subscribe(EventType::OtaStarted,              onOtaStarted);
     bus.subscribe(EventType::OtaProgress,             onOtaProgress);
@@ -635,6 +653,9 @@ void setup() {
     // begin() devuelve en < 5 ms. Si WIFI_SSID está vacío en secrets.h, marca
     // Disabled y no hace nada más. El juego sigue funcionando offline.
     wifi.begin();
+
+    // ── Medidor de batería — independiente de WiFi, funciona offline ─────────
+    battery.begin();
 
     // ── Schedulers: inicializar todos a now para evitar ticks espurios al boot ─
     uint32_t now = millis();
@@ -664,6 +685,9 @@ void loop() {
     // (reservado para extensiones futuras como WebSockets).
     if (webUI) webUI->loop();
     // En ESP32 NO llamar MDNS.update() — no existe / no es necesario.
+
+    // ── Medidor de batería — guard interno kSampleIntervalMs=2000 ────────────
+    battery.loop();
 
     // OneButton necesita tick() en cada iteración para detectar gestos.
     // Los handlers onShortClick/onLongPress se invocan síncronamente desde aquí.
