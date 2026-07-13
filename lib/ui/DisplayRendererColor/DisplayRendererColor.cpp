@@ -716,23 +716,33 @@ void DisplayRendererColor::drawWifiIcon_() {
 // a238adf). Espejo del WiFi (sup-der) en la esquina sup-izq.
 //
 // Guards: oculto si !batteryValid_ (sin hardware soldado — ver
-// docs/hardware-battery.md), en OtaProgress (mismo patrón que drawWifiIcon_)
-// y en StatsView (esa escena muestra el % como texto en el footer, ver
-// drawStatsView_, para no duplicar la información). Parpadeo si batería
+// docs/hardware-battery.md), en OtaProgress (mismo patrón que drawWifiIcon_),
+// en StatsView (esa escena muestra el % como texto en el footer, ver
+// drawStatsView_, para no duplicar la información) y en DeadScreen (esa
+// escena reutiliza drawHudTop_ solo para el WiFi — sin este guard el icono de
+// batería se pintaba encima del layout de la pantalla RIP, colisionando con
+// el texto "DEAD"/edad de la esquina superior izquierda). Parpadeo si batería
 // crítica (<=10%) y sin cargar — mismo patrón que WiFi Connecting.
 //
-// Geometría: cuerpo drawRect(16,22,22,12) + borne fillRect(38,25,3,6).
-// Relleno interior 18×8 en (18,24), ancho proporcional a batteryPercent_
+// Geometría: cuerpo drawRect(12,22,22,12) + borne fillRect(34,25,3,6) — el
+// bloque completo se desplazó 4px a la izquierda respecto a la versión
+// original (cuerpo en x=16, borne acabando en x=41) porque con 3 status icons
+// activos (drawStatusIconsTop_) el bloque centrado arranca en x=40 y el borne
+// original colisionaba 1px con él (right edge 41 > 40). Con el desplazamiento,
+// el borne acaba en x=37, sin solape.
+// Relleno interior 18×8 en (14,24), ancho proporcional a batteryPercent_
 // (mínimo 1 px si percent>0, para que "1%" siga siendo visible).
 // Colores por umbral: COL_GREEN >50 / COL_AMBER 21-50 / COL_RED <=20.
-// Rayo de carga (2 fillTriangle amarillos) centrado ~(27,28) si
-// batteryCharging_ — geometría aproximada, afinar en placa real.
+// Rayo de carga (2 fillTriangle amarillos) si batteryCharging_ — vértices con
+// y<=32 para quedar dentro del interior del cuerpo (el borde inferior del
+// drawRect ocupa la fila y=33; un vértice en y=33 pintaba sobre ese borde).
 // =============================================================================
 
 void DisplayRendererColor::drawBatteryIcon_() {
     if (!batteryValid_)                    return;
     if (scene_ == SceneColor::OtaProgress) return;
     if (scene_ == SceneColor::StatsView)   return;
+    if (scene_ == SceneColor::DeadScreen)  return;
 
     // Parpadeo si batería crítica y no está cargando (patrón WiFi Connecting).
     if (batteryPercent_ <= 10 && !batteryCharging_ && (animFrame_ % 2) != 0) return;
@@ -743,20 +753,22 @@ void DisplayRendererColor::drawBatteryIcon_() {
     else                            fillColor = COL_RED;
 
     // Cuerpo + borne, blancos.
-    canvas_.drawRect(16, 22, 22, 12, COL_WHITE);
-    canvas_.fillRect(38, 25, 3, 6, COL_WHITE);
+    canvas_.drawRect(12, 22, 22, 12, COL_WHITE);
+    canvas_.fillRect(34, 25, 3, 6, COL_WHITE);
 
     // Relleno interior proporcional al percent (mínimo 1 px si percent>0).
     int16_t fillW = static_cast<int16_t>(batteryPercent_) * 18 / 100;
     if (fillW <= 0 && batteryPercent_ > 0) fillW = 1;
     if (fillW > 0) {
-        canvas_.fillRect(18, 24, fillW, 8, fillColor);
+        canvas_.fillRect(14, 24, fillW, 8, fillColor);
     }
 
     // Rayo de carga: 2 triángulos amarillos superpuestos formando un zigzag.
+    // Vértices con y<=32 — el borde inferior del cuerpo (drawRect) ocupa la
+    // fila y=33; antes el segundo triángulo llegaba a y=33 y pintaba encima.
     if (batteryCharging_) {
-        canvas_.fillTriangle(27, 23, 22, 29, 27, 29, COL_YELLOW);
-        canvas_.fillTriangle(25, 26, 25, 33, 30, 26, COL_YELLOW);
+        canvas_.fillTriangle(23, 23, 18, 29, 23, 29, COL_YELLOW);
+        canvas_.fillTriangle(21, 26, 21, 32, 26, 26, COL_YELLOW);
     }
 }
 
