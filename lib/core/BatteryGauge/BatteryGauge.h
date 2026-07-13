@@ -119,8 +119,14 @@ public:
     // clamp fuera de rango. Pura función de mV → %, sin estado.
     static uint8_t percentFromMv(uint16_t mv);
 
-private:
+public:
+    // Capacidad física del ring de muestras — expuesta para que el ctor pueda
+    // clampar samplesToValid contra ella (ver BatteryGauge(const Config&) en el
+    // .cpp): un samplesToValid > kRingCapacity haría la validez inalcanzable en
+    // silencio, porque ringCount_ nunca puede superar kRingCapacity.
     static constexpr uint8_t kRingCapacity = 8;
+
+private:
 
     Config config_;
 
@@ -141,6 +147,17 @@ private:
     bool     slopeWindowStarted_ = false;
     uint32_t slopeWindowStartMs_ = 0;
     uint16_t slopeWindowMinMv_   = 0;
+    // slopeWindowSawRise_: true si la ventana ACTUAL (aún abierta) ya detectó
+    // en alguna muestra una subida >= riseDeltaMv. Se usa solo para decidir,
+    // al expirar la ventana, si chargingBySlope_ debe apagarse (ver .cpp).
+    bool     slopeWindowSawRise_ = false;
+    // chargingBySlope_ es el estado PERSISTENTE de la heurística de pendiente —
+    // a diferencia de una ventana "tumbling" que se recalcula desde cero en cada
+    // rotación, este flag sobrevive a la rotación de ventana y solo se apaga si
+    // una ventana completa transcurre sin ver ninguna subida (ver updateCharging_
+    // en el .cpp para el porqué: evita que el rayo parpadee ~50s en cada frontera
+    // de los 10 min de slopeWindowMs durante una carga lenta y continua).
+    bool     chargingBySlope_ = false;
     bool     charging_ = false;
 
     // --- Fusión con pin externo ---
@@ -160,4 +177,11 @@ private:
     void updateValidityGate_(uint16_t mv, bool plausible);
     void updateDisplayedPercent_();
     void updateCharging_(uint16_t mv, uint32_t nowMs);
+
+    // Resetea todo el estado de la heurística de carga (umbral sostenido +
+    // pendiente) y el `charging_` publicado. Se llama al PERDER validez —
+    // ver comentario en updateValidityGate_ (.cpp) sobre por qué es necesario:
+    // sin esto, `charging` podía quedar en true (obsoleto) mientras
+    // valid==false, violando el contrato "charging siempre false si !valid".
+    void resetChargingState_();
 };
