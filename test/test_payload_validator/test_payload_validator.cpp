@@ -57,15 +57,13 @@ void test_validate_amount_rejects_negative() {
 
 // =============================================================================
 // 5. validate_action_name_known
-// Los 7 nombres de acción conocidos deben retornar Ok.
+// Los 6 nombres de acción conocidos deben retornar Ok.
 // =============================================================================
 void test_validate_action_name_known() {
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::Ok,
                       PayloadValidator::validateActionName("feed"));
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::Ok,
                       PayloadValidator::validateActionName("play"));
-    TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::Ok,
-                      PayloadValidator::validateActionName("heal"));
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::Ok,
                       PayloadValidator::validateActionName("clean"));
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::Ok,
@@ -83,6 +81,8 @@ void test_validate_action_name_known() {
 void test_validate_action_name_unknown() {
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,
                       PayloadValidator::validateActionName("foo"));
+    TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,
+                      PayloadValidator::validateActionName("heal"));
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,
                       PayloadValidator::validateActionName("reset"));
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,

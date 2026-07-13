@@ -324,7 +324,7 @@ static void drawXBMx2(U8G2* u8g2, int x, int y, int w, int h,
 // -----------------------------------------------------------------------------
 // drawXBMx4 — pinta un sprite XBM escalado x4 (cada pixel → cuadrado 4×4).
 // Usado para los frames de animación de acciones (16×16 → 64×64) que sustituyen
-// al sprite del personaje durante la ejecución de Play/Clean/Discipline/Heal.
+// al sprite del personaje durante la ejecución de Play/Clean/Discipline.
 // -----------------------------------------------------------------------------
 static void drawXBMx4(U8G2* u8g2, int x, int y, int w, int h,
                        const uint8_t* bitmap) {
@@ -348,7 +348,6 @@ static uint8_t actionAnimFrameCount(ActionKind action) {
         case ActionKind::Play:       return 4;
         case ActionKind::Clean:      return 2;
         case ActionKind::Discipline: return 2;
-        case ActionKind::Heal:       return 2;
         default:                     return 0;
     }
 }
@@ -371,8 +370,6 @@ static const uint8_t* actionAnimFrame(ActionKind action, uint8_t frameIdx) {
             return (frameIdx % 2) ? kSpriteActionClean1 : kSpriteActionClean0;
         case ActionKind::Discipline:
             return (frameIdx % 2) ? kSpriteActionDiscipline1 : kSpriteActionDiscipline0;
-        case ActionKind::Heal:
-            return (frameIdx % 2) ? kSpriteActionHeal1 : kSpriteActionHeal0;
         default:
             return nullptr;
     }
@@ -405,7 +402,7 @@ void DisplayRenderer::drawIdleMain_() {
     u8g2_->drawStr(0, 11, ageBuf);
 
     // ---- Personaje: sprite 64×64 centrado en y=32 ----
-    // Si hay animación de acción activa (Play/Clean/Disc/Heal), sustituimos el
+    // Si hay animación de acción activa (Play/Clean/Disc), sustituimos el
     // sprite del personaje por el frame de acción correspondiente escalado ×4
     // (16×16 → 64×64). Si no, render normal del personaje según mood.
     if (actionAnimRemainingMs_ > 0) {
@@ -632,7 +629,6 @@ static const char* actionLabel(ActionKind action, bool sleeping) {
         case ActionKind::Medicate:   return "MED";
         case ActionKind::Discipline: return "DISC";
         case ActionKind::Sleep:      return sleeping ? "WAKE" : "SLEEP";
-        case ActionKind::Heal:       return "HEAL";
         case ActionKind::Stats:      return "STATS";
     }
     return "?";
@@ -650,7 +646,6 @@ static const uint8_t* actionIcon(ActionKind action) {
         case ActionKind::Medicate:   return kSpriteActionMedicate;
         case ActionKind::Discipline: return kSpriteActionDiscipline;
         case ActionKind::Sleep:      return kSpriteActionSleep;
-        case ActionKind::Heal:       return kSpriteActionHeal;
         case ActionKind::Stats:      return kSpriteActionStats;
     }
     return nullptr;

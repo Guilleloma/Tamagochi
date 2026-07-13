@@ -40,7 +40,7 @@ var elSprite, elStage, elAge, elBadges,
     elLastUpdate, elOfflineBadge, elWifiIndicator, elBatteryIndicator,
     elToast,
     elBtnFeed, elBtnPlay, elBtnClean, elBtnMedicate,
-    elBtnDiscipline, elBtnSleep, elBtnHeal, elBtnReboot,
+    elBtnDiscipline, elBtnSleep, elBtnReboot,
     elSysFirmware, elSysUptime, elSysHeap, elSysRssi,
     elSysIp, elSysHostname, elSysMac,
     elSysBattStatus, elSysBattRaw, elSysBattFilteredRow, elSysBattFiltered;
@@ -71,7 +71,6 @@ function cacheDomRefs() {
   elBtnMedicate   = document.getElementById('btn-medicate');
   elBtnDiscipline = document.getElementById('btn-discipline');
   elBtnSleep      = document.getElementById('btn-sleep');
-  elBtnHeal       = document.getElementById('btn-heal');
   elBtnReboot     = document.getElementById('btn-reboot');
   elSysIp         = document.getElementById('sys-ip');
   elSysHostname   = document.getElementById('sys-hostname');
@@ -398,7 +397,6 @@ function wireButtons() {
   elBtnClean.addEventListener('click',      function() { doAction('/api/v1/clean',      {}); });
   elBtnMedicate.addEventListener('click',   function() { doAction('/api/v1/medicate',   {}); });
   elBtnDiscipline.addEventListener('click', function() { doAction('/api/v1/discipline', { amount: 10 }); });
-  elBtnHeal.addEventListener('click',       function() { doAction('/api/v1/heal',       { amount: 20 }); });
   elBtnSleep.addEventListener('click', function() {
     doAction('/api/v1/sleep', { value: !(state && state.isSleeping) });
   });

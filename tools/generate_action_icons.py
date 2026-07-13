@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Genera 8 PNGs 16x16 monocromos para los iconos del HUD inferior de IdleMain.
+Genera 7 PNGs 16x16 monocromos para los iconos del HUD inferior de IdleMain.
 
 Convencion del proyecto (ver tools/png_to_xbm.py):
     PNG fondo BLANCO + silueta NEGRA. La silueta se mapea a bit=1 (pixel
@@ -13,7 +13,6 @@ Output:
     assets/sprites/action_medicate.png
     assets/sprites/action_discipline.png
     assets/sprites/action_sleep.png
-    assets/sprites/action_heal.png
     assets/sprites/action_stats.png
 
 Tras ejecutarlo:
@@ -141,25 +140,6 @@ ICONS: dict[str, list[str]] = {
         "  ############  ",
         "  ############  ",
         "                ",
-        "                ",
-    ],
-    # Corazon clasico pixel-art.
-    "action_heal": [
-        "                ",
-        "                ",
-        "  ###     ###   ",
-        " #####   #####  ",
-        "############### ",
-        "############### ",
-        "############### ",
-        "############### ",
-        " ############## ",
-        "  ############  ",
-        "   ##########   ",
-        "    ########    ",
-        "     ######     ",
-        "      ####      ",
-        "       ##       ",
         "                ",
     ],
     # Tres barras verticales crecientes (grafico de stats).

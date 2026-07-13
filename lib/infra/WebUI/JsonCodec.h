@@ -68,7 +68,7 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
                      char* out, size_t outSize);
 
 // Serializa respuesta de acción: state completo + actionApplied.
-// actionValue se usa para "amount" (feed/play/heal/discipline) o ignorado (-1) para clean/medicate.
+// actionValue se usa para "amount" (feed/play/discipline) o ignorado (-1) para clean/medicate.
 // Para sleep, actionValue: 1=true, 0=false.
 size_t serializeActionResponse(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                                uint16_t deathCount, bool turbo, uint32_t uptimeMs,

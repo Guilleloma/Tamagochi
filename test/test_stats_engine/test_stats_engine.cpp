@@ -193,19 +193,6 @@ void test_play_ignored_when_sleeping() {
 }
 
 // =============================================================================
-// 10. test_heal_increases_health
-// applyHeal(20) sube health en 20 desde un valor bajo.
-// =============================================================================
-void test_heal_increases_health() {
-    Stats s = g_engine->stats();
-    s.health = 40;
-    g_engine->setStats(s);
-
-    g_engine->applyHeal(20);
-    TEST_ASSERT_EQUAL_UINT8(60, g_engine->stats().health);
-}
-
-// =============================================================================
 // 11. test_health_decays_only_when_hungry_or_sad
 // Con hunger<90 y happiness>10, health no decae.
 // Con hunger>=90 o happiness<=10, health sí decae.
@@ -634,7 +621,6 @@ int main() {
     RUN_TEST(test_play_clamps_at_100);
     RUN_TEST(test_play_also_increases_hunger);
     RUN_TEST(test_play_ignored_when_sleeping);
-    RUN_TEST(test_heal_increases_health);
     RUN_TEST(test_health_decays_only_when_hungry_or_sad);
     RUN_TEST(test_dirty_flag_set_after_tick);
     RUN_TEST(test_dirty_flag_consumed);

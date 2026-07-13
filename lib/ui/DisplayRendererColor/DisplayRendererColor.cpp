@@ -28,7 +28,7 @@
  *
  * 6. Iconos del menú de acciones (loadMenuIcons_):
  *    Feed→ic-apple, Play→ic-ball, Discipline→ic-disc, Sleep→ic-moon,
- *    Heal→ic-heal, Stats→ic-stats. Todos 24×24, 1 frame "idle".
+ *    Stats→ic-stats. Todos 24×24, 1 frame "idle".
  *    Clean y Medicate usan primitivas (drawMenuIconPrimitive_): sus assets
  *    anim-broom/anim-syringe son 48×48 — no caben en el HUD de 60 px junto
  *    al texto size 2 (que requiere 16 px + márgenes). Se dibujan como iconos
@@ -145,7 +145,6 @@ static const MenuIconSpec kMenuIconSpecs[] = {
     { ActionKind::Play,       "1bd2767f-f5dd-478f-b2bb-94e3d8c0f871" },  // ic-ball
     { ActionKind::Discipline, "7793e238-9159-465a-9965-5d8c83458a5a" },  // ic-disc
     { ActionKind::Sleep,      "2196aed8-2ebe-4dba-a7c6-58ea65a1ce97" },  // ic-moon
-    { ActionKind::Heal,       "db816c90-28ad-4ffe-80bc-832517c57b29" },  // ic-heal
     { ActionKind::Stats,      "03fc9466-8147-4c78-8c2b-b8932e355103" },  // ic-stats
 };
 static constexpr uint8_t kMenuIconSpecCount =
@@ -187,7 +186,6 @@ static const char* actionLabelColor(ActionKind action, bool sleeping) {
         case ActionKind::Medicate:   return "MED";
         case ActionKind::Discipline: return "DISC";
         case ActionKind::Sleep:      return sleeping ? "WAKE" : "SLEEP";
-        case ActionKind::Heal:       return "HEAL";
         case ActionKind::Stats:      return "STATS";
     }
     return "?";
@@ -306,7 +304,7 @@ bool DisplayRendererColor::loadSprites_() {
         allOk = false;
     }
     if (!sprites_.loadAnimation("4b24e182-adb8-486c-b4bd-7133927b7af6", "syringe", overlaySyringe_)) {
-        LOG_ERROR("Overlay: fallo cargando syringe (Heal/Medicate)");
+        LOG_ERROR("Overlay: fallo cargando syringe (Medicate)");
         allOk = false;
     }
     if (!sprites_.loadAnimation("29bf7686-c479-4176-ac8d-4e8460100d83", "ball",    overlayBall_)) {
@@ -320,13 +318,13 @@ bool DisplayRendererColor::loadSprites_() {
 }
 
 // =============================================================================
-// loadMenuIcons_ — precarga los 6 iconos de menú (24×24, 1 frame idle).
+// loadMenuIcons_ — precarga los 5 iconos de menú (24×24, 1 frame idle).
 //
 // Se llama desde begin() justo después de loadSprites_().
 // Si el LittleFS no está flasheado (dev sin assets) devuelve false; en ese
 // caso drawHudBottom_() cae a label solo — degradación suave.
 //
-// Uso de PSRAM por icono: 24×24×2 = 1 152 B. Total 6 iconos ≈ 7 KB.
+// Uso de PSRAM por icono: 24×24×2 = 1 152 B. Total 5 iconos ≈ 6 KB.
 // =============================================================================
 
 bool DisplayRendererColor::loadMenuIcons_() {
@@ -382,15 +380,13 @@ void DisplayRendererColor::setBattery(uint8_t percent, bool charging, bool valid
 // Canal 1 (mood del personaje):
 //   Feed       → Eat   (masticar — único que no tiene overlay)
 //   Play       → Happy
-//   Heal       → Happy
 //   Medicate   → Happy
 //   Discipline → Sad
 //   Clean      → Idle  (badge de caca ya desapareció por applyClean())
 //
 // Canal 2 (overlay encima del personaje):
 //   Clean      → broom   (escoba)
-//   Heal       → syringe (jeringa)
-//   Medicate   → syringe (jeringa — misma animación que Heal)
+//   Medicate   → syringe (jeringa)
 //   Play       → ball    (pelota)
 //   Feed       → sin overlay (la animación de comer es suficiente)
 //
@@ -409,10 +405,6 @@ void DisplayRendererColor::triggerActionAnimation(ActionKind action) {
         case ActionKind::Play:
             mood    = MoodColor::Happy;
             overlay = (overlayBall_.count > 0) ? &overlayBall_ : nullptr;
-            break;
-        case ActionKind::Heal:
-            mood    = MoodColor::Happy;
-            overlay = (overlaySyringe_.count > 0) ? &overlaySyringe_ : nullptr;
             break;
         case ActionKind::Medicate:
             mood    = MoodColor::Happy;
@@ -1062,7 +1054,7 @@ void DisplayRendererColor::drawSprite_() {
     // Posición por tipo de acción (elegida para resultar natural):
     //   broom   (Clean)           → pies del personaje, alineado al borde izq
     //                               del sprite: la escoba barre desde abajo-izq.
-    //   syringe (Heal/Medicate)   → costado derecho a media altura: el médico
+    //   syringe (Medicate)        → costado derecho a media altura: el médico
     //                               aplica la inyección en el brazo.
     //   ball    (Play)            → borde inferior-derecho: la pelota rebota
     //                               frente al personaje.

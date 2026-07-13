@@ -67,7 +67,7 @@ public:
     void triggerEvolveAnimation();               // Baby→Kid/Kid→Adult/Adult→Old: parpadeo 1200 ms
 
     // Sustituye al sprite del personaje en IdleMain por la animación de la acción
-    // ejecutada. Solo aplica a Play, Clean, Discipline, Heal — el resto no
+    // ejecutada. Solo aplica a Play, Clean, Discipline — el resto no
     // tienen frames asociados y la llamada es no-op.
     void triggerActionAnimation(ActionKind action);
 

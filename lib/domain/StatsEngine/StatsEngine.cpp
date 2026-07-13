@@ -28,7 +28,7 @@
 // 4. isSleeping paraliza hunger, happiness, discipline decay. Solo health regenera
 //    lentamente (+0.002 × dt/1000 por segundo).
 //
-// 5. Las acciones (feed/play/heal) resetean el acumulador del stat correspondiente
+// 5. Las acciones (feed/play) resetean el acumulador del stat correspondiente
 //    para evitar que una fracción acumulada se aplique inmediatamente en el siguiente
 //    tick y cause un doble descuento justo tras una acción del usuario.
 //
@@ -282,16 +282,6 @@ void StatsEngine::applyPlay(uint8_t amount) {
 }
 
 // -----------------------------------------------------------------------------
-// applyHeal
-// -----------------------------------------------------------------------------
-void StatsEngine::applyHeal(uint8_t amount) {
-    uint8_t prev = stats_.health;
-    stats_.health = clamp_(static_cast<int>(stats_.health) + amount);
-    healthAcc_ = 0.0f;
-    if (stats_.health != prev) dirty_ = true;
-}
-
-// -----------------------------------------------------------------------------
 // applyClean — resetea poopCount a 0
 // -----------------------------------------------------------------------------
 void StatsEngine::applyClean() {
@@ -379,7 +369,6 @@ bool StatsEngine::consumeDirtyFlag() {
 //   - Medicate:   isSick                 (applyMedicate es no-op si !sick)
 //   - Discipline: siempre                (sin precondición en dominio)
 //   - Sleep:      siempre                (toggle on/off — label dinámico en UI)
-//   - Heal:       health < 100           (applyHeal sería no-op a 100)
 //   - Stats:      siempre (último)       (no es acción real, abre StatsView)
 // -----------------------------------------------------------------------------
 uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) const {
@@ -393,8 +382,6 @@ uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) c
     // Discipline y Sleep son incondicionales — Sleep alterna en la UI según isSleeping.
     out[n++] = ActionKind::Discipline;
     out[n++] = ActionKind::Sleep;
-
-    if (stats_.health < 100)  { out[n++] = ActionKind::Heal; }
 
     // Stats siempre como última entrada — el HUD inferior la usa para abrir StatsView.
     out[n++] = ActionKind::Stats;

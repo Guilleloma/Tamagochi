@@ -345,20 +345,6 @@
       }
     },
     {
-      "id": "db816c90-28ad-4ffe-80bc-832517c57b29",
-      "folder": "ic-heal",
-      "w": 24,
-      "h": 24,
-      "animations": {
-        "idle": {
-          "fps": 8,
-          "frames": [
-            "idle/0.bin"
-          ]
-        }
-      }
-    },
-    {
       "id": "7793e238-9159-465a-9965-5d8c83458a5a",
       "folder": "ic-disc",
       "w": 24,
