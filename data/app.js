@@ -4,6 +4,18 @@ var POLL_INTERVAL_MS  = 3000;
 var BACKOFF_STEPS_MS  = [3000, 6000, 12000, 30000];
 var OFFLINE_THRESHOLD = 2;
 
+// Poll propio de /api/v1/info (panel "Sistema") — deliberadamente mas lento
+// que POLL_INTERVAL_MS porque es diagnostico, no estado de juego.
+//
+// RateLimiter (lib/infra/WebUI/RateLimiter.h) es un token-bucket POR IP
+// compartido entre TODOS los endpoints /api/v1/* (10 tokens, +1/600ms =
+// ~1.667 req/s en regimen sostenido). El poll de /state ya consume 1/3s =
+// 0.333 req/s. Sumando este poll a 10s (0.1 req/s) el total sostenido queda
+// en 0.433 req/s — un 26% del presupuesto del bucket, dejando de sobra los
+// ~1.23 req/s restantes para clics de acciones del usuario sin acercarse a
+// 429. No hizo falta subir a 15s.
+var SYSTEM_POLL_INTERVAL_MS = 10000;
+
 var STAGE_EMOJI = {
   Egg:   '\u{1F95A}',
   Baby:  '\u{1F476}',
@@ -18,6 +30,7 @@ var state = null;
 var lastUpdateTime = null;
 var consecutiveFailures = 0;
 var pollTimerId = null;
+var systemPollTimerId = null;
 
 // DOM refs
 var elSprite, elStage, elAge, elBadges,
@@ -27,7 +40,9 @@ var elSprite, elStage, elAge, elBadges,
     elLastUpdate, elOfflineBadge, elWifiIndicator, elBatteryIndicator,
     elToast,
     elBtnFeed, elBtnPlay, elBtnClean, elBtnMedicate,
-    elBtnDiscipline, elBtnSleep, elBtnHeal, elBtnReboot;
+    elBtnDiscipline, elBtnSleep, elBtnHeal, elBtnReboot,
+    elSysFirmware, elSysUptime, elSysHeap, elSysRssi,
+    elSysBattStatus, elSysBattRaw, elSysBattFilteredRow, elSysBattFiltered;
 
 function cacheDomRefs() {
   elSprite        = document.getElementById('pet-sprite');
@@ -57,6 +72,14 @@ function cacheDomRefs() {
   elBtnSleep      = document.getElementById('btn-sleep');
   elBtnHeal       = document.getElementById('btn-heal');
   elBtnReboot     = document.getElementById('btn-reboot');
+  elSysFirmware   = document.getElementById('sys-firmware');
+  elSysUptime     = document.getElementById('sys-uptime');
+  elSysHeap       = document.getElementById('sys-heap');
+  elSysRssi       = document.getElementById('sys-rssi');
+  elSysBattStatus       = document.getElementById('sys-batt-status');
+  elSysBattRaw          = document.getElementById('sys-batt-raw');
+  elSysBattFilteredRow  = document.getElementById('sys-batt-filtered-row');
+  elSysBattFiltered     = document.getElementById('sys-batt-filtered');
 }
 
 function formatAge(min) {
@@ -141,6 +164,77 @@ function renderBattery(data) {
   elBatteryIndicator.hidden = false;
 }
 
+// Panel "Sistema" — telemetria de GET /api/v1/info (firmware, red, RAM,
+// diagnostico de bateria en crudo). Ver renderSystem()/fetchInfo() abajo.
+
+// Firmware se codifica como 0xMMmm (ver include/config.h FIRMWARE_VERSION) —
+// se muestra en hex de 4 digitos para que coincida con lo que se ve en el
+// codigo/monitor serie (p.ej. 0x0300), no como decimal sin contexto.
+function formatFirmwareVersion(v) {
+  var hex = (v || 0).toString(16).toUpperCase();
+  while (hex.length < 4) hex = '0' + hex;
+  return '0x' + hex;
+}
+
+function formatUptime(ms) {
+  var totalMinutes = Math.floor((ms || 0) / 60000);
+  var h = Math.floor(totalMinutes / 60);
+  var m = totalMinutes % 60;
+  return h > 0 ? (h + 'h ' + m + 'm') : (m + 'm');
+}
+
+// Umbrales pedidos: >-60 buena / -60..-75 media / <-75 mala. El limite
+// superior de cada tramo es estrictamente "mayor que" (p.ej. -60 exacto cae
+// en "media", -75 exacto cae en "mala") para que los tramos no se solapen.
+function wifiQualityLabel(rssi) {
+  if (rssi > -60) return 'buena';
+  if (rssi > -75) return 'media';
+  return 'mala';
+}
+
+function renderSystem(data) {
+  if (!data) return;
+
+  elSysFirmware.textContent = formatFirmwareVersion(data.firmwareVersion);
+  elSysUptime.textContent   = formatUptime(data.uptimeMs);
+  elSysHeap.textContent     = Math.round((data.freeHeap || 0) / 1024) + ' KB';
+
+  var rssi = data.wifiRssi;
+  elSysRssi.textContent = (rssi === undefined || rssi === null)
+    ? '?'
+    : (rssi + ' dBm (' + wifiQualityLabel(rssi) + ')');
+
+  renderSystemBattery(data);
+}
+
+// Estado del sensor — pensado para diagnosticar una soldadura reciente del
+// divisor de VBAT (ver docs/hardware-battery.md):
+//   "OK"              -> batteryValid true, gate ya confirmado.
+//   "Detectando (N/8)" -> raw dentro del rango plausible del BatteryGauge
+//                         (2800-4350mV, ver BatteryGauge.h) pero el gate aun
+//                         no acumulo las 8 muestras consecutivas requeridas.
+//   "No detectado"    -> raw fuera de ese rango (pin flotante, nada soldado,
+//                         o fuera de rango por otra causa de hardware).
+function renderSystemBattery(data) {
+  var raw = data.batteryRawMillivolts || 0;
+  elSysBattRaw.textContent = raw + ' mV';
+
+  if (data.batteryValid) {
+    elSysBattStatus.textContent = 'OK';
+    elSysBattFilteredRow.hidden = false;
+    elSysBattFiltered.textContent =
+      (data.batteryPercent || 0) + '% / ' + (data.batteryMillivolts || 0) + ' mV' +
+      (data.batteryCharging ? ' (cargando)' : '');
+    return;
+  }
+
+  elSysBattFilteredRow.hidden = true;
+  var plausible = raw >= 2800 && raw <= 4350;  // ver minPlausibleMv/maxPlausibleMv
+  elSysBattStatus.textContent = plausible
+    ? ('Detectando... (' + (data.batteryGateProgress || 0) + '/8)')
+    : 'No detectado';
+}
+
 function updateAgeLabel() {
   if (!lastUpdateTime) { elLastUpdate.textContent = 'Sin datos aun'; return; }
   var s = Math.round((Date.now() - lastUpdateTime) / 1000);
@@ -183,6 +277,31 @@ function fetchState() {
       handlePollError();
     })
     .catch(handlePollError);
+}
+
+// Poll independiente de /api/v1/info para el panel "Sistema". Deliberadamente
+// simple (sin backoff ni badge de Offline: ese rol ya lo cumple fetchState())
+// — si falla, reintenta al mismo intervalo fijo; es un panel de diagnostico
+// secundario, no el indicador principal de conectividad.
+function scheduleSystemPoll(delayMs) {
+  if (systemPollTimerId !== null) clearTimeout(systemPollTimerId);
+  systemPollTimerId = setTimeout(function() { systemPollTimerId = null; fetchInfo(); }, delayMs);
+}
+
+function stopSystemPolling() {
+  if (systemPollTimerId !== null) { clearTimeout(systemPollTimerId); systemPollTimerId = null; }
+}
+
+function fetchInfo() {
+  if (document.visibilityState !== 'visible') return;
+  fetch('/api/v1/info', { method: 'GET', credentials: 'same-origin' })
+    .then(function(res) {
+      if (res.ok) {
+        return res.json().then(function(j) { renderSystem(j.data); scheduleSystemPoll(SYSTEM_POLL_INTERVAL_MS); });
+      }
+      scheduleSystemPoll(SYSTEM_POLL_INTERVAL_MS);
+    })
+    .catch(function() { scheduleSystemPoll(SYSTEM_POLL_INTERVAL_MS); });
 }
 
 // Acciones
@@ -229,9 +348,12 @@ async function doReboot() {
       // El dispositivo tarda unos segundos en volver a estar disponible tras
       // el reinicio — se detiene el polling actual y se reintenta mas tarde
       // en vez de dejar que el backoff normal (pensado para caidas breves de
-      // red) se dispare de inmediato con el primer fallo.
+      // red) se dispare de inmediato con el primer fallo. Mismo tratamiento
+      // para el poll de /info del panel Sistema.
       stopPolling();
       schedulePoll(5000);
+      stopSystemPolling();
+      scheduleSystemPoll(5000);
     } else if (res.status === 429) {
       flashFeedback('Demasiado rapido', 'warn');
     } else if (res.status !== 401) {
@@ -275,8 +397,13 @@ function wireButtons() {
 // Visibility
 
 document.addEventListener('visibilitychange', function() {
-  if (document.visibilityState === 'visible') { stopPolling(); fetchState(); }
-  else stopPolling();
+  if (document.visibilityState === 'visible') {
+    stopPolling(); fetchState();
+    stopSystemPolling(); fetchInfo();
+  } else {
+    stopPolling();
+    stopSystemPolling();
+  }
 });
 
 // Init
@@ -286,4 +413,5 @@ document.addEventListener('DOMContentLoaded', function() {
   wireButtons();
   setInterval(updateAgeLabel, 1000);
   fetchState();
+  fetchInfo();
 });

@@ -155,7 +155,7 @@ void test_serialize_state_below_buffer_limit() {
 // =============================================================================
 void test_serialize_info_includes_required_fields() {
     size_t written = JsonCodec::serializeInfo(0x0300u, 142567u, 38240u, -54,
-                                              makeValidBattery(), g_buf, sizeof(g_buf));
+                                              makeValidBattery(), 4120u, 8u, g_buf, sizeof(g_buf));
 
     TEST_ASSERT_GREATER_THAN(0u, written);
 
@@ -177,11 +177,12 @@ void test_serialize_info_includes_required_fields() {
 
 // =============================================================================
 // 5b. serialize_info_battery_fields_valid
-// serializeInfo() con snapshot válido expone percent/charging/valid/millivolts.
+// serializeInfo() con snapshot válido expone percent/charging/valid/millivolts
+// + batteryRawMillivolts/batteryGateProgress (diagnóstico, ver JsonCodec.h).
 // =============================================================================
 void test_serialize_info_battery_fields_valid() {
     size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
-                                              makeValidBattery(), g_buf, sizeof(g_buf));
+                                              makeValidBattery(), 4120u, 8u, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -193,17 +194,23 @@ void test_serialize_info_battery_fields_valid() {
     TEST_ASSERT_EQUAL_UINT8(87,   data["batteryPercent"].as<uint8_t>());
     TEST_ASSERT_TRUE(data["batteryCharging"].as<bool>());
     TEST_ASSERT_EQUAL_UINT16(4120, data["batteryMillivolts"].as<uint16_t>());
+
+    TEST_ASSERT_FALSE(data["batteryRawMillivolts"].isNull());
+    TEST_ASSERT_FALSE(data["batteryGateProgress"].isNull());
+    TEST_ASSERT_EQUAL_UINT16(4120, data["batteryRawMillivolts"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_UINT8(8,     data["batteryGateProgress"].as<uint8_t>());
 }
 
 // =============================================================================
 // 5c. serialize_info_battery_fields_unknown
 // serializeInfo() con snapshot Unknown (hardware sin soldar) → batteryValid
 // false y el resto de campos en su valor neutro, pero SIEMPRE presentes
-// (backward compatible, api-conventions.md).
+// (backward compatible, api-conventions.md). Caso "nunca hubo lectura
+// plausible" (raw=0, gateProgress=0 — p.ej. pin flotante, sin divisor).
 // =============================================================================
 void test_serialize_info_battery_fields_unknown() {
     size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
-                                              makeUnknownBattery(), g_buf, sizeof(g_buf));
+                                              makeUnknownBattery(), 0u, 0u, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -215,6 +222,34 @@ void test_serialize_info_battery_fields_unknown() {
     TEST_ASSERT_EQUAL_UINT8(0, data["batteryPercent"].as<uint8_t>());
     TEST_ASSERT_FALSE(data["batteryCharging"].as<bool>());
     TEST_ASSERT_EQUAL_UINT16(0, data["batteryMillivolts"].as<uint16_t>());
+
+    TEST_ASSERT_FALSE(data["batteryRawMillivolts"].isNull());
+    TEST_ASSERT_FALSE(data["batteryGateProgress"].isNull());
+    TEST_ASSERT_EQUAL_UINT16(0, data["batteryRawMillivolts"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_UINT8(0,  data["batteryGateProgress"].as<uint8_t>());
+}
+
+// =============================================================================
+// 5c2. serialize_info_battery_raw_fields_present_while_gate_in_progress
+// El caso que motiva estos campos (ver bug report): el divisor está soldado
+// y el pin ADC lee un valor plausible (3550mV), pero el gate de validez aún
+// no acumuló las 8 muestras consecutivas requeridas → batteryValid sigue
+// false. Sin batteryRawMillivolts/batteryGateProgress esto es indistinguible
+// de "no hay hardware conectado" (raw=0) desde fuera del BatteryGauge — con
+// ellos, se ve claramente "5/8, leyendo 3550mV" (a punto de validar).
+// =============================================================================
+void test_serialize_info_battery_raw_fields_present_while_gate_in_progress() {
+    size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
+                                              makeUnknownBattery(), 3550u, 5u, g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    deserializeJson(doc, g_buf, written);
+    JsonObject data = doc["data"];
+
+    TEST_ASSERT_FALSE(data["batteryValid"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT16(3550, data["batteryRawMillivolts"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_UINT8(5,     data["batteryGateProgress"].as<uint8_t>());
 }
 
 // =============================================================================
@@ -431,6 +466,7 @@ int main() {
     RUN_TEST(test_serialize_info_includes_required_fields);
     RUN_TEST(test_serialize_info_battery_fields_valid);
     RUN_TEST(test_serialize_info_battery_fields_unknown);
+    RUN_TEST(test_serialize_info_battery_raw_fields_present_while_gate_in_progress);
     RUN_TEST(test_serialize_state_battery_fields_unknown);
     RUN_TEST(test_serialize_action_response_battery_fields_valid);
     RUN_TEST(test_serialize_action_response_battery_fields_unknown);

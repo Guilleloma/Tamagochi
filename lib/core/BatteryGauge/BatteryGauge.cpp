@@ -27,6 +27,9 @@ BatteryGauge::BatteryGauge(const Config& config)
 
 // -----------------------------------------------------------------------------
 // addSample — punto de entrada único. Orden de las etapas (importa):
+//   0. Registrar la lectura cruda SIN gatear (lastRawMv_) — SIEMPRE, antes de
+//      cualquier gate. Es diagnóstico puro (ver lastRawMillivolts() en el .h);
+//      no participa en ninguna decisión de valid_/percent_/charging_.
 //   1. Gate de validez (puede hacer Unknown -> valid o valid -> Unknown).
 //   2. Filtro + curva + histéresis de % (solo tiene efecto si valid_).
 //   3. Heurística de carga + fusión con pin (solo con muestra plausible Y
@@ -37,6 +40,8 @@ BatteryGauge::BatteryGauge(const Config& config)
 //   4. Comparar contra la última tupla publicada y devolver si cambió.
 // -----------------------------------------------------------------------------
 bool BatteryGauge::addSample(uint16_t batteryMv, uint32_t nowMs) {
+    lastRawMv_ = batteryMv;
+
     const bool plausible = (batteryMv >= config_.minPlausibleMv)
                          && (batteryMv <= config_.maxPlausibleMv);
 

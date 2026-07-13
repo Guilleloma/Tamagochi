@@ -144,4 +144,11 @@ private:
     // es nullptr (ESP8266, o ESP32 con BATTERY_SENSE_ENABLED=0). Centraliza el
     // null-check en un solo sitio en vez de repetirlo en cada handler.
     BatterySnapshot batterySnapshot_() const;
+
+    // Diagnóstico de batería sin gatear — 0 si battery_ es nullptr. Usados
+    // solo en handleGetInfo_ (ver JsonCodec::serializeInfo). Mismo criterio de
+    // "0 == sin sensor" que batterySnapshot_(), pero estos dos SIEMPRE reflejan
+    // la lectura real (no se gatean por valid_).
+    uint16_t batteryRawMillivolts_() const;
+    uint8_t  batteryGateProgress_() const;
 };
