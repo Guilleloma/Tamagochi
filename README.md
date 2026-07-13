@@ -178,6 +178,7 @@ Una vez la placa esté en la WiFi y `data/*` esté subido al filesystem:
 | `POST /api/v1/{feed,play,heal,discipline}` | Body `{"amount": 1..100}` |
 | `POST /api/v1/{clean,medicate}` | Sin body |
 | `POST /api/v1/sleep` | Body `{"value": true}` o `{"value": false}` |
+| `POST /api/v1/reboot` | Sin body. Persiste el estado y reinicia el dispositivo (~750ms después de responder) |
 
 **Autenticación:** HTTP Basic Auth con `WEB_AUTH_USER:WEB_AUTH_PASSWORD` de `secrets.h`. Todos los endpoints `/api/v1/*` la requieren.
 

@@ -263,6 +263,27 @@ body {
   color: var(--muted);
 }
 
+/* Boton de sistema (reboot): discreto, empujado a la derecha del footer.
+   Tamaño reducido respecto a .btn — no compite visualmente con las acciones
+   de juego. Ambar/rojo en hover como aviso de que es una accion disruptiva. */
+.btn--reboot {
+  margin-left: auto;
+  min-height: unset;
+  padding: 4px 10px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--muted);
+}
+
+.btn--reboot:hover,
+.btn--reboot:focus-visible {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
 /* ============================================================
    Toast de feedback
    ============================================================ */

@@ -17,6 +17,14 @@
 //   POST /api/v1/clean        → sin body                publica ActionCleanRequested
 //   POST /api/v1/medicate     → sin body                publica ActionMedicateRequested
 //
+// Endpoint de sistema:
+//   POST /api/v1/reboot       → sin body. Persiste el estado (síncrono, ANTES
+//                               de responder) y reinicia el ESP ~750ms después
+//                               de enviar la respuesta 200 (ver rebootAtMs_ y
+//                               loop() — ESP.restart() nunca se llama dentro
+//                               del handler porque cortaría la respuesta HTTP,
+//                               que corre en la task async_tcp).
+//
 // Patrón de acción: WebUI NO llama directo a StatsEngine. Publica evento al bus
 // (síncrono); main.cpp suscribe handlers que aplican la acción y persisten.
 // Como el bus es síncrono, cuando publish() retorna, las stats ya están actualizadas.
@@ -69,7 +77,8 @@ public:
 
     bool isRunning() const { return running_; }
 
-    // Hook para el loop principal. AsyncWebServer es event-driven — por ahora no-op.
+    // Hook para el loop principal. AsyncWebServer es event-driven — se usa
+    // para el reinicio diferido tras POST /api/v1/reboot (ver rebootAtMs_).
     void loop();
 
 private:
@@ -81,6 +90,14 @@ private:
     AsyncWebServer        server_;
     RateLimiter        rateLimiter_;
     bool               running_ = false;
+
+    // Instante (millis()) en el que loop() debe llamar a ESP.restart(), o 0 si
+    // no hay reinicio programado. Se fija en handlePostReboot_ tras responder
+    // 200 al cliente — NUNCA se llama ESP.restart() dentro del handler HTTP
+    // (correría en la task async_tcp y cortaría la propia respuesta a mitad
+    // de envío). 0 es seguro como centinela de "sin programar": millis()==0
+    // solo ocurre en el primer instante de boot, muy antes de que WebUI exista.
+    uint32_t rebootAtMs_ = 0;
 
     // Monta las rutas en el servidor.
     void mountRoutes_();
@@ -100,6 +117,10 @@ private:
     void handlePostSleep_(AsyncWebServerRequest* req, JsonVariant& json);
     void handlePostClean_(AsyncWebServerRequest* req);
     void handlePostMedicate_(AsyncWebServerRequest* req);
+
+    // POST /api/v1/reboot — sin body. Persiste (síncrono) y programa el
+    // reinicio para ~750ms después de responder (ver rebootAtMs_ y loop()).
+    void handlePostReboot_(AsyncWebServerRequest* req);
 
     // Serializa y envía la respuesta estándar de acción:
     //   { "data": <state completo>, "meta": {...}, "actionApplied": {"type":..., "amount":...} }
