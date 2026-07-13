@@ -1,6 +1,8 @@
 #pragma once
 // =============================================================================
-// OTAManager — Actualización Over-The-Air vía ArduinoOTA (Puerto 8266).
+// OTAManager — Actualización Over-The-Air vía ArduinoOTA. Puerto por defecto
+// de cada plataforma (NO fijado explícitamente — ver comentario en begin() en
+// el .cpp): ESP32→3232, ESP8266→8266.
 //
 // Activar SOLO cuando WiFi esté Connected. Si OTA_PASSWORD está vacío en
 // secrets.h, begin() no arranca el servidor OTA y emite LOG_WARN.
@@ -17,7 +19,9 @@
 //
 // Coste de loop(): < 5 µs sin actualización en curso (ArduinoOTA.handle()).
 //
-// Dependencias externas: ArduinoOTA.h, ESP8266mDNS.h (Arduino-only).
+// Dependencias externas: ArduinoOTA.h (Arduino-only; arrastra su propia
+// dependencia de mDNS por plataforma — ESPmDNS.h en ESP32, ESP8266mDNS.h en
+// ESP8266 — no se incluye directamente aquí).
 // No testeable en env:native.
 // =============================================================================
 

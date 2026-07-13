@@ -45,7 +45,13 @@ void OTAManager::begin() {
 
     ArduinoOTA.setHostname(OTA_HOSTNAME);
     ArduinoOTA.setPassword(OTA_PASSWORD);  // hashea a MD5 internamente
-    ArduinoOTA.setPort(8266);
+    // NO fijar setPort() — bug de porting: este código viene de la Fase 2
+    // ESP8266 con `setPort(8266)` hardcodeado. Al portar a ESP32-S3 (Fase 5)
+    // ese valor quedó arrastrado, pero espota/ArduinoOTA en ESP32 sondea por
+    // defecto el puerto 3232, no 8266 — el dispositivo escuchaba en el puerto
+    // equivocado y el flasheo remoto nunca recibía respuesta. Dejar setPort()
+    // sin llamar hace que cada plataforma use su propio default correcto:
+    // ESP32→3232, ESP8266→8266 (así env:esp12e_ota sigue funcionando).
 
     // Callbacks: function pointers estáticos que delegan en instance_->bus_.
     ArduinoOTA.onStart(onStart_);
@@ -56,7 +62,7 @@ void OTAManager::begin() {
     ArduinoOTA.begin();
     ready_ = true;
 
-    LOG_INFO("[ota] ready hostname=%s.local port=8266", OTA_HOSTNAME);
+    LOG_INFO("[ota] ready hostname=%s.local", OTA_HOSTNAME);
 }
 
 // -----------------------------------------------------------------------------

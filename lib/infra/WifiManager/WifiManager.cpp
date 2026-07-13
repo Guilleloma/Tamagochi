@@ -56,9 +56,16 @@ void WifiManager::begin() {
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
     // setSleep(false): sin esto el modem duerme entre DTIM beacons y el router
-    // (Xiaomi, DTIM alto) tira los UDP unicast entrantes — la invitación de
-    // ArduinoOTA (puerto 3232) se pierde casi siempre aunque HTTP/mDNS funcionen.
-    // Coste: ~20-40 mA extra de media. Diagnosticado en el despliegue de Fase 5.
+    // (Xiaomi, DTIM alto) puede retrasar/perder paquetes entrantes en general
+    // (HTTP, mDNS, UDP), afectando la latencia y estabilidad de la conexión.
+    // Coste: ~20-40 mA extra de media.
+    //
+    // CORRECCIÓN (ver commit fix/ota-port-esp32): esto NO fue la causa del OTA
+    // roto en ESP32-S3. La causa real era `ArduinoOTA.setPort(8266)` hardcodeado
+    // en OTAManager.cpp — puerto del ESP8266 arrastrado en el porting — mientras
+    // espota/ArduinoOTA en ESP32 sondea por defecto el puerto 3232 (ver
+    // OTAManager.cpp). setSleep(false) se mantiene porque sigue siendo una
+    // mejora genuina de latencia/estabilidad de red, no como "fix" de OTA.
     WiFi.setSleep(false);
     WiFi.hostname(OTA_HOSTNAME);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
