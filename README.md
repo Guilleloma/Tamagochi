@@ -7,7 +7,7 @@ Este repositorio contiene **dos variantes de firmware** para el mismo Tamagotchi
 | **ESP8266 mono** (original) | ideaspark ESP8266 0.96" OLED V3.2 | SSD1306 128×64 mono | `src/main.cpp` |
 | **ESP32-S3 color** (Furbygotchi) | Waveshare ESP32-S3 Zero | JD9853 240×296 IPS TFT | `src/main_esp32.cpp` |
 
-El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 108 tests `native` aplican a las dos.
+El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 171 tests `native` aplican a las dos.
 
 ---
 
@@ -45,30 +45,38 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 
 ---
 
-## Estado actual — Fase 3 completada
+## Estado actual — Fase 3 completada + hitos posteriores
 
 | Capa | Feature | Estado |
 |---|---|---|
 | **core** | Logger con niveles | ✅ |
 | **core** | EventBus pub/sub (sin allocación dinámica) | ✅ |
-| **domain** | StatsEngine — 6 stats con decay + 7 acciones | ✅ |
+| **core** | BatteryGauge — filtrado + gate de plausibilidad (host-testable) | ✅ |
+| **core** | MessageBox — canal SPSC + sanitizado UTF-8→ASCII | ✅ |
+| **domain** | StatsEngine — 6 stats con decay + 6 acciones | ✅ |
 | **domain** | LifeFSM — 6 etapas + transiciones automáticas + muerte/resurrección | ✅ |
 | **domain** | Persistence LittleFS rotativa + CRC32 + migrate v1→v2 | ✅ |
 | **ui** | InputHandler con OneButton calibrado | ✅ |
-| **ui** | DisplayRenderer multi-sprite por etapa + DeadScreen | ✅ |
+| **ui** | DisplayRenderer (mono) / DisplayRendererColor (ESP32-S3) | ✅ |
 | **ui** | Overlays asíncronos SICK / SLEEP_Z / HUNGRY / POOP | ✅ |
 | **ui** | Animaciones IDLE / HAPPY / SAD / EAT one-shot | ✅ |
+| **ui** | BootSplash — pantalla de arranque | ✅ |
+| **ui** | MarqueeLogic — scroll de texto (lógica pura) + MessageView | ✅ |
 | **infra** | WifiManager STA no bloqueante + reconexión | ✅ |
 | **infra** | OTAManager (ArduinoOTA + password) | ✅ |
-| **infra** | WebUI — AsyncWebServer + 9 endpoints REST + mDNS | ✅ |
+| **infra** | WebUI — AsyncWebServer + 10 endpoints REST + mDNS | ✅ |
+| **infra** | `POST /api/v1/message` — mensaje del padre (marquee) | ✅ |
+| **infra** | `POST /api/v1/reboot` — reinicio remoto con persist previo | ✅ |
+| **infra** | `GET /api/v1/info` — identidad de red (IP/hostname/MAC) + ADC crudo | ✅ |
 | **infra** | RateLimiter (token bucket por IP) + AuthChecker (HTTP Basic) | ✅ |
 | **ui** | Frontend HTML/CSS/JS mobile-first servido desde LittleFS | ✅ |
+| **ui** | Dashboard: panel Sistema (diagnóstico) + panel Mensaje + botón Reiniciar | ✅ |
 | **build** | TURBO_MODE ×60 (env `esp12e_turbo`) para QA | ✅ |
 | **build** | OTA upload via WiFi (env `esp12e_ota`) | ✅ |
-| **build** | Tests host-native — **108 tests pasando** | ✅ |
-| **build** | Script integración HTTP — **27 tests pasando** | ✅ |
-| **diferido** | Sprites EGG/KID/ADULT/OLD/DEAD reales | ⏸️ usando BABY como placeholder |
-| **diferido** | Gestión de energía (auto-dim, sleep) | ⏸️ Fase 4 |
+| **build** | Tests host-native — **171 tests pasando** | ✅ |
+| **build** | Script integración HTTP — **26 tests pasando** | ✅ |
+| **diferido** | Sprites EGG/KID/ADULT/OLD/DEAD reales (mono) | ⏸️ usando BABY como placeholder |
+| **diferido** | Gestión de energía (auto-dim, sleep) | ⏸️ Fase 5 |
 
 ---
 
@@ -95,7 +103,7 @@ OTA_PASSWORD="tu_password" pio run -e esp12e_ota -t upload
 # Monitor serie (115200 baud)
 pio device monitor
 
-# Tests host-native (no necesita la placa)
+# Tests host-native (no necesita la placa) — 171/171
 pio test -e native
 ```
 
@@ -129,31 +137,42 @@ Tamagotchi/
 ├── lib/
 │   ├── core/
 │   │   ├── Logger/            ← macros LOG_INFO/WARN/ERROR/DEBUG
-│   │   └── EventBus/          ← pub/sub síncrono, function pointers planos
+│   │   ├── EventBus/          ← pub/sub síncrono, function pointers planos
+│   │   ├── BatteryGauge/      ← filtrado ADC + gate de plausibilidad (puro)
+│   │   └── MessageBox/        ← canal SPSC + sanitizado UTF-8→ASCII del marquee
 │   ├── domain/                ← lógica pura, testeable host-native
-│   │   ├── StatsEngine/       ← 6 stats + decay + 7 acciones + RNG inyectable
+│   │   ├── StatsEngine/       ← 6 stats + decay + 6 acciones + RNG inyectable
 │   │   ├── LifeFSM/           ← 6 etapas + transiciones automáticas
 │   │   └── Persistence/       ← LittleFS rotativo + CRC32 + IStorage + migrate
 │   ├── infra/
 │   │   ├── WifiManager/       ← STA no bloqueante + reconexión con backoff
-│   │   ├── OTAManager/        ← ArduinoOTA con password (port 8266)
+│   │   ├── OTAManager/        ← ArduinoOTA con password
 │   │   └── WebUI/             ← AsyncWebServer + JsonCodec + RateLimiter + AuthChecker
 │   └── ui/
 │       ├── InputHandler/      ← wrapper OneButton → EventBus
-│       └── DisplayRenderer/   ← U8g2 + scenes + tabla sprites por etapa + overlays
+│       ├── DisplayRenderer/   ← U8g2 mono + scenes + tabla sprites por etapa + overlays
+│       ├── DisplayRendererColor/ ← Arduino_GFX color (ESP32-S3) + MessageView
+│       ├── MarqueeLogic/      ← scroll de texto horizontal (lógica pura)
+│       └── BootSplash/        ← pantalla de arranque
 ├── data/                      ← LittleFS: index.html + app.css + app.js (frontend)
 ├── scripts/
-│   └── integration_test.sh   ← script de tests HTTP contra placa real (27 tests)
-├── src/main.cpp               ← orquestación: singletons + suscripciones + loop
-├── test/
-│   ├── test_smoke/            ← canario del env native
-│   ├── test_stats_engine/     ← 34 tests
+│   └── integration_test.sh   ← script de tests HTTP contra placa real (26 tests)
+├── src/
+│   ├── main.cpp               ← orquestación ESP8266: singletons + suscripciones + loop
+│   └── main_esp32.cpp         ← orquestación ESP32-S3 (incluye consumo del MessageBox)
+├── test/                      ← 171 tests host-native (12 suites)
+│   ├── test_smoke/            ← canario del env native (1)
+│   ├── test_stats_engine/     ← 33 tests
 │   ├── test_persistence/      ← 22 tests (incluye migrate v1→v2)
 │   ├── test_life_fsm/         ← 16 tests (transiciones de etapas)
-│   ├── test_json_codec/       ← 14 tests (parse + render JSON)
+│   ├── test_json_codec/       ← 22 tests (parse + render JSON)
 │   ├── test_payload_validator/← 6 tests
 │   ├── test_rate_limiter/     ← 9 tests (token bucket)
-│   └── test_auth_checker/     ← 6 tests (HTTP Basic Auth)
+│   ├── test_auth_checker/     ← 6 tests (HTTP Basic Auth)
+│   ├── test_battery_gauge/    ← 25 tests (filtrado + gate)
+│   ├── test_boot_splash/      ← 5 tests
+│   ├── test_marquee_logic/    ← 13 tests (scroll)
+│   └── test_message_box/      ← 13 tests (sanitizado UTF-8→ASCII)
 ├── assets/sprites/            ← PNGs fuente (1-bit, 32×32 y 16×16)
 ├── tools/
 │   ├── slice_sheet.py         ← trocea sprite sheets (Nano Banana)
@@ -173,12 +192,31 @@ Una vez la placa esté en la WiFi y `data/*` esté subido al filesystem:
 | URL | Descripción |
 |---|---|
 | `http://tamagotchi.local/` | Frontend mobile-first (HTML/CSS/JS desde LittleFS) |
-| `http://tamagotchi.local/api/v1/state` | Snapshot del Tamagotchi (`lifeStage`, stats, flags) |
-| `http://tamagotchi.local/api/v1/info` | Telemetría: `freeHeap`, `uptimeMs`, `rssi`, etc. |
+| `GET /api/v1/state` | Snapshot del Tamagotchi (`lifeStage`, stats, flags) |
+| `GET /api/v1/info` | Telemetría + identidad de red + diagnóstico de batería (ver abajo) |
 | `POST /api/v1/{feed,play,discipline}` | Body `{"amount": 1..100}` |
 | `POST /api/v1/{clean,medicate}` | Sin body |
 | `POST /api/v1/sleep` | Body `{"value": true}` o `{"value": false}` |
+| `POST /api/v1/message` | Body `{"text": "..."}` — mensaje del padre (marquee). Solo variante color |
 | `POST /api/v1/reboot` | Sin body. Persiste el estado y reinicia el dispositivo (~750ms después de responder) |
+
+> **Nota:** la acción/endpoint **Heal fue eliminada** (redundante con `medicate`) — su sprite, botón y tests salieron del repo. Quedan 6 acciones: feed, play, clean, medicate, discipline, sleep.
+
+#### `GET /api/v1/info` — campos
+
+Además de `firmwareVersion`, `uptimeMs`, `freeHeap`, `wifiRssi`:
+
+- **Identidad de red** (siempre presente): `ipAddress`, `hostname`, `macAddress`.
+- **Batería** (gateada por validez): `batteryPercent`, `batteryCharging`, `batteryValid`, `batteryMillivolts`.
+- **Diagnóstico de soldadura** (nunca gateado — sirve para depurar el divisor de VBAT): `batteryRawMillivolts` (última lectura ADC cruda) y `batteryGateProgress` (0-8 muestras consecutivas plausibles hacia la validez).
+
+#### `POST /api/v1/message` — mensaje del padre
+
+- **Body:** `{"text": "..."}`. Máximo **192 bytes UTF-8 crudos**; se sanitizan a **ASCII imprimible** (≤ 96 chars) con transliteración de acentos (á→a, ñ→n, …) y descarte de emoji/controles (ver `MessageBox` / `TextSanitizer`).
+- **200:** `{"data": {"messageAccepted": true, "displayedChars": N}}`.
+- **422 `MISSING_FIELD`:** falta `text` o no es string.
+- **422 `INVALID_TEXT`:** texto crudo > 192 bytes, vacío tras sanitizar (solo espacios/emoji) o > 96 chars sanitizados.
+- El firmware (ESP32-S3) lo consume del `MessageBox` en `loop()` y lo muestra como marquee (`MessageView`); se descarta con el botón físico (click corto o pulsación larga), restaurando la escena previa.
 
 **Autenticación:** HTTP Basic Auth con `WEB_AUTH_USER:WEB_AUTH_PASSWORD` de `secrets.h`. Todos los endpoints `/api/v1/*` la requieren.
 
@@ -196,7 +234,7 @@ HOST=tamagotchi.local AUTH_USER=admin AUTH_PASS=tu_pass ./scripts/integration_te
 HOST=192.168.x.x AUTH_USER=admin AUTH_PASS=tu_pass ./scripts/integration_test.sh
 ```
 
-Cubre 27 escenarios: auth (401), happy path por endpoint (200 + `actionApplied`), validaciones (422 amount fuera de rango / tipo equivocado, 400 JSON malformado), 404 en rutas inexistentes y los assets estáticos del frontend.
+Cubre 26 escenarios: auth (401), happy path por endpoint (200 + `actionApplied`), validaciones (422 amount fuera de rango / tipo equivocado, 400 JSON malformado), 404 en rutas inexistentes y los assets estáticos del frontend. (Los endpoints `message` y `reboot` aún no están cubiertos por el script — ver backlog.)
 
 ---
 
@@ -204,7 +242,7 @@ Cubre 27 escenarios: auth (401), happy path por endpoint (200 + `actionApplied`)
 
 ### Tests automáticos
 ```bash
-pio test -e native   # 108/108 deben pasar
+pio test -e native   # 171/171 deben pasar
 ```
 
 ### Pruebas funcionales en hardware
@@ -216,7 +254,7 @@ pio test -e native   # 108/108 deben pasar
 - [x] WiFi conecta a SSID configurado en `secrets.h` y aparece en `IdleMain` con icono
 - [x] OTA upload funciona (`OTA_PASSWORD="..." pio run -e esp12e_ota -t upload`)
 - [x] `tamagotchi.local` accesible desde móvil y sirve el frontend
-- [x] `scripts/integration_test.sh` 27/27 PASS
+- [x] `scripts/integration_test.sh` 26/26 PASS
 - [ ] Ciclo completo de vida verificado con TURBO (~25 min wall-clock para llegar a DeadScreen)
 - [ ] Resurrección Dead→Egg tras 5 min wall-clock
 
@@ -253,7 +291,7 @@ Comprueba:
 
 ## Variante ESP32-S3 color (Furbygotchi)
 
-Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 108 tests `native` validan ambas variantes.
+Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 171 tests `native` validan ambas variantes.
 
 ### Hardware ESP32-S3
 
@@ -264,7 +302,7 @@ Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vid
 | Librería display | Arduino_GFX v1.3.7 (fijada por compatibilidad con arduino-esp32 core 2.0.17 / IDF4) |
 | Botón | BOOT / GPIO0 (active-LOW — **no mantener pulsado en reset**: pin de strapping) |
 
-**Medidor de batería:** firmware, icono TFT y API listos (`batteryValid`/`batteryPercent`/`batteryCharging` en `/api/v1/state`); la soldadura del divisor (GPIO1) y del sensado de carga (GPIO2) está **pendiente** — hasta entonces el icono permanece oculto. Guía completa de soldadura en [`docs/hardware-battery.md`](docs/hardware-battery.md).
+**Medidor de batería:** firmware (`lib/core/BatteryGauge/`, 25 tests host), icono TFT y API listos (`batteryValid`/`batteryPercent`/`batteryCharging` en `/api/v1/state`); la soldadura del divisor (GPIO1) y del sensado de carga (GPIO2) está **pendiente** — hasta entonces el icono permanece oculto. Para depurar la soldadura, el panel **Sistema → Batería (diagnóstico)** del dashboard muestra `batteryRawMillivolts` (ADC crudo, nunca gateado) y `batteryGateProgress` (racha 0-8 hacia la validez). Guía completa de soldadura en [`docs/hardware-battery.md`](docs/hardware-battery.md).
 
 #### Cableado TFT JD9853
 
@@ -297,6 +335,14 @@ Los sprites se generan con el proyecto **Pixel Sprites** (repo separado), se exp
 | Etapas | `egg` / `baby` / `kid` / `adult` / `old` / `ghost` |
 | Animaciones | `idle` / `happy` / `sad` / `eat` / `sleep` (egg y ghost solo `idle`) |
 
+### Mensajes del padre (marquee)
+
+Un padre puede enviar texto al Tamagotchi desde el dashboard (panel **Mensaje**) o vía `POST /api/v1/message`. El texto se muestra como marquee a color y se descarta con el botón físico.
+
+- **`MessageBox`** (`lib/core/`): canal **SPSC** sin mutex (productor = handler HTTP en task `async_tcp`; consumidor = `loopTask`), con par release/acquire. Sanitiza UTF-8→ASCII imprimible (transliteración de acentos, descarte de emoji/controles). Límites: **192 bytes** crudos → **≤ 96 chars** sanitizados. Política **last-wins**.
+- **`MarqueeLogic`** (`lib/ui/`): lógica pura de scroll horizontal (posición, vueltas, timeout), testeable en host — 13 tests.
+- **`MessageView`** (`DisplayRendererColor`): escena que renderiza el marquee. `loop()` la activa cuando llega un mensaje y la mascota está viva; al terminar (timeout, vueltas agotadas o descarte por botón) restaura la escena previa (`sceneBeforeMessage_`).
+
 ### Compilar y flashear — ESP32-S3
 
 ```bash
@@ -326,8 +372,12 @@ cp include/secrets.h.example include/secrets.h
 ```
 
 - **WIFI_SSID vacío** → arranca offline sin error.
-- Dashboard disponible en `http://tamagotchi.local` (HTTP Basic Auth).
+- Dashboard disponible en `http://tamagotchi.local` (HTTP Basic Auth). Incluye panel **Sistema** colapsable (`<details>`, polling propio cada 10 s) con IP, hostname, MAC, firmware, uptime, RAM libre, RSSI y el diagnóstico de batería.
 - OTA: `pio run -e esp32s3_ota -t upload` (requiere OTA_PASSWORD y placa en red).
+
+> **Fixes de red (13 jul):**
+> - `WiFi.setSleep(false)` — el modem sleep descartaba los paquetes UDP de invitación de OTA, dejando la placa "invisible" para `espota`. Con el sleep desactivado el OTA vuelve a ser fiable.
+> - Eliminado `setPort(8266)` en el ESP32-S3 — ese es el puerto del ESP8266; el ESP32 usa su puerto OTA por defecto (3232). Con el `setPort` erróneo el OTA escuchaba en el puerto equivocado.
 
 ---
 
@@ -338,9 +388,28 @@ cp include/secrets.h.example include/secrets.h
 - **Fase 4 (ESP32-S3)** — Furbygotchi color: JD9853 + sprites RGB565 + LittleFS assets + evolución visual por etapa.
 - **Fase 5** — gestión de energía (auto-dim/off del OLED/TFT, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
 
+### Changelog reciente (13-14 jul 2026)
+
+**14 jul — Mensajes del padre (marquee):**
+- `MessageBox` (core, SPSC + sanitizado UTF-8→ASCII) — 13 tests host.
+- `MarqueeLogic` (ui, scroll puro) — 13 tests host.
+- Escena `MessageView` en `DisplayRendererColor` + integración en `main_esp32` (consumo del `MessageBox`, descarte por botón).
+- Endpoint `POST /api/v1/message` + panel **Mensaje** en el dashboard.
+
+**13 jul — Batería, telemetría, dashboard y fixes:**
+- `BatteryGauge` (core) con filtrado + gate de plausibilidad (exige muestras consecutivas; charging gateado por validez) — 25 tests host.
+- `GET /api/v1/info` ampliado: identidad de red (IP/hostname/MAC) + ADC crudo (`batteryRawMillivolts`/`batteryGateProgress`).
+- Dashboard: panel **Sistema** (diagnóstico colapsable) + etiquetas de batería autoexplicativas + botón **Reiniciar**.
+- `POST /api/v1/reboot` (persist previo + reinicio).
+- Fix OTA: `WiFi.setSleep(false)` (modem sleep perdía UDP de invitación) y eliminado `setPort(8266)` erróneo en ESP32-S3.
+- Acción/botón/sprite **Heal eliminados** (redundante con `medicate`): 7 → 6 acciones.
+- `BootSplash` (pantalla de arranque) — 5 tests host.
+- Actualización del modelo de carcasa + proyecto de slicer 3MF; `Videos/` fuera del repo (`.gitignore`).
+
 ### Backlog específico (no perder)
 
 - **ActionMenu en pantalla** — menú con iconos navegable con 1 botón. Permite ejecutar todas las acciones sin WiFi.
+- **Cobertura HTTP de `message`/`reboot`** — `integration_test.sh` aún no los cubre (26 escenarios actuales).
 - **Sprites faltantes** — Adult sad, Old happy/sad. Baja prioridad (placeholders idle son coherentes con los estados emocionales contenidos de adultos serios y ancianos lentos).
 - **AdultType variants** — sprites distintos según `attentionScore` (athletic / normal / obese / grumpy).
 - **`/api/v1/reset`** — endpoint para forzar resurrección (huevo nuevo) desde la web. Planeado pero no implementado en Fase 3.
