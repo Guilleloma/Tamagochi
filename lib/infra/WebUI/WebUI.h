@@ -11,7 +11,6 @@
 // Endpoints (hito 6 — acciones de juego):
 //   POST /api/v1/feed         → body: {"amount":1-100}  publica ActionFeedRequested
 //   POST /api/v1/play         → body: {"amount":1-100}  publica ActionPlayRequested
-//   POST /api/v1/heal         → body: {"amount":1-100}  publica ActionHealRequested
 //   POST /api/v1/discipline   → body: {"amount":1-100}  publica ActionDisciplineRequested
 //   POST /api/v1/sleep        → body: {"value":true|false} publica ActionSleepRequested
 //   POST /api/v1/clean        → sin body                publica ActionCleanRequested
@@ -112,7 +111,6 @@ private:
     // Los de no-body (clean, medicate) usan server_.on() con HTTP_POST directo.
     void handlePostFeed_(AsyncWebServerRequest* req, JsonVariant& json);
     void handlePostPlay_(AsyncWebServerRequest* req, JsonVariant& json);
-    void handlePostHeal_(AsyncWebServerRequest* req, JsonVariant& json);
     void handlePostDiscipline_(AsyncWebServerRequest* req, JsonVariant& json);
     void handlePostSleep_(AsyncWebServerRequest* req, JsonVariant& json);
     void handlePostClean_(AsyncWebServerRequest* req);

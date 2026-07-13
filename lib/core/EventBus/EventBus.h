@@ -43,7 +43,6 @@ enum class EventType : uint8_t {
     WifiStateChanged,   // payload & 0xFF = WifiState enum value
     ActionFeedRequested,        // payload = amount (1-100)
     ActionPlayRequested,        // payload = amount (1-100)
-    ActionHealRequested,        // payload = amount (1-100)
     ActionCleanRequested,       // payload = 0 (sin amount)
     ActionMedicateRequested,    // payload = 0
     ActionDisciplineRequested,  // payload = amount (1-100)

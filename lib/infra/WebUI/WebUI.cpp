@@ -2,7 +2,7 @@
 // WebUI.cpp — Implementación del servidor HTTP REST para el Tamagochi.
 //
 // Hito 5, Fase 3. Endpoints GET /api/v1/state y GET /api/v1/info.
-// Hito 6, Fase 3. Endpoints POST /api/v1/{feed,play,heal,discipline,sleep,clean,medicate}.
+// Hito 6, Fase 3. Endpoints POST /api/v1/{feed,play,discipline,sleep,clean,medicate}.
 //
 // Patrón de acciones: WebUI publica eventos al EventBus (síncrono). Los handlers
 // en main.cpp aplican la acción sobre StatsEngine y persisten. Como el bus es
@@ -123,14 +123,6 @@ void WebUI::mountRoutes_() {
     );
     playHandler->setMethod(HTTP_POST);
     server_.addHandler(playHandler);
-
-    auto* healHandler = new AsyncCallbackJsonWebHandler("/api/v1/heal",
-        [this](AsyncWebServerRequest* req, JsonVariant& json) {
-            handlePostHeal_(req, json);
-        }
-    );
-    healHandler->setMethod(HTTP_POST);
-    server_.addHandler(healHandler);
 
     auto* disciplineHandler = new AsyncCallbackJsonWebHandler("/api/v1/discipline",
         [this](AsyncWebServerRequest* req, JsonVariant& json) {
@@ -307,15 +299,6 @@ void WebUI::handlePostPlay_(AsyncWebServerRequest* req, JsonVariant& json) {
     bus_.publish({EventType::ActionPlayRequested, static_cast<int32_t>(amount)});
     LOG_INFO("[webui] POST /api/v1/play amount=%d", amount);
     sendActionResponse_(req, "play", static_cast<int32_t>(amount));
-}
-
-void WebUI::handlePostHeal_(AsyncWebServerRequest* req, JsonVariant& json) {
-    if (!checkAuthAndRate_(req)) return;
-    int amount = 0;
-    if (!extractAmount_(req, json, amount)) return;
-    bus_.publish({EventType::ActionHealRequested, static_cast<int32_t>(amount)});
-    LOG_INFO("[webui] POST /api/v1/heal amount=%d", amount);
-    sendActionResponse_(req, "heal", static_cast<int32_t>(amount));
 }
 
 void WebUI::handlePostDiscipline_(AsyncWebServerRequest* req, JsonVariant& json) {

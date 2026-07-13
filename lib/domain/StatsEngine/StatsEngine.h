@@ -23,7 +23,7 @@ static constexpr uint8_t kMaxPoopCount = 9;
 
 // -----------------------------------------------------------------------------
 // ActionKind — enumera los items navegables del HUD inferior de IdleMain.
-// Las primeras 7 corresponden a las acciones del dashboard web (mismo orden);
+// Las primeras 6 corresponden a las acciones del dashboard web (mismo orden);
 // `Stats` no es una acción de dominio: la UI la usa para entrar a StatsView.
 // El valor numérico no se persiste ni se publica en eventos — solo se usa para
 // que la UI seleccione qué EventType emitir o qué escena abrir.
@@ -35,13 +35,12 @@ enum class ActionKind : uint8_t {
     Medicate,
     Discipline,
     Sleep,
-    Heal,
     Stats   // abre la pantalla densa de stats (no genera evento de acción)
 };
 
 // Tamaño máximo del buffer destino para listAvailableActions.
-// 7 acciones + 1 entrada Stats = 8 items en el peor caso.
-static constexpr uint8_t kMaxActionMenuItems = 8;
+// 6 acciones + 1 entrada Stats = 7 items en el peor caso.
+static constexpr uint8_t kMaxActionMenuItems = 7;
 
 struct Stats {
     // Fase 1
@@ -88,7 +87,6 @@ public:
     // --- Acciones Fase 1 ---
     void applyFeed(uint8_t amount);   // reduce hunger (sacia). Clamp a 0. Genera peso y caca.
     void applyPlay(uint8_t amount);   // sube happiness en amount. Clamp a 100.
-    void applyHeal(uint8_t amount);   // sube health en amount. Clamp a 100.
 
     // --- Acciones Fase 2 ---
     void applyClean();                  // resetea poopCount a 0

@@ -175,7 +175,7 @@ Una vez la placa esté en la WiFi y `data/*` esté subido al filesystem:
 | `http://tamagotchi.local/` | Frontend mobile-first (HTML/CSS/JS desde LittleFS) |
 | `http://tamagotchi.local/api/v1/state` | Snapshot del Tamagotchi (`lifeStage`, stats, flags) |
 | `http://tamagotchi.local/api/v1/info` | Telemetría: `freeHeap`, `uptimeMs`, `rssi`, etc. |
-| `POST /api/v1/{feed,play,heal,discipline}` | Body `{"amount": 1..100}` |
+| `POST /api/v1/{feed,play,discipline}` | Body `{"amount": 1..100}` |
 | `POST /api/v1/{clean,medicate}` | Sin body |
 | `POST /api/v1/sleep` | Body `{"value": true}` o `{"value": false}` |
 | `POST /api/v1/reboot` | Sin body. Persiste el estado y reinicia el dispositivo (~750ms después de responder) |

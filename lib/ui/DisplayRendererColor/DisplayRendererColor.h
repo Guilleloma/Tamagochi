@@ -8,9 +8,9 @@
  *
  * FASE 4 (menú): drawHudBottom_() pinta icono 24×24 + label de la acción
  * seleccionada, centrados como bloque horizontal en la card inferior.
- * Iconos para 6 acciones (Feed/Play/Discipline/Sleep/Heal/Stats) cargados vía
+ * Iconos para 5 acciones (Feed/Play/Discipline/Sleep/Stats) cargados vía
  * SpriteStore desde LittleFS (carpetas ic-apple, ic-ball, ic-disc, ic-moon,
- * ic-heal, ic-stats). Clean y Medicate usan primitivas dibujadas en render
+ * ic-stats). Clean y Medicate usan primitivas dibujadas en render
  * (sin assets separados: anim-broom y anim-syringe son 48×48, no caben en
  * los 60 px del HUD junto al texto size 2; ver drawMenuIconPrimitive_()).
  *
@@ -112,7 +112,6 @@ public:
     // Mapeo acción → MoodColor (con fallback a idle si la etapa no tiene ese mood):
     //   Feed       → Eat   (come)
     //   Play       → Happy (alegre)
-    //   Heal       → Happy
     //   Medicate   → Happy
     //   Clean      → Idle  (limpieza neutra; borra overlay caca visualmente)
     //   Discipline → Sad   (consecuencia negativa)
@@ -168,7 +167,7 @@ private:
     // lastRenderMs_ se usa para calcular el delta entre renders y drenar los timers.
     uint32_t lastRenderCallMs_      = 0;
 
-    // Timer unificado de acción one-shot (Feed/Play/Heal/Clean/Medicate/Discipline).
+    // Timer unificado de acción one-shot (Feed/Play/Clean/Medicate/Discipline).
     // Mientras actionAnimRemainingMs_ > 0, drawSprite_() usa actionAnimMood_ en lugar
     // del mood calculado por computeMood_().
     uint32_t  actionAnimRemainingMs_ = 0;
@@ -210,7 +209,7 @@ private:
 
     // Sprites de overlay precargados en PSRAM al boot (~8 KB total):
     //   overlayBroom_   → Clean   (48×48, 6 frames)
-    //   overlaySyringe_ → Heal + Medicate (48×48, 3 frames)
+    //   overlaySyringe_ → Medicate (48×48, 3 frames)
     //   overlayBall_    → Play    (48×48, 3 frames)
     ColorSpriteFrames overlayBroom_;
     ColorSpriteFrames overlaySyringe_;
@@ -218,11 +217,11 @@ private:
 
     // ── Iconos del menú de acciones (HUD inferior) ───────────────────────────
     // Iconos 24×24 RGB565, uno por ActionKind que tiene asset de icono dedicado.
-    // Orden: Feed=0, Play=1, Discipline=2, Sleep=3, Heal=4, Stats=5.
+    // Orden: Feed=0, Play=1, Discipline=2, Sleep=3, Stats=4.
     // Clean e Medicate se dibujan con primitivas (ver drawMenuIconPrimitive_()).
     // Cargados en loadMenuIcons_(); si falla, drawHudBottom_() omite el icono
     // para esa acción y pinta solo el label (degradación suave).
-    static constexpr uint8_t kMenuIconCount = 6;
+    static constexpr uint8_t kMenuIconCount = 5;
     ColorSpriteFrames menuIcons_[kMenuIconCount];
     bool menuIconsLoaded_ = false;
 

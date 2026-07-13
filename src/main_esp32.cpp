@@ -13,7 +13,7 @@
 //   - Boot       → carga PersistedState v2 → aplica a StatsEngine/LifeFSM
 //   - Schedulers → decay, envejecimiento, render, autosave (no-bloqueante)
 //   - Botón      → short click=moveCursor, long press=acción HUD
-//   - Acciones   → Feed/Play/Heal/Clean/Medicate/Discipline/Sleep
+//   - Acciones   → Feed/Play/Clean/Medicate/Discipline/Sleep
 //   - Animaciones → EAT, Evolve, Hatch
 //   - Muerte/Resurrección → DeadScreen → nuevo Egg tras kResurrectionMs
 //   - Persistencia automática tras cada acción crítica y cada 5 min
@@ -187,7 +187,7 @@ static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const L
 
 // Publica el EventType de la acción HUD seleccionada y dispara la animación one-shot
 // correspondiente en el renderer. triggerActionAnimation() resuelve el mapeo
-// acción→MoodColor internamente (Feed→Eat, Play/Heal/Medicate→Happy, Discipline→Sad,
+// acción→MoodColor internamente (Feed→Eat, Play/Medicate→Happy, Discipline→Sad,
 // Clean→Idle) con fallback a idle si la etapa no tiene esa animación.
 static void executeSelectedAction_() {
     ActionKind action = renderer->currentSelectedAction();
@@ -214,15 +214,12 @@ static void executeSelectedAction_() {
             bus.publish({EventType::ActionSleepRequested,
                          statsEngine.stats().isSleeping ? 0 : 1});
             break;
-        case ActionKind::Heal:
-            bus.publish({EventType::ActionHealRequested, 20});
-            break;
         case ActionKind::Stats:
             // Se maneja en onLongPress como transición de escena — no llega aquí.
             break;
     }
 
-    // Disparar animación one-shot para acciones que la tengan (Feed/Play/Heal/
+    // Disparar animación one-shot para acciones que la tengan (Feed/Play/
     // Clean/Medicate/Discipline). triggerActionAnimation es no-op para Sleep/Stats.
     renderer->triggerActionAnimation(action);
 
@@ -398,13 +395,6 @@ static void onActionPlay(const Event& e) {
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
     LOG_INFO("[action] play +%d -> happiness=%u", static_cast<int>(e.payload), statsEngine.stats().happiness);
-}
-
-static void onActionHeal(const Event& e) {
-    statsEngine.applyHeal(static_cast<uint8_t>(e.payload));
-    bus.publish({EventType::StatsChanged, 0});
-    bus.publish({EventType::PersistRequested, 0});
-    LOG_INFO("[action] heal +%d -> health=%u", static_cast<int>(e.payload), statsEngine.stats().health);
 }
 
 static void onActionClean(const Event&) {
@@ -672,7 +662,6 @@ void setup() {
     // Acciones HUD y WebUI (mismas que main.cpp ESP8266)
     bus.subscribe(EventType::ActionFeedRequested,      onActionFeed);
     bus.subscribe(EventType::ActionPlayRequested,      onActionPlay);
-    bus.subscribe(EventType::ActionHealRequested,      onActionHeal);
     bus.subscribe(EventType::ActionCleanRequested,     onActionClean);
     bus.subscribe(EventType::ActionMedicateRequested,  onActionMedicate);
     bus.subscribe(EventType::ActionDisciplineRequested, onActionDiscipline);

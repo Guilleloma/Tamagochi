@@ -2,7 +2,7 @@
 # =============================================================================
 # Tamagotchi — script de integracion HTTP (Fase 3 hito 8).
 #
-# Verifica los 9 endpoints de la API contra un dispositivo real.
+# Verifica los 8 endpoints de la API contra un dispositivo real.
 # Usa solo curl + bash POSIX, sin dependencias externas.
 #
 # Uso:
@@ -116,7 +116,7 @@ expect_body_contains "GET /api/v1/info contiene freeHeap"   200 "freeHeap"  $AUT
 # 3. POST endpoints con amount — happy path
 # ---------------------------------------------------------------------------
 section "POST endpoints con amount (happy path)"
-for action in feed play heal discipline; do
+for action in feed play discipline; do
     expect_body_contains "POST /api/v1/$action amount=10 -> 200" 200 "actionApplied" \
         $AUTH -X POST -H "Content-Type: application/json" -d '{"amount":10}' "${BASE}/api/v1/$action"
 done

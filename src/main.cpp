@@ -179,10 +179,6 @@ static void executeSelectedAction_() {
             bus.publish({EventType::ActionSleepRequested,
                          statsEngine.stats().isSleeping ? 0 : 1});
             break;
-        case ActionKind::Heal:
-            bus.publish({EventType::ActionHealRequested, 20});
-            renderer.triggerActionAnimation(action);
-            break;
         case ActionKind::Stats:
             // Manejado en onLongPress como transición de escena, no debería llegar.
             break;
@@ -330,13 +326,6 @@ static void onActionPlay(const Event& e) {
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
     LOG_INFO("[action] play +%d -> happiness=%u", static_cast<int>(e.payload), statsEngine.stats().happiness);
-}
-
-static void onActionHeal(const Event& e) {
-    statsEngine.applyHeal(static_cast<uint8_t>(e.payload));
-    bus.publish({EventType::StatsChanged, 0});
-    bus.publish({EventType::PersistRequested, 0});
-    LOG_INFO("[action] heal +%d -> health=%u", static_cast<int>(e.payload), statsEngine.stats().health);
 }
 
 static void onActionClean(const Event&) {
@@ -515,7 +504,6 @@ void setup() {
     // Acciones WebUI (hito 6) — publicadas por los POST handlers de WebUI
     bus.subscribe(EventType::ActionFeedRequested,       onActionFeed);
     bus.subscribe(EventType::ActionPlayRequested,       onActionPlay);
-    bus.subscribe(EventType::ActionHealRequested,       onActionHeal);
     bus.subscribe(EventType::ActionCleanRequested,      onActionClean);
     bus.subscribe(EventType::ActionMedicateRequested,   onActionMedicate);
     bus.subscribe(EventType::ActionDisciplineRequested, onActionDiscipline);
