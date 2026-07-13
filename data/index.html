@@ -85,6 +85,55 @@
     </div>
   </section>
 
+  <!-- Sistema: <details>/<summary> nativos dan un disclosure accesible
+       (aria-expanded implícito, sin JS) — colapsado por defecto porque es un
+       panel de diagnóstico, no parte del juego. Datos de GET /api/v1/info,
+       con polling propio cada 10s (ver SYSTEM_POLL_INTERVAL_MS en app.js). -->
+  <section class="system-section" aria-label="Sistema">
+    <details id="system-details">
+      <summary class="section-title system-summary">Sistema</summary>
+
+      <div class="system-grid">
+        <div class="system-row">
+          <span class="system-label">Firmware</span>
+          <span class="system-value" id="sys-firmware">?</span>
+        </div>
+        <div class="system-row">
+          <span class="system-label">Uptime</span>
+          <span class="system-value" id="sys-uptime">?</span>
+        </div>
+        <div class="system-row">
+          <span class="system-label">RAM libre</span>
+          <span class="system-value" id="sys-heap">?</span>
+        </div>
+        <div class="system-row">
+          <span class="system-label">WiFi</span>
+          <span class="system-value" id="sys-rssi">?</span>
+        </div>
+      </div>
+
+      <!-- Diagnóstico de la soldadura del divisor de VBAT (GPIO1) — ver
+           docs/hardware-battery.md. batteryRawMillivolts/batteryGateProgress
+           nunca se gatean por valid, a diferencia del resto de campos de
+           batería (ver JsonCodec::serializeInfo). -->
+      <h3 class="section-title system-subtitle">Bateria (diagnostico)</h3>
+      <div class="system-grid">
+        <div class="system-row">
+          <span class="system-label">Sensor</span>
+          <span class="system-value" id="sys-batt-status">?</span>
+        </div>
+        <div class="system-row">
+          <span class="system-label">Lectura cruda</span>
+          <span class="system-value" id="sys-batt-raw">?</span>
+        </div>
+        <div class="system-row" id="sys-batt-filtered-row" hidden>
+          <span class="system-label">Filtrado</span>
+          <span class="system-value" id="sys-batt-filtered">?</span>
+        </div>
+      </div>
+    </details>
+  </section>
+
 </main>
 
 <footer class="footer" aria-live="polite">

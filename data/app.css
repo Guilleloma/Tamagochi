@@ -251,6 +251,62 @@ body {
 }
 
 /* ============================================================
+   Sistema (panel de diagnóstico: firmware, red, batería en crudo)
+   ============================================================ */
+.system-section {
+  margin-top: 20px;
+}
+
+.system-summary {
+  cursor: pointer;
+  list-style: none;             /* oculta el triángulo nativo del navegador */
+  -webkit-tap-highlight-color: transparent;
+}
+
+.system-summary::-webkit-details-marker {
+  display: none;                /* Safari/Chrome: mismo motivo que list-style */
+}
+
+/* Flechita propia consistente entre navegadores, gira al abrir via [open]. */
+.system-summary::before {
+  content: '\25B8';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+
+#system-details[open] .system-summary::before {
+  transform: rotate(90deg);
+}
+
+.system-subtitle {
+  margin-top: 14px;
+}
+
+.system-grid {
+  margin-top: 6px;
+}
+
+.system-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--surface);
+}
+
+.system-label {
+  color: var(--muted);
+}
+
+.system-value {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
    Footer
    ============================================================ */
 .footer {
