@@ -54,3 +54,6 @@ assets/sprites/raw/
 
 # hardware/case — exports SVG sueltos (regenerables)
 hardware/case/*.svg
+
+# Media personal (vídeos/fotos del dispositivo) — no pertenece al repo
+Videos/
