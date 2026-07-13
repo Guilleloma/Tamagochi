@@ -38,10 +38,17 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                       char* out, size_t outSize);
 
 // Serializa info de telemetría del dispositivo.
-// Formato: { "data": { "firmwareVersion", "uptimeMs", "freeHeap", "wifiRssi", ... } }
+// Formato: { "data": { "firmwareVersion", "uptimeMs", "freeHeap", "wifiRssi",
+//                      "ipAddress", "hostname", "macAddress", ... } }
 // Además de batteryPercent/batteryCharging/batteryValid, incluye batteryMillivolts
 // (mV filtrados del gauge, 0 si !valid) — /info es el endpoint canónico de
 // telemetría detallada.
+//
+// ipAddress / hostname / macAddress: identidad de red, SIEMPRE presentes
+// (cadena vacía "" si WiFi no está conectado — nunca null, para no romper
+// consumidores que asuman string). ipAddress/macAddress se recalculan en cada
+// llamada (WiFi.localIP()/macAddress() en el caller); hostname es el
+// configurado (OTA_HOSTNAME ".local"), no depende de la conexión.
 //
 // batteryRawMillivolts / batteryGateProgress: diagnóstico de soldadura, SIEMPRE
 // presentes (a diferencia de batteryMillivolts, nunca se gatean a 0/valid).
@@ -55,6 +62,7 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
 // no de estado de juego.
 size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
                      uint32_t freeHeap, int8_t wifiRssi,
+                     const char* ipAddress, const char* hostname, const char* macAddress,
                      const BatterySnapshot& battery,
                      uint16_t batteryRawMillivolts, uint8_t batteryGateProgress,
                      char* out, size_t outSize);

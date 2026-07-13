@@ -79,6 +79,7 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
 
 size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
                      uint32_t freeHeap, int8_t wifiRssi,
+                     const char* ipAddress, const char* hostname, const char* macAddress,
                      const BatterySnapshot& battery,
                      uint16_t batteryRawMillivolts, uint8_t batteryGateProgress,
                      char* out, size_t outSize) {
@@ -89,6 +90,15 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
     data["uptimeMs"]        = uptimeMs;
     data["freeHeap"]        = freeHeap;
     data["wifiRssi"]        = wifiRssi;
+    // Identidad de red — SIEMPRE presentes (cadena vacía si WiFi caído, ver
+    // comentario del .h). ArduinoJson v7 NO copia const char* (guarda el
+    // puntero, zero-copy) — es responsabilidad del caller mantener vivos los
+    // buffers hasta que serializeJson() (más abajo, misma llamada síncrona)
+    // termine de escribir. Ver WebUI::handleGetInfo_: los String de Arduino
+    // se guardan en variables locales del caller para cumplir esto.
+    data["ipAddress"]  = ipAddress;
+    data["hostname"]   = hostname;
+    data["macAddress"] = macAddress;
     // /info es el endpoint canónico de telemetría — además del trío común
     // (percent/charging/valid) expone batteryMillivolts para diagnóstico fino.
     data["batteryPercent"]    = battery.percent;

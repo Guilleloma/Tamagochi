@@ -42,6 +42,7 @@ var elSprite, elStage, elAge, elBadges,
     elBtnFeed, elBtnPlay, elBtnClean, elBtnMedicate,
     elBtnDiscipline, elBtnSleep, elBtnHeal, elBtnReboot,
     elSysFirmware, elSysUptime, elSysHeap, elSysRssi,
+    elSysIp, elSysHostname, elSysMac,
     elSysBattStatus, elSysBattRaw, elSysBattFilteredRow, elSysBattFiltered;
 
 function cacheDomRefs() {
@@ -72,6 +73,9 @@ function cacheDomRefs() {
   elBtnSleep      = document.getElementById('btn-sleep');
   elBtnHeal       = document.getElementById('btn-heal');
   elBtnReboot     = document.getElementById('btn-reboot');
+  elSysIp         = document.getElementById('sys-ip');
+  elSysHostname   = document.getElementById('sys-hostname');
+  elSysMac        = document.getElementById('sys-mac');
   elSysFirmware   = document.getElementById('sys-firmware');
   elSysUptime     = document.getElementById('sys-uptime');
   elSysHeap       = document.getElementById('sys-heap');
@@ -194,6 +198,13 @@ function wifiQualityLabel(rssi) {
 
 function renderSystem(data) {
   if (!data) return;
+
+  // ipAddress/hostname/macAddress: SIEMPRE presentes en /api/v1/info, pero
+  // pueden llegar como '' si el WiFi cae (ver WebUI::handleGetInfo_) — se
+  // muestra '?' en ese caso en vez de una celda vacia y confusa.
+  elSysIp.textContent       = data.ipAddress  || '?';
+  elSysHostname.textContent = data.hostname   || '?';
+  elSysMac.textContent      = data.macAddress || '?';
 
   elSysFirmware.textContent = formatFirmwareVersion(data.firmwareVersion);
   elSysUptime.textContent   = formatUptime(data.uptimeMs);
