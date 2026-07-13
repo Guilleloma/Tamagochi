@@ -39,6 +39,7 @@
 
 #include "DisplayRendererColor.h"
 #include "Logger.h"
+#include "MarqueeLogic.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -215,6 +216,11 @@ void DisplayRendererColor::begin() {
     actionAnimMood_         = MoodColor::Idle;
     hatchAnimRemainingMs_   = 0;
     evolveAnimRemainingMs_  = 0;
+    // Mensaje del padre: sin mensaje activo al arrancar/reiniciar el renderer.
+    messageRemainingMs_     = 0;
+    messageElapsedMs_       = 0;
+    messageTextPxW_         = 0;
+    messageText_[0]         = '\0';
     // Canal overlay: resetear estado antes de cargar sprites
     overlayAnimFrames_      = nullptr;
     overlayAnimRemainingMs_ = 0;
@@ -451,6 +457,53 @@ void DisplayRendererColor::triggerEvolveAnimation() {
 }
 
 // =============================================================================
+// Mensaje del padre (marquee)
+// =============================================================================
+
+// showMessage — asciiText ya viene sanitizado a ASCII por MessageBox (ver
+// main_esp32.cpp); aquí solo se copia de forma defensiva (strncpy +
+// null-terminate) y se resetea el estado de scroll/timer. NO cambia scene_:
+// el caller decide cuándo entrar en MessageView (permite, p.ej., loguear o
+// descartar el mensaje sin llegar a mostrarlo — ver main_esp32.cpp).
+void DisplayRendererColor::showMessage(const char* asciiText) {
+    if (asciiText == nullptr) asciiText = "";
+
+    strncpy(messageText_, asciiText, sizeof(messageText_) - 1);
+    messageText_[sizeof(messageText_) - 1] = '\0';
+
+    messageElapsedMs_   = 0;
+    messageRemainingMs_ = kMessageDurationMs;
+
+    // Ancho en px del texto completo a kMessageTextSize. La fuente base de
+    // Arduino_GFX (igual que Adafruit_GFX) es 6px/char de ancho a textSize=1;
+    // el mismo cálculo que usa drawHudBottom_ para su label (12px = 6*2 a
+    // size 2). Se calcula una vez aquí — drawMessageView_ lo reutiliza en
+    // cada render sin recalcular strlen().
+    const uint16_t charW = static_cast<uint16_t>(6 * kMessageTextSize);
+    messageTextPxW_ = static_cast<uint16_t>(strlen(messageText_) * charW);
+}
+
+// dismissMessage — descarte inmediato (botón físico, ver main_esp32.cpp).
+// Poner remaining a 0 basta: el próximo render() ve messageActive()==false
+// y el caller restaura la escena anterior.
+void DisplayRendererColor::dismissMessage() {
+    messageRemainingMs_ = 0;
+}
+
+// messageActive — true mientras quede tiempo Y el marquee no haya agotado
+// sus vueltas permitidas (kMessageMaxPasses). Un mensaje corto a 60 px/s
+// podría dar muchas más de 6 vueltas en 60 s — este segundo límite evita que
+// un mensaje ya "leído de sobra" siga ocupando la pantalla hasta agotar el
+// timer completo.
+bool DisplayRendererColor::messageActive() const {
+    if (messageRemainingMs_ == 0) return false;
+
+    const uint32_t cycle  = MarqueeLogic::cyclePx(messageTextPxW_, kScreenW);
+    const uint32_t offset = MarqueeLogic::offsetPx(messageElapsedMs_, kMarqueeSpeedPxPerSec);
+    return MarqueeLogic::passCount(offset, cycle) < kMessageMaxPasses;
+}
+
+// =============================================================================
 // Menú de acciones
 // =============================================================================
 
@@ -506,6 +559,16 @@ void DisplayRendererColor::render() {
     if (evolveAnimRemainingMs_ > 0) {
         evolveAnimRemainingMs_ = (evolveAnimRemainingMs_ > dtMs)
                                ? (evolveAnimRemainingMs_ - dtMs) : 0u;
+    }
+    // Mensaje del padre: drenar el timer de auto-descarte y acumular el
+    // tiempo transcurrido (alimenta MarqueeLogic::offsetPx() en
+    // drawMessageView_/messageActive — scroll por TIEMPO, no por frame).
+    // Solo se acumula mientras hay mensaje activo (remaining>0): evita que
+    // messageElapsedMs_ crezca sin límite entre mensajes.
+    if (messageRemainingMs_ > 0) {
+        messageRemainingMs_ = (messageRemainingMs_ > dtMs)
+                            ? (messageRemainingMs_ - dtMs) : 0u;
+        messageElapsedMs_ += dtMs;
     }
     // Canal overlay: drenar timer y apagar cuando expire
     if (overlayAnimRemainingMs_ > 0) {
@@ -572,6 +635,7 @@ void DisplayRendererColor::render() {
         case SceneColor::StatsView:   drawStatsView_();   break;
         case SceneColor::OtaProgress: drawOtaProgress_(); break;
         case SceneColor::DeadScreen:  drawDeadScreen_();  break;
+        case SceneColor::MessageView: drawMessageView_(); break;
     }
 }
 
@@ -1486,6 +1550,65 @@ void DisplayRendererColor::drawDeadScreen_() {
     snprintf(ripBuf, sizeof(ripBuf), "Total RIPs: %u", static_cast<unsigned>(deathCount_));
     canvas_.setCursor(kSafeTextX, ripY + 72);
     canvas_.print(ripBuf);
+
+    canvas_.flush();
+}
+
+// =============================================================================
+// drawMessageView_ — mensaje del padre: HUD top + personaje + banda tipo
+// bocadillo con el texto en marquee.
+//
+// Layout: mismo fondo/HUD/personaje que IdleMain; la card inferior reutiliza
+// la geometría exacta del HUD (cardY = kScreenH-kEdgeInset-kHudBottomH,
+// kHudBottomH de alto) pero pintada como bocadillo blanco en vez del HUD de
+// acciones — MessageView y IdleMain son mutuamente excluyentes (currentScene
+// en main_esp32.cpp), así que no hay conflicto visual entre ambas.
+//
+// El desplazamiento del texto es por TIEMPO (MarqueeLogic::offsetPx sobre
+// messageElapsedMs_), no por frame — inmune a variaciones de FPS de render.
+// Solo se hace setCursor+print de la subcadena potencialmente visible
+// (firstVisibleChar..hasta salir por la derecha) para no imprimir chars con
+// cursor muy negativo innecesariamente.
+// =============================================================================
+
+void DisplayRendererColor::drawMessageView_() {
+    canvas_.fillScreen(COL_BG);
+
+    // HUD superior (WiFi/batería) + personaje centrado con el mood normal
+    // (drawSprite_ ya resuelve mood via computeMood_() cuando no hay
+    // animación one-shot de acción activa — mismo criterio que IdleMain).
+    drawHudTop_();
+    drawSprite_();
+
+    // ── Banda tipo bocadillo — misma geometría que la card del HUD inferior ──
+    const int16_t cardY = kScreenH - kEdgeInset - kHudBottomH;
+    const int16_t cardW = kScreenW - 2 * kEdgeInset;
+    canvas_.fillRoundRect(kEdgeInset, cardY, cardW, kHudBottomH, kCornerR, COL_WHITE);
+    canvas_.drawRoundRect(kEdgeInset, cardY, cardW, kHudBottomH, kCornerR, COL_GRAY);
+
+    // ── Texto en marquee — scroll por tiempo (MarqueeLogic) ──────────────────
+    const uint16_t charW  = static_cast<uint16_t>(6 * kMessageTextSize);
+    const uint32_t cycle  = MarqueeLogic::cyclePx(messageTextPxW_, kScreenW);
+    const uint32_t offset = MarqueeLogic::offsetPx(messageElapsedMs_, kMarqueeSpeedPxPerSec);
+    const int32_t  x0     = MarqueeLogic::textX(offset, kScreenW, cycle);
+    const uint32_t firstIdx =
+        MarqueeLogic::firstVisibleChar(offset, kScreenW, cycle, charW);
+
+    // Centrado vertical del texto dentro de la banda (fuente base 8px alto/char).
+    const int16_t fontH = static_cast<int16_t>(8 * kMessageTextSize);
+    const int16_t textY = cardY + (kHudBottomH - fontH) / 2;
+
+    canvas_.setTextColor(COL_BLACK);
+    canvas_.setTextSize(kMessageTextSize);
+
+    const size_t textLen = strlen(messageText_);
+    for (size_t i = firstIdx; i < textLen; ++i) {
+        const int32_t charX = x0 + static_cast<int32_t>(i) * static_cast<int32_t>(charW);
+        if (charX >= kScreenW) break;               // resto ya fuera por la derecha
+        if (charX <= -static_cast<int32_t>(charW)) continue;  // aún no visible (defensivo)
+        canvas_.setCursor(static_cast<int16_t>(charX), textY);
+        canvas_.print(messageText_[i]);
+    }
 
     canvas_.flush();
 }

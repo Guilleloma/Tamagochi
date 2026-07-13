@@ -58,7 +58,8 @@ enum class SceneColor : uint8_t {
     IdleMain,
     StatsView,
     OtaProgress,
-    DeadScreen
+    DeadScreen,
+    MessageView   // mensaje de texto del padre (marquee) — ver showMessage()
 };
 
 // =============================================================================
@@ -121,6 +122,22 @@ public:
     void triggerHatchAnimation();   // reservado (Fase 3)
     void triggerEvolveAnimation();  // parpadeo 1200 ms (Fase 3)
 
+    // ── Mensaje del padre (marquee) ──────────────────────────────────────────
+    // showMessage: copia asciiText (ya sanitizado a ASCII por MessageBox — ver
+    // main_esp32.cpp) a messageText_, resetea el scroll (offset/pasadas) y
+    // arranca el timer de kMessageDurationMs. NO cambia scene_ — el caller
+    // (main_esp32.cpp) decide cuándo mostrar MessageView.
+    void showMessage(const char* asciiText);
+
+    // dismissMessage: descarte inmediato (botón físico). Pone remaining a 0 —
+    // el próximo render() ya ve messageActive()==false.
+    void dismissMessage();
+
+    // messageActive: true mientras quede tiempo Y no se hayan agotado las
+    // pasadas de marquee permitidas (kMessageMaxPasses). El caller la usa para
+    // saber cuándo restaurar la escena anterior.
+    bool messageActive() const;
+
     // ── Menú de acciones ─────────────────────────────────────────────────────
     // En Fase 2 el menú se pobla con datos falsos; refreshActionMenu usará StatsEngine real en Fase 3.
     void refreshActionMenu(const StatsEngine& engine);
@@ -175,6 +192,21 @@ private:
 
     uint32_t hatchAnimRemainingMs_  = 0;
     uint32_t evolveAnimRemainingMs_ = 0;
+
+    // ── Mensaje del padre (marquee) ─────────────────────────────────────────
+    // messageText_: copia local ya sanitizada a ASCII (ver showMessage()).
+    // messageRemainingMs_: ms restantes antes de auto-descartar el mensaje;
+    //   se drena en render() igual que el resto de timers one-shot. 0 = sin
+    //   mensaje activo (ver messageActive()).
+    // messageElapsedMs_: ms transcurridos desde showMessage() — alimenta
+    //   MarqueeLogic::offsetPx() para el scroll (por TIEMPO, no por frame).
+    // messageTextPxW_: ancho en px del texto completo a kMessageTextSize,
+    //   calculado una vez en showMessage() (evita recalcular strlen*charW
+    //   en cada render()).
+    char     messageText_[97]      = {};
+    uint32_t messageRemainingMs_   = 0;
+    uint32_t messageElapsedMs_     = 0;
+    uint16_t messageTextPxW_       = 0;
 
     // ── Cache de animaciones por etapa — precargadas en PSRAM al boot ───────
     // spritesByStage_[stage] contiene los ColorSpriteFrames de todos los moods
@@ -272,6 +304,22 @@ private:
     // para eat; el resto son 4 frames, ~500 ms). Usamos 1200 ms con margen.
     static constexpr uint32_t kActionAnimDurationMs = 1200;
 
+    // ── Mensaje del padre (marquee) ──────────────────────────────────────────
+    // kMessageDurationMs: duración máxima del mensaje en pantalla (60 s) —
+    //   auto-descarte aunque el padre nunca vuelva a interactuar y el usuario
+    //   no pulse el botón.
+    // kMarqueeSpeedPxPerSec: velocidad de scroll horizontal. 60 px/s da un
+    //   ritmo de lectura cómodo (a kMessageTextSize=3, ~3.3 chars/s).
+    // kMessageTextSize: setTextSize() del texto del marquee (18 px/char de
+    //   ancho — ver drawMessageView_()).
+    // kMessageMaxPasses: nº máximo de vueltas completas del marquee antes de
+    //   dar el mensaje por "leído" y descartarlo (con textos cortos, 60 s a
+    //   60 px/s podría dar muchas más vueltas de las razonables).
+    static constexpr uint32_t kMessageDurationMs     = 60000;
+    static constexpr uint32_t kMarqueeSpeedPxPerSec   = 60;
+    static constexpr uint8_t  kMessageTextSize        = 3;
+    static constexpr uint8_t  kMessageMaxPasses       = 6;
+
     // ── Menú de acciones ─────────────────────────────────────────────────────
     ActionKind visibleActions_[kMaxActionMenuItems] = {};
     uint8_t    visibleCount_  = 0;
@@ -291,6 +339,7 @@ private:
     void drawStatsView_();
     void drawOtaProgress_();
     void drawDeadScreen_();
+    void drawMessageView_();       // mensaje del padre — HUD + personaje + marquee
 
     void drawHudTop_();            // WiFi + batería en esquina sup (etapa/edad movidas a StatsView)
     void drawHudBottom_();         // acción seleccionada

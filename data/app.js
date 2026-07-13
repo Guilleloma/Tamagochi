@@ -41,6 +41,7 @@ var elSprite, elStage, elAge, elBadges,
     elToast,
     elBtnFeed, elBtnPlay, elBtnClean, elBtnMedicate,
     elBtnDiscipline, elBtnSleep, elBtnReboot,
+    elMessageForm, elMessageInput,
     elSysFirmware, elSysUptime, elSysHeap, elSysRssi,
     elSysIp, elSysHostname, elSysMac,
     elSysBattStatus, elSysBattRaw, elSysBattFilteredRow, elSysBattFiltered;
@@ -72,6 +73,8 @@ function cacheDomRefs() {
   elBtnDiscipline = document.getElementById('btn-discipline');
   elBtnSleep      = document.getElementById('btn-sleep');
   elBtnReboot     = document.getElementById('btn-reboot');
+  elMessageForm   = document.getElementById('message-form');
+  elMessageInput  = document.getElementById('message-input');
   elSysIp         = document.getElementById('sys-ip');
   elSysHostname   = document.getElementById('sys-hostname');
   elSysMac        = document.getElementById('sys-mac');
@@ -375,6 +378,35 @@ async function doReboot() {
   }
 }
 
+// Envio de mensaje al Tamagotchi — mismo patron de fetch que doReboot(), pero
+// la respuesta de /api/v1/message ({data:{messageAccepted, displayedChars}})
+// tampoco es el estado del Tamagotchi, asi que no se pasa a renderState().
+// El backend translitera tildes/enye a ASCII y limita a 96 caracteres; eso es
+// transparente para el dashboard (el input solo aplica maxlength=96).
+async function doSendMessage() {
+  var text = elMessageInput.value.trim();
+  if (!text) return;
+  try {
+    var res = await fetch('/api/v1/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ text: text })
+    });
+    if (res.ok) {
+      flashFeedback('Mensaje enviado', 'success');
+      elMessageInput.value = '';
+    } else if (res.status === 429) {
+      flashFeedback('Demasiado rapido, espera un momento', 'warn');
+    } else if (res.status !== 401) {
+      var ej = await res.json().catch(function() { return { error: { message: 'Error ' + res.status } }; });
+      flashFeedback((ej.error && ej.error.message) || 'Error', 'error');
+    }
+  } catch (e) {
+    flashFeedback('Sin conexion', 'error');
+  }
+}
+
 // Toast
 
 var toastTimer = null;
@@ -401,6 +433,12 @@ function wireButtons() {
     doAction('/api/v1/sleep', { value: !(state && state.isSleeping) });
   });
   if (elBtnReboot) elBtnReboot.addEventListener('click', doReboot);
+  if (elMessageForm) {
+    elMessageForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      doSendMessage();
+    });
+  }
 }
 
 // Visibility

@@ -54,6 +54,7 @@
 #include "WebUI.h"
 #include "BootSplash.h"
 #include "BatteryMonitor.h"
+#include "MessageBox.h"
 
 // =============================================================================
 // Verificación de versión de firmware en compile-time.
@@ -108,11 +109,22 @@ static BatteryMonitor battery(bus);
 // WebUI se construye en heap en setup() para acceder a renderer/engine ya inicializados.
 // Declaramos un puntero aquí; la instancia se crea en setup().
 static WebUI*      webUI = nullptr;
+// messageBox: buffer SPSC para el mensaje de texto del padre (POST
+// /api/v1/message). Productor = handler HTTP (task async_tcp, vía WebUI);
+// consumidor = loop() (ver más abajo). Puro (lib/core) — no requiere begin().
+static MessageBox  messageBox;
 
 // =============================================================================
 // Estado de escena — accesible a los handlers estáticos del EventBus.
 // =============================================================================
 static SceneColor currentScene = SceneColor::IdleMain;
+
+// Escena activa justo antes de entrar en MessageView — para restaurarla
+// cuando el marquee termina (timeout, vueltas agotadas o descarte por botón).
+// Solo se actualiza al ENTRAR en MessageView (ver loop()), nunca mientras ya
+// se está en ella, para no perder la escena original si llegan varios
+// mensajes seguidos antes de que el usuario descarte el primero.
+static SceneColor sceneBeforeMessage_ = SceneColor::IdleMain;
 
 // Etapa anterior del LifeFSM — para detectar la transición Dead→Egg
 // (resurrección) en onLifeStateChanged sin estado extra.
@@ -226,9 +238,20 @@ static void executeSelectedAction_() {
     LOG_INFO("Action HUD: executed %u", static_cast<unsigned>(action));
 }
 
+// dismissMessage_ — descarte del mensaje del padre (botón físico, corto o
+// largo indistintamente — ver onShortClick/onLongPress). Restaura la escena
+// que estaba activa antes de que el mensaje interrumpiera (sceneBeforeMessage_).
+static void dismissMessage_() {
+    renderer->dismissMessage();
+    currentScene = sceneBeforeMessage_;
+    renderer->setScene(currentScene);
+    LOG_INFO("Message: descartado por boton -> scene=%u", static_cast<unsigned>(currentScene));
+}
+
 // Botón corto:
-//   IdleMain  → refresca preconditions y avanza cursor del HUD.
-//   StatsView → cierra StatsView y vuelve a IdleMain.
+//   IdleMain     → refresca preconditions y avanza cursor del HUD.
+//   StatsView    → cierra StatsView y vuelve a IdleMain.
+//   MessageView  → descarta el mensaje del padre y restaura la escena previa.
 //   DeadScreen / otros → ignorar.
 static void onShortClick(const Event&) {
     if (lifeFSM.stage() == LifeStage::Dead) return;
@@ -245,16 +268,24 @@ static void onShortClick(const Event&) {
             renderer->setScene(currentScene);
             LOG_INFO("Scene -> IdleMain (from StatsView)");
             break;
+        case SceneColor::MessageView:
+            dismissMessage_();
+            break;
         default:
             break;
     }
 }
 
 // Botón largo:
-//   IdleMain  → ejecuta la acción activa del HUD. Si es Stats, abre StatsView.
-//   StatsView → no-op (long press solo tiene semántica en IdleMain).
+//   MessageView → descarta el mensaje del padre (mismo criterio que el click corto).
+//   IdleMain    → ejecuta la acción activa del HUD. Si es Stats, abre StatsView.
+//   StatsView   → no-op (long press solo tiene semántica en IdleMain).
 static void onLongPress(const Event&) {
     if (lifeFSM.stage() == LifeStage::Dead) return;
+    if (currentScene == SceneColor::MessageView) {
+        dismissMessage_();
+        return;
+    }
     if (currentScene != SceneColor::IdleMain) return;
 
     ActionKind action = renderer->currentSelectedAction();
@@ -639,10 +670,13 @@ void setup() {
     // BATTERY_SENSE_ENABLED=0 se pasa nullptr explícitamente: aunque `battery`
     // siempre existe como objeto, su gauge_ nunca deja Unknown en ese caso, así
     // que nullptr documenta la intención sin cambiar el comportamiento observable.
+    //
+    // &messageBox (6º parámetro, ver WebUI.h) se pasa en AMBAS ramas — el
+    // mensaje del padre es independiente del sensor de batería.
 #if BATTERY_SENSE_ENABLED
-    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi, &battery.gauge());
+    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi, &battery.gauge(), &messageBox);
 #else
-    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi, nullptr);
+    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi, nullptr, &messageBox);
 #endif
 
     // ── Suscripciones EventBus ────────────────────────────────────────────────
@@ -711,6 +745,50 @@ void loop() {
     // Los handlers onShortClick/onLongPress se invocan síncronamente desde aquí.
     if (inputHandler) {
         inputHandler->loop();
+    }
+
+    // ── Mensaje del padre: consumir de MessageBox y mostrar en pantalla ──────
+    // Consumidor SPSC (ver MessageBox.h) — el productor es el handler HTTP de
+    // WebUI, que corre en la task async_tcp. Sin acuse de recibo: el POST ya
+    // respondió 200 al aceptar, independientemente de si aquí se muestra o se
+    // descarta (p.ej. mascota muerta o en OtaProgress).
+    if (messageBox.hasPending()) {
+        char text[MessageBox::kMaxLen + 1];
+        messageBox.consume(text, sizeof(text));
+
+        const bool canShow = (lifeFSM.stage() != LifeStage::Dead)
+                           && (currentScene == SceneColor::IdleMain
+                               || currentScene == SceneColor::StatsView
+                               || currentScene == SceneColor::MessageView);
+
+        if (canShow) {
+            // No pisar sceneBeforeMessage_ si ya estábamos en MessageView
+            // (un segundo mensaje mientras se muestra el primero no debe
+            // perder la escena ORIGINAL a la que hay que volver al terminar).
+            if (currentScene != SceneColor::MessageView) {
+                sceneBeforeMessage_ = currentScene;
+            }
+            renderer->showMessage(text);
+            currentScene = SceneColor::MessageView;
+            renderer->setScene(currentScene);
+            LOG_INFO("Message: mostrando mensaje del padre (%u chars)",
+                     static_cast<unsigned>(strlen(text)));
+        } else {
+            LOG_WARN("Message: descartado (scene=%u stage=%u no permite mostrarlo)",
+                      static_cast<unsigned>(currentScene),
+                      static_cast<unsigned>(lifeFSM.stage()));
+        }
+    }
+
+    // ── Mensaje del padre: restaurar la escena previa al terminar el marquee ──
+    // messageActive()==false cuando expira el timer de 60s o se agotan las
+    // vueltas permitidas (kMessageMaxPasses) — el descarte por botón (ver
+    // dismissMessage_) ya restaura la escena de forma síncrona, así que este
+    // bloque solo dispara en el camino de "se dejó terminar solo".
+    if (currentScene == SceneColor::MessageView && !renderer->messageActive()) {
+        currentScene = sceneBeforeMessage_;
+        renderer->setScene(currentScene);
+        LOG_INFO("Scene -> %u (mensaje del padre terminado)", static_cast<unsigned>(currentScene));
     }
 
     uint32_t now = millis();
