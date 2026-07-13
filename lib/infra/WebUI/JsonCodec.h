@@ -40,10 +40,23 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
 // Serializa info de telemetría del dispositivo.
 // Formato: { "data": { "firmwareVersion", "uptimeMs", "freeHeap", "wifiRssi", ... } }
 // Además de batteryPercent/batteryCharging/batteryValid, incluye batteryMillivolts
-// (mV crudos del gauge) — /info es el endpoint canónico de telemetría detallada.
+// (mV filtrados del gauge, 0 si !valid) — /info es el endpoint canónico de
+// telemetría detallada.
+//
+// batteryRawMillivolts / batteryGateProgress: diagnóstico de soldadura, SIEMPRE
+// presentes (a diferencia de batteryMillivolts, nunca se gatean a 0/valid).
+//   - batteryRawMillivolts: última lectura del ADC sin filtrar ni gatear (ver
+//     BatteryGauge::lastRawMillivolts) — permite ver qué lee el pin ADC en
+//     tiempo real aunque el gate nunca llegue a validar.
+//   - batteryGateProgress: muestras consecutivas plausibles+estables hacia la
+//     validez, 0-8 (ver BatteryGauge::consecutivePlausible) — permite saber si
+//     el gate está "a punto" de validar o si cada muestra rompe la racha.
+// Exclusivos de /info (no de /state): son datos de diagnóstico de hardware,
+// no de estado de juego.
 size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
                      uint32_t freeHeap, int8_t wifiRssi,
                      const BatterySnapshot& battery,
+                     uint16_t batteryRawMillivolts, uint8_t batteryGateProgress,
                      char* out, size_t outSize);
 
 // Serializa respuesta de acción: state completo + actionApplied.

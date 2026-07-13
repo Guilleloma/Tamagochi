@@ -221,6 +221,58 @@ void test_four_consecutive_glitches_invalidate() {
 }
 
 // =============================================================================
+// 10c. test_last_raw_millivolts_updates_even_when_implausible
+// lastRawMillivolts() es diagnóstico puro: debe reflejar SIEMPRE la última
+// muestra pasada a addSample(), sea plausible/estable o no — a diferencia de
+// snapshot().millivolts, que se gatea a 0 mientras !valid_. Sin esto, un
+// usuario que acaba de soldar el divisor y ve Unknown no tiene forma de saber
+// si el pin lee 0 (nada conectado) o 5000 (fuera de rango) o 3500 (dentro de
+// rango pero inestable).
+// =============================================================================
+void test_last_raw_millivolts_updates_even_when_implausible() {
+    TEST_ASSERT_EQUAL_UINT16(0, g_gauge->lastRawMillivolts());  // boot, sin muestras aún
+
+    g_gauge->addSample(5000, 0);  // implausible (> maxPlausibleMv)
+    TEST_ASSERT_FALSE(g_gauge->snapshot().valid);
+    TEST_ASSERT_EQUAL_UINT16(0, g_gauge->snapshot().millivolts);   // gateado: 0 pese a la lectura real
+    TEST_ASSERT_EQUAL_UINT16(5000, g_gauge->lastRawMillivolts());  // sin gatear: la lectura real
+
+    g_gauge->addSample(3500, 1000);  // plausible, pero aún no valid (1 sola muestra)
+    TEST_ASSERT_FALSE(g_gauge->snapshot().valid);
+    TEST_ASSERT_EQUAL_UINT16(0, g_gauge->snapshot().millivolts);
+    TEST_ASSERT_EQUAL_UINT16(3500, g_gauge->lastRawMillivolts());
+}
+
+// =============================================================================
+// 10d. test_consecutive_plausible_reflects_gate_progress
+// consecutivePlausible() expone el progreso real del gate de validez (0..8):
+// sube con cada muestra plausible+consecutiva, se resetea a 0 en cuanto una
+// implausible rompe la racha (mismo comportamiento que el propio gate, ver
+// test_floating_pin_alternating_in_and_out_of_range_never_valid), y se queda
+// en kRingCapacity (8) una vez valid_.
+// =============================================================================
+void test_consecutive_plausible_reflects_gate_progress() {
+    TEST_ASSERT_EQUAL_UINT8(0, g_gauge->consecutivePlausible());  // boot
+
+    uint32_t t = 0;
+    for (uint8_t i = 0; i < 5; ++i) {
+        g_gauge->addSample(3700, t);
+        t += 1000;
+        TEST_ASSERT_EQUAL_UINT8(i + 1, g_gauge->consecutivePlausible());
+    }
+    TEST_ASSERT_FALSE(g_gauge->snapshot().valid);  // 5/8, aún no valida
+
+    g_gauge->addSample(5000, t);  // implausible -> rompe la racha
+    t += 1000;
+    TEST_ASSERT_EQUAL_UINT8(0, g_gauge->consecutivePlausible());
+    TEST_ASSERT_FALSE(g_gauge->snapshot().valid);
+
+    feedStable(*g_gauge, 3700, 8, t, 1000);  // racha nueva y completa
+    TEST_ASSERT_TRUE(g_gauge->snapshot().valid);
+    TEST_ASSERT_EQUAL_UINT8(8, g_gauge->consecutivePlausible());
+}
+
+// =============================================================================
 // 10b. test_samples_to_valid_clamped_to_ring_capacity
 // [MINOR] samplesToValid no puede superar kRingCapacity (8): ringCount_ satura
 // ahí, así que un Config con samplesToValid=20 haría la validez inalcanzable
@@ -516,6 +568,8 @@ int main() {
     RUN_TEST(test_floating_pin_alternating_in_and_out_of_range_never_valid);
     RUN_TEST(test_single_glitch_does_not_invalidate);
     RUN_TEST(test_four_consecutive_glitches_invalidate);
+    RUN_TEST(test_last_raw_millivolts_updates_even_when_implausible);
+    RUN_TEST(test_consecutive_plausible_reflects_gate_progress);
     RUN_TEST(test_samples_to_valid_clamped_to_ring_capacity);
 
     RUN_TEST(test_percent_hysteresis_prevents_flicker);

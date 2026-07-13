@@ -115,6 +115,28 @@ public:
     // Estado publicable actual (sin efectos secundarios).
     BatterySnapshot snapshot() const;
 
+    // Última lectura cruda (mV, ya compensada por el divisor externo — ver
+    // BatteryMonitor) SIN gatear por validez. A diferencia de
+    // snapshot().millivolts (0 mientras !valid_), este valor se actualiza en
+    // TODA llamada a addSample(), sea plausible/estable o no.
+    //
+    // Solo para diagnóstico (p.ej. /api/v1/info): sin esto, si el gate nunca
+    // llega a validar tras soldar el divisor, es imposible distinguir desde
+    // fuera "no hay hardware conectado" (pin flotante) de "hardware conectado
+    // pero fuera de rango o inestable" (soldadura floja, GND no común, divisor
+    // con resistencias equivocadas...) — el snapshot público no expone nada
+    // útil en ninguno de los dos casos.
+    uint16_t lastRawMillivolts() const { return lastRawMv_; }
+
+    // Progreso del gate de validez: muestras CONSECUTIVAS plausibles+estables
+    // acumuladas hacia `samplesToValid` (0..kRingCapacity). Expone ringCount_
+    // directamente — no añade estado nuevo, es diagnóstico "gratis".
+    //
+    // Mientras !valid_: 0 = cada muestra reciente rompió la racha (implausible
+    // o el ring se acaba de limpiar); un valor intermedio (p.ej. 6) = "a punto"
+    // de validar. Una vez valid_==true se mantiene en kRingCapacity.
+    uint8_t consecutivePlausible() const { return ringCount_; }
+
     // Curva LiPo 1S por tramos, interpolación lineal entre breakpoints,
     // clamp fuera de rango. Pura función de mV → %, sin estado.
     static uint8_t percentFromMv(uint16_t mv);
@@ -129,6 +151,11 @@ public:
 private:
 
     Config config_;
+
+    // Última lectura cruda SIN gatear — ver lastRawMillivolts(). Se actualiza
+    // en cada addSample() antes de cualquier gate, incluida la primerísima
+    // llamada tras boot (permite diagnóstico aunque el gate nunca valide).
+    uint16_t lastRawMv_ = 0;
 
     // --- Gate de validez + filtro (ring de últimas muestras plausibles) ---
     uint16_t ring_[kRingCapacity] = {};

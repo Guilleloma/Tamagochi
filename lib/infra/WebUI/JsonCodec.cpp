@@ -80,6 +80,7 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
 size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
                      uint32_t freeHeap, int8_t wifiRssi,
                      const BatterySnapshot& battery,
+                     uint16_t batteryRawMillivolts, uint8_t batteryGateProgress,
                      char* out, size_t outSize) {
     JsonDocument doc;
 
@@ -94,6 +95,10 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
     data["batteryCharging"]   = battery.charging;
     data["batteryValid"]      = battery.valid;
     data["batteryMillivolts"] = battery.millivolts;
+    // Diagnóstico de soldadura — SIEMPRE presentes, nunca gateados por valid
+    // (a diferencia de batteryMillivolts). Ver comentario del .h.
+    data["batteryRawMillivolts"] = batteryRawMillivolts;
+    data["batteryGateProgress"]  = batteryGateProgress;
 
     return serializeJson(doc, out, outSize);
 }

@@ -221,7 +221,7 @@ void WebUI::handleGetState_(AsyncWebServerRequest* req) {
 void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
     if (!checkAuthAndRate_(req)) return;
 
-    char buf[256];
+    char buf[320];  // 256 se quedaba justo al añadir batteryRawMillivolts/batteryGateProgress
 
     size_t len = JsonCodec::serializeInfo(
         FIRMWARE_VERSION,
@@ -229,6 +229,8 @@ void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
         ESP.getFreeHeap(),
         WiFi.RSSI(),
         batterySnapshot_(),
+        batteryRawMillivolts_(),
+        batteryGateProgress_(),
         buf,
         sizeof(buf)
     );
@@ -487,6 +489,21 @@ void WebUI::sendJsonError_(AsyncWebServerRequest* req, int code,
 // -----------------------------------------------------------------------------
 BatterySnapshot WebUI::batterySnapshot_() const {
     return battery_ ? battery_->snapshot() : BatterySnapshot{};
+}
+
+// -----------------------------------------------------------------------------
+// batteryRawMillivolts_ / batteryGateProgress_ — diagnóstico de soldadura
+// (ver JsonCodec::serializeInfo). 0 si battery_ es nullptr, mismo criterio de
+// "sin sensor" que batterySnapshot_() — pero a diferencia de esa, estos dos
+// NUNCA se gatean por valid_: reflejan siempre la lectura real del ADC y el
+// progreso real del gate, incluso mientras el gauge está en Unknown.
+// -----------------------------------------------------------------------------
+uint16_t WebUI::batteryRawMillivolts_() const {
+    return battery_ ? battery_->lastRawMillivolts() : 0;
+}
+
+uint8_t WebUI::batteryGateProgress_() const {
+    return battery_ ? battery_->consecutivePlausible() : 0;
 }
 
 #endif  // UNIT_TEST
