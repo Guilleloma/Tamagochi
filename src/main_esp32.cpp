@@ -302,19 +302,39 @@ static void onWifiStateChanged(const Event& e) {
     if (renderer) renderer->setWifiState(ws);
 
     if (ws == WifiState::Connected) {
-        // Activar OTA — requiere WiFi con IP asignada.
+        // Activar OTA — requiere WiFi con IP asignada. ArduinoOTA.begin() en
+        // ESP32 YA inicializa mDNS internamente (MDNS.begin(hostname) +
+        // MDNS.enableArduino(), que registra el servicio _arduino._tcp usado
+        // por espota para descubrir el dispositivo) — ver ArduinoOTA::begin()
+        // en el framework arduino-esp32.
         ota.begin();
 
         // Activar WebUI — servidor HTTP en puerto 80 con endpoints REST.
         if (webUI && !webUI->isRunning()) webUI->begin();
 
-        // mDNS: anunciar hostname + servicio HTTP.
-        // ESP32: MDNS.begin() es suficiente; no hay que llamar MDNS.update() en el loop.
-        if (MDNS.begin(OTA_HOSTNAME)) {
+        // mDNS: registrar además el servicio HTTP para que el dashboard sea
+        // descubrible.
+        //
+        // FIX (doble init de mDNS): antes se llamaba MDNS.begin(OTA_HOSTNAME)
+        // aquí incondicionalmente, pero si ota.begin() ya lo inicializó (caso
+        // normal, OTA_PASSWORD no vacío) esta segunda llamada a mdns_init()
+        // SIEMPRE fallaba (el stack mDNS de esp-idf no admite doble init) —
+        // MDNS.begin() devolvía false y todo el bloque, incluido
+        // MDNS.addService("http",...), se saltaba en silencio. El dashboard
+        // seguía siendo alcanzable por hostname (ArduinoOTA ya lo registró)
+        // pero nunca aparecía como servicio _http._tcp para clientes mDNS-SD.
+        //
+        // Ahora solo se llama MDNS.begin() aquí si ota.begin() NO lo hizo
+        // (OTA_PASSWORD vacío en secrets.h -> OTAManager::begin() retorna
+        // antes de tocar mDNS, ver OTAManager.cpp).
+        bool mdnsReady = ota.isReady();
+        if (!mdnsReady) {
+            mdnsReady = MDNS.begin(OTA_HOSTNAME);
+            if (!mdnsReady) LOG_WARN("[mdns] begin failed — continuando sin mDNS");
+        }
+        if (mdnsReady) {
             MDNS.addService("http", "tcp", 80);
             LOG_INFO("[mdns] hostname=%s.local  http service registered", OTA_HOSTNAME);
-        } else {
-            LOG_WARN("[mdns] begin failed — continuando sin mDNS");
         }
     } else {
         // Cualquier estado distinto de Connected: detener OTA y WebUI si estaban activos.
