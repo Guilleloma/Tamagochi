@@ -84,6 +84,14 @@
     </div>
   </section>
 
+  <section class="message-section" aria-label="Mensaje">
+    <h2 class="section-title">Mensaje</h2>
+    <form id="message-form" class="message-form">
+      <input type="text" id="message-input" maxlength="96" autocomplete="off" placeholder="Escribe un mensaje para la mascota..." aria-label="Texto del mensaje">
+      <button type="submit" class="btn" id="btn-send-message">Enviar</button>
+    </form>
+  </section>
+
   <!-- Sistema: <details>/<summary> nativos dan un disclosure accesible
        (aria-expanded implícito, sin JS) — colapsado por defecto porque es un
        panel de diagnóstico, no parte del juego. Datos de GET /api/v1/info,
