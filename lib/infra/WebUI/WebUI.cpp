@@ -32,6 +32,10 @@
 #include "StatsEngine.h"
 #include "LifeFSM.h"
 #include "WifiManager.h"
+// NOTA: NO incluir BatteryMonitor.h aquí — WebUI depende solo de BatteryGauge
+// (vía WebUI.h), que ya trae el tipo BatterySnapshot. Incluir BatteryMonitor.h
+// arrastraría infra ESP32-only (analogSetPinAttenuation) al LDF de builds que
+// compilan WebUI sin necesitarlo. Ver comentario del ctor en WebUI.h.
 #include "JsonCodec.h"
 #include "AuthChecker.h"
 
@@ -40,11 +44,12 @@
 // =============================================================================
 
 WebUI::WebUI(EventBus& bus, const StatsEngine& engine, const LifeFSM& fsm,
-             const WifiManager& wifi)
+             const WifiManager& wifi, const BatteryGauge* battery)
     : bus_(bus)
     , engine_(engine)
     , fsm_(fsm)
     , wifi_(wifi)
+    , battery_(battery)
     , server_(80)
     , rateLimiter_()
     , running_(false)
@@ -74,6 +79,16 @@ void WebUI::end() {
 void WebUI::loop() {
     // AsyncWebServer es event-driven — no requiere polling.
     // Hook reservado para futuras extensiones (p.ej. WebSockets).
+
+    // Reinicio diferido tras POST /api/v1/reboot (ver handlePostReboot_ y el
+    // comentario de rebootAtMs_ en el .h). Se comprueba aquí, en el loop
+    // principal, en vez de dentro del handler HTTP, porque ESP.restart() ahí
+    // cortaría la respuesta 200 a mitad de envío (el handler corre en la task
+    // async_tcp, no en el loop principal).
+    if (rebootAtMs_ != 0 && millis() >= rebootAtMs_) {
+        LOG_WARN("[webui] reiniciando dispositivo (solicitado via /api/v1/reboot)");
+        ESP.restart();
+    }
 }
 
 // =============================================================================
@@ -143,6 +158,11 @@ void WebUI::mountRoutes_() {
         handlePostMedicate_(req);
     });
 
+    // --- POST endpoint de sistema (reboot) — sin body, mismo patrón que clean/medicate ---
+    server_.on("/api/v1/reboot", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        handlePostReboot_(req);
+    });
+
     // --- Archivos estáticos desde LittleFS (hito 7) ---
     // Sirve /, /app.css, /app.js, /favicon.ico desde la carpeta raíz de LittleFS.
     // index.html sin caché; CSS/JS/favicon con caché de 1 hora.
@@ -182,6 +202,7 @@ void WebUI::handleGetState_(AsyncWebServerRequest* req) {
         deathCount,
         turbo,
         millis(),
+        batterySnapshot_(),
         buf,
         sizeof(buf)
     );
@@ -207,6 +228,7 @@ void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
         millis(),
         ESP.getFreeHeap(),
         WiFi.RSSI(),
+        batterySnapshot_(),
         buf,
         sizeof(buf)
     );
@@ -316,6 +338,44 @@ void WebUI::handlePostMedicate_(AsyncWebServerRequest* req) {
     sendActionResponse_(req, "medicate", -1);  // -1 = sin amount en la respuesta
 }
 
+// -----------------------------------------------------------------------------
+// handlePostReboot_ — endpoint de sistema. Sin body.
+//
+// Motivación (ver commit): ArduinoOTA puede colgarse tras un apagón por
+// batería sin dejar forma remota de reiniciar el dispositivo. Este endpoint
+// da esa vía de escape.
+//
+// Orden crítico:
+//   1. checkAuthAndRate_ — mismo gate que el resto de /api/v1/*.
+//   2. PersistRequested SÍNCRONO antes de responder — el bus es síncrono
+//      (mismo patrón que el resto de acciones), así que al llegar al paso 3
+//      el estado ya está a salvo en LittleFS, pase lo que pase después.
+//   3. Responder 200 con { data: { rebooting: true }, meta: {...} }.
+//   4. Programar rebootAtMs_ = millis() + 750 — el reinicio real ocurre en
+//      loop() (ver WebUI::loop), NUNCA aquí: ESP.restart() en este handler
+//      cortaría la propia respuesta HTTP a mitad de envío, porque este
+//      handler corre en la task async_tcp, no en el loop principal. El
+//      margen de 750ms da tiempo a que AsyncTCP termine de enviar el buffer
+//      de respuesta al cliente antes del reinicio.
+// -----------------------------------------------------------------------------
+void WebUI::handlePostReboot_(AsyncWebServerRequest* req) {
+    if (!checkAuthAndRate_(req)) return;
+
+    bus_.publish({EventType::PersistRequested, 0});
+    LOG_WARN("[webui] POST /api/v1/reboot — estado persistido, reinicio programado en 750ms");
+
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+             "{\"data\":{\"rebooting\":true},\"meta\":{\"apiVersion\":\"v1\",\"timestamp\":%lu}}",
+             static_cast<unsigned long>(millis()));
+
+    AsyncWebServerResponse* resp = req->beginResponse(200, "application/json", buf);
+    resp->addHeader("Cache-Control", "no-store");
+    req->send(resp);
+
+    rebootAtMs_ = millis() + 750;
+}
+
 void WebUI::sendActionResponse_(AsyncWebServerRequest* req,
                                 const char* actionType, int32_t actionValue) {
     char buf[600];  // serializeActionResponse ocupa ~420 bytes + overhead de actionApplied
@@ -336,6 +396,7 @@ void WebUI::sendActionResponse_(AsyncWebServerRequest* req,
         millis(),
         actionType,
         actionValue,
+        batterySnapshot_(),
         buf,
         sizeof(buf)
     );
@@ -415,6 +476,17 @@ void WebUI::sendJsonError_(AsyncWebServerRequest* req, int code,
         return;
     }
     req->send(code, "application/json", buf);
+}
+
+// -----------------------------------------------------------------------------
+// batterySnapshot_ — {valid:false, percent:0, charging:false, millivolts:0} si
+// battery_ es nullptr. Mismo contrato de API que un BatteryMonitor real sin
+// hardware detectado (ver BatteryGauge.h) — el cliente de la API nunca ve la
+// diferencia entre "sin sensor de batería compilado" y "sensor presente pero
+// aún sin validar".
+// -----------------------------------------------------------------------------
+BatterySnapshot WebUI::batterySnapshot_() const {
+    return battery_ ? battery_->snapshot() : BatterySnapshot{};
 }
 
 #endif  // UNIT_TEST

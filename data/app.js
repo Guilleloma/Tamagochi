@@ -24,10 +24,10 @@ var elSprite, elStage, elAge, elBadges,
     elBarHunger, elBarHappiness, elBarHealth, elBarDisc,
     elValHunger, elValHappiness, elValHealth, elValDisc,
     elValWeight, elValPoop,
-    elLastUpdate, elOfflineBadge, elWifiIndicator,
+    elLastUpdate, elOfflineBadge, elWifiIndicator, elBatteryIndicator,
     elToast,
     elBtnFeed, elBtnPlay, elBtnClean, elBtnMedicate,
-    elBtnDiscipline, elBtnSleep, elBtnHeal;
+    elBtnDiscipline, elBtnSleep, elBtnHeal, elBtnReboot;
 
 function cacheDomRefs() {
   elSprite        = document.getElementById('pet-sprite');
@@ -47,6 +47,7 @@ function cacheDomRefs() {
   elLastUpdate    = document.getElementById('last-update');
   elOfflineBadge  = document.getElementById('offline-badge');
   elWifiIndicator = document.getElementById('wifi-indicator');
+  elBatteryIndicator = document.getElementById('battery-indicator');
   elToast         = document.getElementById('toast');
   elBtnFeed       = document.getElementById('btn-feed');
   elBtnPlay       = document.getElementById('btn-play');
@@ -55,6 +56,7 @@ function cacheDomRefs() {
   elBtnDiscipline = document.getElementById('btn-discipline');
   elBtnSleep      = document.getElementById('btn-sleep');
   elBtnHeal       = document.getElementById('btn-heal');
+  elBtnReboot     = document.getElementById('btn-reboot');
 }
 
 function formatAge(min) {
@@ -116,6 +118,27 @@ function renderState(data) {
   elOfflineBadge.hidden = true;
   elWifiIndicator.textContent = '● Online';
   elWifiIndicator.className   = 'badge badge--ok';
+
+  renderBattery(data);
+}
+
+function renderBattery(data) {
+  if (!data.batteryValid) {
+    elBatteryIndicator.hidden = true;
+    return;
+  }
+
+  var pct = data.batteryPercent || 0;
+  var cls = 'badge--ok';
+  if (pct <= 20)      cls = 'badge--error';
+  else if (pct <= 50) cls = 'badge--warn';
+
+  var icon = data.batteryCharging ? '\u{26A1} ' : '\u{1F50B} ';
+  elBatteryIndicator.textContent = icon + pct + '%';
+  elBatteryIndicator.className   = 'badge ' + cls;
+  elBatteryIndicator.setAttribute('aria-label',
+    'Bateria ' + pct + '%' + (data.batteryCharging ? ', cargando' : ''));
+  elBatteryIndicator.hidden = false;
 }
 
 function updateAgeLabel() {
@@ -187,6 +210,39 @@ async function doAction(endpoint, body) {
   }
 }
 
+// Reinicio remoto — mismo patron de fetch que doAction(), pero la respuesta
+// de /api/v1/reboot ({data:{rebooting:true}}) NO es el estado del Tamagotchi,
+// asi que no se pasa a renderState(). El dispositivo persiste antes de
+// responder y se reinicia ~750ms despues (ver WebUI::handlePostReboot_).
+async function doReboot() {
+  if (!confirm('Reiniciar el dispositivo ahora? La partida se guarda antes de reiniciar.')) {
+    return;
+  }
+  try {
+    var res = await fetch('/api/v1/reboot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin'
+    });
+    if (res.ok) {
+      flashFeedback('Reiniciando...', 'warn');
+      // El dispositivo tarda unos segundos en volver a estar disponible tras
+      // el reinicio — se detiene el polling actual y se reintenta mas tarde
+      // en vez de dejar que el backoff normal (pensado para caidas breves de
+      // red) se dispare de inmediato con el primer fallo.
+      stopPolling();
+      schedulePoll(5000);
+    } else if (res.status === 429) {
+      flashFeedback('Demasiado rapido', 'warn');
+    } else if (res.status !== 401) {
+      var ej = await res.json().catch(function() { return { error: { message: 'Error ' + res.status } }; });
+      flashFeedback((ej.error && ej.error.message) || 'Error', 'error');
+    }
+  } catch (e) {
+    flashFeedback('Sin conexion', 'error');
+  }
+}
+
 // Toast
 
 var toastTimer = null;
@@ -213,6 +269,7 @@ function wireButtons() {
   elBtnSleep.addEventListener('click', function() {
     doAction('/api/v1/sleep', { value: !(state && state.isSleeping) });
   });
+  if (elBtnReboot) elBtnReboot.addEventListener('click', doReboot);
 }
 
 // Visibility

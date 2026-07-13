@@ -42,6 +42,7 @@ const char* lifeStageToString(LifeStage stage) {
 
 size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                       uint16_t deathCount, bool turbo, uint32_t uptimeMs,
+                      const BatterySnapshot& battery,
                       char* out, size_t outSize) {
     JsonDocument doc;
 
@@ -59,6 +60,11 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
     data["attentionScore"] = stats.attentionScore;
     data["deathCount"]     = deathCount;
     data["turbo"]          = turbo;
+    // Campos siempre presentes (backward compatible) — batteryValid indica si
+    // el resto de campos de batería son fiables (hardware no soldado aún → false).
+    data["batteryPercent"]  = battery.percent;
+    data["batteryCharging"] = battery.charging;
+    data["batteryValid"]    = battery.valid;
 
     JsonObject meta = doc["meta"].to<JsonObject>();
     meta["apiVersion"] = "v1";
@@ -73,6 +79,7 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
 
 size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
                      uint32_t freeHeap, int8_t wifiRssi,
+                     const BatterySnapshot& battery,
                      char* out, size_t outSize) {
     JsonDocument doc;
 
@@ -81,6 +88,12 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
     data["uptimeMs"]        = uptimeMs;
     data["freeHeap"]        = freeHeap;
     data["wifiRssi"]        = wifiRssi;
+    // /info es el endpoint canónico de telemetría — además del trío común
+    // (percent/charging/valid) expone batteryMillivolts para diagnóstico fino.
+    data["batteryPercent"]    = battery.percent;
+    data["batteryCharging"]   = battery.charging;
+    data["batteryValid"]      = battery.valid;
+    data["batteryMillivolts"] = battery.millivolts;
 
     return serializeJson(doc, out, outSize);
 }
@@ -92,6 +105,7 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
 size_t serializeActionResponse(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                                uint16_t deathCount, bool turbo, uint32_t uptimeMs,
                                const char* actionType, int32_t actionValue,
+                               const BatterySnapshot& battery,
                                char* out, size_t outSize) {
     JsonDocument doc;
 
@@ -109,6 +123,9 @@ size_t serializeActionResponse(const Stats& stats, LifeStage stage, uint32_t age
     data["attentionScore"] = stats.attentionScore;
     data["deathCount"]     = deathCount;
     data["turbo"]          = turbo;
+    data["batteryPercent"]  = battery.percent;
+    data["batteryCharging"] = battery.charging;
+    data["batteryValid"]    = battery.valid;
 
     JsonObject meta = doc["meta"].to<JsonObject>();
     meta["apiVersion"] = "v1";

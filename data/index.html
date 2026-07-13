@@ -10,7 +10,14 @@
 
 <header class="header">
   <h1 class="header__title">Tamagotchi</h1>
-  <span id="wifi-indicator" class="badge badge--ok" title="Estado de conexion">&#9679; Online</span>
+  <div class="header__status">
+    <span id="wifi-indicator" class="badge badge--ok" title="Estado de conexion">&#9679; Online</span>
+    <!-- role="status" (región live implícita, no intrusiva): sin esto un
+         <span> con aria-label no tiene rol semántico ("generic") y los
+         lectores de pantalla lo ignoran por completo, incluso al actualizar
+         el aria-label en cada poll (ver renderBattery() en app.js). -->
+    <span id="battery-indicator" class="badge" role="status" hidden></span>
+  </div>
 </header>
 
 <main>
@@ -83,6 +90,7 @@
 <footer class="footer" aria-live="polite">
   <span id="last-update">Sin datos aun</span>
   <span id="offline-badge" class="badge badge--error" hidden>&#9888; Offline</span>
+  <button class="btn btn--reboot" id="btn-reboot" aria-label="Reiniciar dispositivo" title="Reiniciar dispositivo">&#x21bb; Reiniciar</button>
 </footer>
 
 <div id="toast" class="toast" aria-live="assertive" aria-atomic="true" hidden></div>

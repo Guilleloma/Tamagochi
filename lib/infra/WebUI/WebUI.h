@@ -4,7 +4,9 @@
 //
 // Endpoints (hito 5):
 //   GET  /api/v1/state        → estado completo del Tamagochi (stats + stage + age)
+//                                + batteryPercent/batteryCharging/batteryValid
 //   GET  /api/v1/info         → telemetría del dispositivo (firmware, heap, RSSI)
+//                                + battery* (igual que /state) + batteryMillivolts
 //
 // Endpoints (hito 6 — acciones de juego):
 //   POST /api/v1/feed         → body: {"amount":1-100}  publica ActionFeedRequested
@@ -14,6 +16,14 @@
 //   POST /api/v1/sleep        → body: {"value":true|false} publica ActionSleepRequested
 //   POST /api/v1/clean        → sin body                publica ActionCleanRequested
 //   POST /api/v1/medicate     → sin body                publica ActionMedicateRequested
+//
+// Endpoint de sistema:
+//   POST /api/v1/reboot       → sin body. Persiste el estado (síncrono, ANTES
+//                               de responder) y reinicia el ESP ~750ms después
+//                               de enviar la respuesta 200 (ver rebootAtMs_ y
+//                               loop() — ESP.restart() nunca se llama dentro
+//                               del handler porque cortaría la respuesta HTTP,
+//                               que corre en la task async_tcp).
 //
 // Patrón de acción: WebUI NO llama directo a StatsEngine. Publica evento al bus
 // (síncrono); main.cpp suscribe handlers que aplican la acción y persisten.
@@ -35,6 +45,11 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncJson.h>
 #include "RateLimiter.h"
+// BatteryGauge (lib/core) es lógica pura — sin Arduino.h, compila igual en
+// env:native, ESP8266 y ESP32. A propósito WebUI NO incluye BatteryMonitor.h
+// (infra ESP32-only: analogSetPinAttenuation vía Arduino.h) — ver comentario
+// del 5º parámetro del ctor más abajo sobre por qué este desacople importa.
+#include "BatteryGauge.h"
 
 class EventBus;
 class StatsEngine;
@@ -43,8 +58,15 @@ class WifiManager;
 
 class WebUI {
 public:
+    // battery: puntero NULLABLE al BatteryGauge puro (no BatteryMonitor). Esto
+    // desacopla WebUI de la infra específica de ESP32 — WebUI se compila igual
+    // en ESP8266 (que nunca tendrá medidor de batería) pasando nullptr, y en
+    // ESP32-S3 pasando &battery.gauge(). Con nullptr, los handlers usan un
+    // BatterySnapshot{} vacío (valid:false) — mismo contrato de API que un
+    // BatteryMonitor real sin hardware soldado (ver sendActionResponse_ y los
+    // handlers GET en el .cpp).
     WebUI(EventBus& bus, const StatsEngine& engine, const LifeFSM& fsm,
-          const WifiManager& wifi);
+          const WifiManager& wifi, const BatteryGauge* battery = nullptr);
 
     // Arranca el servidor HTTP en el puerto 80. Idempotente.
     // Llamar solo cuando WiFi.state() == Connected.
@@ -55,17 +77,27 @@ public:
 
     bool isRunning() const { return running_; }
 
-    // Hook para el loop principal. AsyncWebServer es event-driven — por ahora no-op.
+    // Hook para el loop principal. AsyncWebServer es event-driven — se usa
+    // para el reinicio diferido tras POST /api/v1/reboot (ver rebootAtMs_).
     void loop();
 
 private:
-    EventBus&          bus_;
-    const StatsEngine& engine_;
-    const LifeFSM&     fsm_;
-    const WifiManager& wifi_;
-    AsyncWebServer     server_;
+    EventBus&             bus_;
+    const StatsEngine&    engine_;
+    const LifeFSM&        fsm_;
+    const WifiManager&    wifi_;
+    const BatteryGauge*   battery_;  // nullable — ver comentario del ctor
+    AsyncWebServer        server_;
     RateLimiter        rateLimiter_;
     bool               running_ = false;
+
+    // Instante (millis()) en el que loop() debe llamar a ESP.restart(), o 0 si
+    // no hay reinicio programado. Se fija en handlePostReboot_ tras responder
+    // 200 al cliente — NUNCA se llama ESP.restart() dentro del handler HTTP
+    // (correría en la task async_tcp y cortaría la propia respuesta a mitad
+    // de envío). 0 es seguro como centinela de "sin programar": millis()==0
+    // solo ocurre en el primer instante de boot, muy antes de que WebUI exista.
+    uint32_t rebootAtMs_ = 0;
 
     // Monta las rutas en el servidor.
     void mountRoutes_();
@@ -86,6 +118,10 @@ private:
     void handlePostClean_(AsyncWebServerRequest* req);
     void handlePostMedicate_(AsyncWebServerRequest* req);
 
+    // POST /api/v1/reboot — sin body. Persiste (síncrono) y programa el
+    // reinicio para ~750ms después de responder (ver rebootAtMs_ y loop()).
+    void handlePostReboot_(AsyncWebServerRequest* req);
+
     // Serializa y envía la respuesta estándar de acción:
     //   { "data": <state completo>, "meta": {...}, "actionApplied": {"type":..., "amount":...} }
     // actionValue < 0 → no se incluye "amount" (clean/medicate).
@@ -103,4 +139,9 @@ private:
     // Serializa y envía una respuesta de error JSON estándar (api-conventions.md).
     void sendJsonError_(AsyncWebServerRequest* req, int code,
                         const char* errorCode, const char* message);
+
+    // Snapshot de batería para los handlers — {valid:false,...} si battery_
+    // es nullptr (ESP8266, o ESP32 con BATTERY_SENSE_ENABLED=0). Centraliza el
+    // null-check en un solo sitio en vez de repetirlo en cada handler.
+    BatterySnapshot batterySnapshot_() const;
 };

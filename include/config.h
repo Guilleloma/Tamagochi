@@ -29,6 +29,24 @@
   #define PIN_BUTTON           4
   #define BUTTON_ACTIVE_LOW    false
   #define BUTTON_PULLUP_ACTIVE false
+
+  // ── Medidor de batería — ESP32-S3 Zero ──────────────────────────────────
+  // El divisor de tensión (B+ → R1 100k → GPIO1 → R2 100k → GND) se soldará
+  // en otra sesión — ver guía completa en docs/hardware-battery.md. Hasta
+  // entonces el pin queda flotante y BatteryGauge lo detecta en runtime vía
+  // su gate de plausibilidad+estabilidad (nunca sale de Unknown sin hardware).
+  //
+  // GPIO libres verificados en esta placa: 1, 2, 5, 6.
+  // Ocupados: 4 botón, 7-12 TFT, 19/20 USB, 21 WS2812.
+  #define BATTERY_SENSE_ENABLED       1
+  #define PIN_BATTERY_ADC             1   // GPIO1 = ADC1_CH0 (ADC1: compatible con WiFi activo)
+  #define BATTERY_DIVIDER_NUM         2   // divisor 2×100k: Vbat = Vpin × 2/1
+  #define BATTERY_DIVIDER_DEN         1
+  // Sensado de carga: OFF por defecto — activar SOLO tras soldar y verificar
+  // con multímetro (docs/hardware-battery.md). MODE=1 VbusPresence, MODE=2 LED activo-LOW.
+  #define BATTERY_CHARGE_PIN_ENABLED  0
+  #define PIN_CHARGE_SENSE            2   // GPIO2 (GPIO3 es strapping — evitar)
+  #define BATTERY_CHARGE_SENSE_MODE   1   // 1=VbusPresence, 2=ChargeLedActiveLow
 #else
   // TTP223 en GPIO4 del ESP8266 — active-HIGH, sin pull-up externo.
   #define PIN_BUTTON           4

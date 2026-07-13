@@ -178,6 +178,7 @@ Una vez la placa esté en la WiFi y `data/*` esté subido al filesystem:
 | `POST /api/v1/{feed,play,heal,discipline}` | Body `{"amount": 1..100}` |
 | `POST /api/v1/{clean,medicate}` | Sin body |
 | `POST /api/v1/sleep` | Body `{"value": true}` o `{"value": false}` |
+| `POST /api/v1/reboot` | Sin body. Persiste el estado y reinicia el dispositivo (~750ms después de responder) |
 
 **Autenticación:** HTTP Basic Auth con `WEB_AUTH_USER:WEB_AUTH_PASSWORD` de `secrets.h`. Todos los endpoints `/api/v1/*` la requieren.
 
@@ -262,6 +263,8 @@ Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vid
 | Display | TFT SPI JD9853 240×296 IPS color |
 | Librería display | Arduino_GFX v1.3.7 (fijada por compatibilidad con arduino-esp32 core 2.0.17 / IDF4) |
 | Botón | BOOT / GPIO0 (active-LOW — **no mantener pulsado en reset**: pin de strapping) |
+
+**Medidor de batería:** firmware, icono TFT y API listos (`batteryValid`/`batteryPercent`/`batteryCharging` en `/api/v1/state`); la soldadura del divisor (GPIO1) y del sensado de carga (GPIO2) está **pendiente** — hasta entonces el icono permanece oculto. Guía completa de soldadura en [`docs/hardware-battery.md`](docs/hardware-battery.md).
 
 #### Cableado TFT JD9853
 

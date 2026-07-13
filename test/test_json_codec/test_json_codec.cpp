@@ -34,6 +34,21 @@ static Stats makeDefaultStats() {
     return s;
 }
 
+// Snapshots de batería reutilizados en varios tests: uno "válido" con valores
+// realistas y otro "Unknown" (hardware sin soldar, patrón que domina el repo).
+static BatterySnapshot makeValidBattery() {
+    BatterySnapshot b;
+    b.valid      = true;
+    b.percent    = 87;
+    b.charging   = true;
+    b.millivolts = 4120;
+    return b;
+}
+
+static BatterySnapshot makeUnknownBattery() {
+    return BatterySnapshot{};  // valid=false, percent=0, charging=false, millivolts=0
+}
+
 void setUp() {
     memset(g_buf, 0, sizeof(g_buf));
 }
@@ -47,7 +62,7 @@ void tearDown() {}
 void test_serialize_state_produces_valid_json() {
     Stats s = makeDefaultStats();
     size_t written = JsonCodec::serializeState(
-        s, LifeStage::Baby, 142, 0, false, 1741234567u, g_buf, sizeof(g_buf));
+        s, LifeStage::Baby, 142, 0, false, 1741234567u, makeValidBattery(), g_buf, sizeof(g_buf));
 
     TEST_ASSERT_GREATER_THAN(0u, written);
 
@@ -68,7 +83,7 @@ void test_serialize_state_produces_valid_json() {
 // =============================================================================
 void test_serialize_state_camel_case_fields() {
     Stats s = makeDefaultStats();
-    JsonCodec::serializeState(s, LifeStage::Baby, 142, 0, false, 0u, g_buf, sizeof(g_buf));
+    JsonCodec::serializeState(s, LifeStage::Baby, 142, 0, false, 0u, makeValidBattery(), g_buf, sizeof(g_buf));
 
     JsonDocument doc;
     deserializeJson(doc, g_buf);
@@ -82,10 +97,14 @@ void test_serialize_state_camel_case_fields() {
     TEST_ASSERT_FALSE(data["isSick"].isNull());
     TEST_ASSERT_FALSE(data["isSleeping"].isNull());
     TEST_ASSERT_FALSE(data["lifeStage"].isNull());
+    TEST_ASSERT_FALSE(data["batteryPercent"].isNull());
+    TEST_ASSERT_FALSE(data["batteryCharging"].isNull());
+    TEST_ASSERT_FALSE(data["batteryValid"].isNull());
 
     // Asegurarse que NO hay snake_case
     TEST_ASSERT_TRUE(data["age_minutes"].isNull());
     TEST_ASSERT_TRUE(data["poop_count"].isNull());
+    TEST_ASSERT_TRUE(data["battery_percent"].isNull());
 }
 
 // =============================================================================
@@ -94,7 +113,7 @@ void test_serialize_state_camel_case_fields() {
 // =============================================================================
 void test_serialize_state_lifestage_as_string() {
     Stats s = makeDefaultStats();
-    JsonCodec::serializeState(s, LifeStage::Baby, 142, 0, false, 0u, g_buf, sizeof(g_buf));
+    JsonCodec::serializeState(s, LifeStage::Baby, 142, 0, false, 0u, makeValidBattery(), g_buf, sizeof(g_buf));
 
     JsonDocument doc;
     deserializeJson(doc, g_buf);
@@ -122,7 +141,7 @@ void test_serialize_state_below_buffer_limit() {
     s.attentionScore = 1000;
 
     size_t written = JsonCodec::serializeState(
-        s, LifeStage::Old, 99999u, 9999u, true, 0xFFFFFFFFu, g_buf, sizeof(g_buf));
+        s, LifeStage::Old, 99999u, 9999u, true, 0xFFFFFFFFu, makeValidBattery(), g_buf, sizeof(g_buf));
 
     // 0 indica truncado (serializeJson devuelve 0 si el buffer es insuficiente)
     TEST_ASSERT_GREATER_THAN(0u, written);
@@ -135,7 +154,8 @@ void test_serialize_state_below_buffer_limit() {
 // serializeInfo() produce JSON con firmwareVersion, uptimeMs, freeHeap, wifiRssi.
 // =============================================================================
 void test_serialize_info_includes_required_fields() {
-    size_t written = JsonCodec::serializeInfo(0x0300u, 142567u, 38240u, -54, g_buf, sizeof(g_buf));
+    size_t written = JsonCodec::serializeInfo(0x0300u, 142567u, 38240u, -54,
+                                              makeValidBattery(), g_buf, sizeof(g_buf));
 
     TEST_ASSERT_GREATER_THAN(0u, written);
 
@@ -153,6 +173,126 @@ void test_serialize_info_includes_required_fields() {
     TEST_ASSERT_EQUAL_UINT32(142567u, data["uptimeMs"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(38240u,  data["freeHeap"].as<uint32_t>());
     TEST_ASSERT_EQUAL_INT8(-54,       data["wifiRssi"].as<int8_t>());
+}
+
+// =============================================================================
+// 5b. serialize_info_battery_fields_valid
+// serializeInfo() con snapshot válido expone percent/charging/valid/millivolts.
+// =============================================================================
+void test_serialize_info_battery_fields_valid() {
+    size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
+                                              makeValidBattery(), g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    deserializeJson(doc, g_buf, written);
+    JsonObject data = doc["data"];
+
+    TEST_ASSERT_FALSE(data["batteryMillivolts"].isNull());
+    TEST_ASSERT_TRUE(data["batteryValid"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT8(87,   data["batteryPercent"].as<uint8_t>());
+    TEST_ASSERT_TRUE(data["batteryCharging"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT16(4120, data["batteryMillivolts"].as<uint16_t>());
+}
+
+// =============================================================================
+// 5c. serialize_info_battery_fields_unknown
+// serializeInfo() con snapshot Unknown (hardware sin soldar) → batteryValid
+// false y el resto de campos en su valor neutro, pero SIEMPRE presentes
+// (backward compatible, api-conventions.md).
+// =============================================================================
+void test_serialize_info_battery_fields_unknown() {
+    size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
+                                              makeUnknownBattery(), g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    deserializeJson(doc, g_buf, written);
+    JsonObject data = doc["data"];
+
+    TEST_ASSERT_FALSE(data["batteryValid"].isNull());
+    TEST_ASSERT_FALSE(data["batteryValid"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT8(0, data["batteryPercent"].as<uint8_t>());
+    TEST_ASSERT_FALSE(data["batteryCharging"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT16(0, data["batteryMillivolts"].as<uint16_t>());
+}
+
+// =============================================================================
+// 5d. serialize_state_battery_fields_unknown
+// serializeState() con snapshot Unknown — mismo contrato que /info salvo que
+// no expone batteryMillivolts (campo exclusivo de /info).
+// =============================================================================
+void test_serialize_state_battery_fields_unknown() {
+    Stats s = makeDefaultStats();
+    size_t written = JsonCodec::serializeState(
+        s, LifeStage::Baby, 142, 0, false, 0u, makeUnknownBattery(), g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    deserializeJson(doc, g_buf, written);
+    JsonObject data = doc["data"];
+
+    TEST_ASSERT_FALSE(data["batteryValid"].isNull());
+    TEST_ASSERT_FALSE(data["batteryValid"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT8(0, data["batteryPercent"].as<uint8_t>());
+    TEST_ASSERT_FALSE(data["batteryCharging"].as<bool>());
+    TEST_ASSERT_TRUE(data["batteryMillivolts"].isNull());  // no es campo de /state
+}
+
+// =============================================================================
+// 5e. serialize_action_response_battery_fields_valid
+// serializeActionResponse() no tenía cobertura de test para los campos de
+// batería pese a incluirlos desde ac0464e (mismo trío que /state: percent,
+// charging, valid). Verifica snapshot válido + que actionApplied no interfiere.
+// =============================================================================
+void test_serialize_action_response_battery_fields_valid() {
+    Stats s = makeDefaultStats();
+    size_t written = JsonCodec::serializeActionResponse(
+        s, LifeStage::Baby, 142, 0, false, 0u,
+        "feed", 20, makeValidBattery(), g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, g_buf, written);
+    TEST_ASSERT_EQUAL(DeserializationError::Ok, err.code());
+
+    JsonObject data = doc["data"];
+    TEST_ASSERT_FALSE(data["batteryValid"].isNull());
+    TEST_ASSERT_TRUE(data["batteryValid"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT8(87, data["batteryPercent"].as<uint8_t>());
+    TEST_ASSERT_TRUE(data["batteryCharging"].as<bool>());
+
+    // actionApplied sigue presente y sin interferencia con los campos de batería.
+    TEST_ASSERT_EQUAL_STRING("feed", doc["actionApplied"]["type"].as<const char*>());
+    TEST_ASSERT_EQUAL_UINT32(20, doc["actionApplied"]["amount"].as<uint32_t>());
+}
+
+// =============================================================================
+// 5f. serialize_action_response_battery_fields_unknown
+// serializeActionResponse() con snapshot Unknown (hardware sin soldar) —
+// batteryValid false y el resto de campos de batería en su valor neutro,
+// pero SIEMPRE presentes (backward compatible, api-conventions.md). Usa
+// actionValue=-1 (patrón clean/medicate) para cubrir también ese caso.
+// =============================================================================
+void test_serialize_action_response_battery_fields_unknown() {
+    Stats s = makeDefaultStats();
+    size_t written = JsonCodec::serializeActionResponse(
+        s, LifeStage::Baby, 142, 0, false, 0u,
+        "clean", -1, makeUnknownBattery(), g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    deserializeJson(doc, g_buf, written);
+    JsonObject data = doc["data"];
+
+    TEST_ASSERT_FALSE(data["batteryValid"].isNull());
+    TEST_ASSERT_FALSE(data["batteryValid"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT8(0, data["batteryPercent"].as<uint8_t>());
+    TEST_ASSERT_FALSE(data["batteryCharging"].as<bool>());
+
+    // clean/medicate: actionValue<0 -> "amount" no se incluye en la respuesta.
+    TEST_ASSERT_EQUAL_STRING("clean", doc["actionApplied"]["type"].as<const char*>());
+    TEST_ASSERT_TRUE(doc["actionApplied"]["amount"].isNull());
 }
 
 // =============================================================================
@@ -289,6 +429,11 @@ int main() {
     RUN_TEST(test_serialize_state_lifestage_as_string);
     RUN_TEST(test_serialize_state_below_buffer_limit);
     RUN_TEST(test_serialize_info_includes_required_fields);
+    RUN_TEST(test_serialize_info_battery_fields_valid);
+    RUN_TEST(test_serialize_info_battery_fields_unknown);
+    RUN_TEST(test_serialize_state_battery_fields_unknown);
+    RUN_TEST(test_serialize_action_response_battery_fields_valid);
+    RUN_TEST(test_serialize_action_response_battery_fields_unknown);
     RUN_TEST(test_parse_feed_payload_valid);
     RUN_TEST(test_parse_feed_payload_missing_amount);
     RUN_TEST(test_parse_feed_payload_amount_out_of_range);
