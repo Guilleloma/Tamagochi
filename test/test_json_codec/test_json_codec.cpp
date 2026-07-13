@@ -240,6 +240,62 @@ void test_serialize_state_battery_fields_unknown() {
 }
 
 // =============================================================================
+// 5e. serialize_action_response_battery_fields_valid
+// serializeActionResponse() no tenía cobertura de test para los campos de
+// batería pese a incluirlos desde ac0464e (mismo trío que /state: percent,
+// charging, valid). Verifica snapshot válido + que actionApplied no interfiere.
+// =============================================================================
+void test_serialize_action_response_battery_fields_valid() {
+    Stats s = makeDefaultStats();
+    size_t written = JsonCodec::serializeActionResponse(
+        s, LifeStage::Baby, 142, 0, false, 0u,
+        "feed", 20, makeValidBattery(), g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, g_buf, written);
+    TEST_ASSERT_EQUAL(DeserializationError::Ok, err.code());
+
+    JsonObject data = doc["data"];
+    TEST_ASSERT_FALSE(data["batteryValid"].isNull());
+    TEST_ASSERT_TRUE(data["batteryValid"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT8(87, data["batteryPercent"].as<uint8_t>());
+    TEST_ASSERT_TRUE(data["batteryCharging"].as<bool>());
+
+    // actionApplied sigue presente y sin interferencia con los campos de batería.
+    TEST_ASSERT_EQUAL_STRING("feed", doc["actionApplied"]["type"].as<const char*>());
+    TEST_ASSERT_EQUAL_UINT32(20, doc["actionApplied"]["amount"].as<uint32_t>());
+}
+
+// =============================================================================
+// 5f. serialize_action_response_battery_fields_unknown
+// serializeActionResponse() con snapshot Unknown (hardware sin soldar) —
+// batteryValid false y el resto de campos de batería en su valor neutro,
+// pero SIEMPRE presentes (backward compatible, api-conventions.md). Usa
+// actionValue=-1 (patrón clean/medicate) para cubrir también ese caso.
+// =============================================================================
+void test_serialize_action_response_battery_fields_unknown() {
+    Stats s = makeDefaultStats();
+    size_t written = JsonCodec::serializeActionResponse(
+        s, LifeStage::Baby, 142, 0, false, 0u,
+        "clean", -1, makeUnknownBattery(), g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    deserializeJson(doc, g_buf, written);
+    JsonObject data = doc["data"];
+
+    TEST_ASSERT_FALSE(data["batteryValid"].isNull());
+    TEST_ASSERT_FALSE(data["batteryValid"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT8(0, data["batteryPercent"].as<uint8_t>());
+    TEST_ASSERT_FALSE(data["batteryCharging"].as<bool>());
+
+    // clean/medicate: actionValue<0 -> "amount" no se incluye en la respuesta.
+    TEST_ASSERT_EQUAL_STRING("clean", doc["actionApplied"]["type"].as<const char*>());
+    TEST_ASSERT_TRUE(doc["actionApplied"]["amount"].isNull());
+}
+
+// =============================================================================
 // 6. parse_feed_payload_valid
 // { "amount": 20 } → ParseError::Ok, outAmount = 20.
 // =============================================================================
@@ -376,6 +432,8 @@ int main() {
     RUN_TEST(test_serialize_info_battery_fields_valid);
     RUN_TEST(test_serialize_info_battery_fields_unknown);
     RUN_TEST(test_serialize_state_battery_fields_unknown);
+    RUN_TEST(test_serialize_action_response_battery_fields_valid);
+    RUN_TEST(test_serialize_action_response_battery_fields_unknown);
     RUN_TEST(test_parse_feed_payload_valid);
     RUN_TEST(test_parse_feed_payload_missing_amount);
     RUN_TEST(test_parse_feed_payload_amount_out_of_range);

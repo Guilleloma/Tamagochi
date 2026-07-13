@@ -27,6 +27,7 @@ B+ (batería, ~3.0–4.2 V)
   [R1 100kΩ]
    │
    ├──────────────→ GPIO1 (ADC1_CH0)
+   ├──[C1 100nF]──→ GND   (condensador de filtro del ADC — ver nota)
    │
   [R2 100kΩ]
    │
@@ -34,6 +35,7 @@ B+ (batería, ~3.0–4.2 V)
 ```
 
 - Divisor **2×100k** → el punto medio ve siempre **la mitad** de VBAT (máx. ~2.175V con LiPo llena a 4.35V, dentro del fondo de escala del ADC a 11dB).
+- **C1: condensador cerámico 100nF entre el punto medio y GND.** El divisor presenta ~50kΩ de impedancia de salida (Thevenin), demasiado alta para el sample&hold del ADC del ESP32-S3: sin condensador, el S&H no llega a cargarse del todo en cada muestreo y las lecturas salen bajas y ruidosas. C1 actúa de reservorio de carga y estabiliza la medida. La constante RC resultante (~5ms) es irrelevante aquí — la tensión de la batería cambia en escala de minutos.
 - Consumo del divisor: `4.2V / 200kΩ ≈ 21 µA` — despreciable frente al consumo del propio ESP32-S3.
 - `BATTERY_DIVIDER_NUM=2 / BATTERY_DIVIDER_DEN=1` en `include/config.h` ya asume exactamente este divisor. Si usas otros valores de resistencia, ajusta esas constantes (mantener resistencias iguales; solo importa la proporción).
 
@@ -135,6 +137,7 @@ pio run -e esp32s3_ota -t upload
 ## Lista de material
 
 - 2-4 resistencias **100kΩ, tolerancia 1%** (2 para el divisor de VBAT; 2 más si se implementa también el sensado de carga).
+- 1 condensador **cerámico 100nF** (C1, filtro del punto medio del divisor de VBAT — ver sección 2).
 - Cable fino (30 AWG / wire-wrap o similar) para los puentes a GPIO1/GPIO2 y GND.
 - Estaño + soldador de punta fina.
 - Multímetro (imprescindible para verificar antes de conectar nada a un GPIO — ver advertencias en negrita de las secciones 2 y 4).
