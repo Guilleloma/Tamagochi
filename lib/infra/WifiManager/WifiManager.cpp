@@ -55,6 +55,11 @@ void WifiManager::begin() {
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
+    // setSleep(false): sin esto el modem duerme entre DTIM beacons y el router
+    // (Xiaomi, DTIM alto) tira los UDP unicast entrantes — la invitación de
+    // ArduinoOTA (puerto 3232) se pierde casi siempre aunque HTTP/mDNS funcionen.
+    // Coste: ~20-40 mA extra de media. Diagnosticado en el despliegue de Fase 5.
+    WiFi.setSleep(false);
     WiFi.hostname(OTA_HOSTNAME);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
