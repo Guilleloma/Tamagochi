@@ -38,18 +38,21 @@
 // compilan WebUI sin necesitarlo. Ver comentario del ctor en WebUI.h.
 #include "JsonCodec.h"
 #include "AuthChecker.h"
+#include "MessageBox.h"
 
 // =============================================================================
 // Constructor
 // =============================================================================
 
 WebUI::WebUI(EventBus& bus, const StatsEngine& engine, const LifeFSM& fsm,
-             const WifiManager& wifi, const BatteryGauge* battery)
+             const WifiManager& wifi, const BatteryGauge* battery,
+             MessageBox* messageBox)
     : bus_(bus)
     , engine_(engine)
     , fsm_(fsm)
     , wifi_(wifi)
     , battery_(battery)
+    , messageBox_(messageBox)
     , server_(80)
     , rateLimiter_()
     , running_(false)
@@ -154,6 +157,20 @@ void WebUI::mountRoutes_() {
     server_.on("/api/v1/reboot", HTTP_POST, [this](AsyncWebServerRequest* req) {
         handlePostReboot_(req);
     });
+
+    // --- POST /api/v1/message — mensaje del padre (marquee, hito 8) ---
+    // Solo se monta si hay un MessageBox inyectado (ver comentario del ctor
+    // en WebUI.h) — con nullptr (ESP8266 / builds sin esta feature) el
+    // endpoint simplemente no existe y cae en handleNotFound_ (404 estándar).
+    if (messageBox_ != nullptr) {
+        auto* messageHandler = new AsyncCallbackJsonWebHandler("/api/v1/message",
+            [this](AsyncWebServerRequest* req, JsonVariant& json) {
+                handlePostMessage_(req, json);
+            }
+        );
+        messageHandler->setMethod(HTTP_POST);
+        server_.addHandler(messageHandler);
+    }
 
     // --- Archivos estáticos desde LittleFS (hito 7) ---
     // Sirve /, /app.css, /app.js, /favicon.ico desde la carpeta raíz de LittleFS.
@@ -380,6 +397,85 @@ void WebUI::handlePostReboot_(AsyncWebServerRequest* req) {
     req->send(resp);
 
     rebootAtMs_ = millis() + 750;
+}
+
+// -----------------------------------------------------------------------------
+// handlePostMessage_ — POST /api/v1/message. Body: {"text":"..."}.
+//
+// Solo se llega aquí si messageBox_ != nullptr (mountRoutes_ no registra la
+// ruta en caso contrario). Sin acuse de recibo del Tamagotchi: 200 confirma
+// que el texto fue aceptado y encolado, no que ya se está mostrando.
+//
+// Orden de validación (fail fast, rules/error-handling.md):
+//   1. checkAuthAndRate_ — mismo gate que el resto de /api/v1/*.
+//   2. "text" presente y de tipo string -> 422 MISSING_FIELD si no.
+//   3. strlen(raw) > MessageBox::kMaxRawLen -> 422 INVALID_TEXT (rechazo
+//      rápido antes de gastar tiempo sanitizando un payload ya sobredimensionado;
+//      messageBox_->post() repite este mismo chequeo como única fuente de
+//      verdad — ver MessageBox.h — así que este paso es puramente un fail-fast).
+//   4. messageBox_->post(raw) hace la sanitización UTF-8->ASCII real y la
+//      validación de longitud/vacío definitiva -> Empty/TooLong mapean a 422
+//      INVALID_TEXT, Ok -> 200.
+//
+// displayedChars se recalcula con TextSanitizer::utf8ToAscii sobre el mismo
+// `raw` para la respuesta — MessageBox::PostResult no expone el conteo, y
+// añadir un getter solo para esto complicaría su API pública ya testeada
+// (commit anterior). El texto ya está acotado a kMaxRawLen bytes, así que
+// resanitizarlo aquí es barato y no compite con el post() ya aceptado.
+// -----------------------------------------------------------------------------
+void WebUI::handlePostMessage_(AsyncWebServerRequest* req, JsonVariant& json) {
+    if (!checkAuthAndRate_(req)) return;
+
+    JsonVariantConst textVar = json["text"];
+    if (textVar.isUnbound() || textVar.isNull()) {
+        sendJsonError_(req, 422, "MISSING_FIELD", "text field required (string)");
+        return;
+    }
+    if (!textVar.is<const char*>()) {
+        sendJsonError_(req, 422, "INVALID_TEXT", "text must be a string");
+        return;
+    }
+
+    const char* raw = textVar.as<const char*>();
+    if (raw == nullptr) {
+        sendJsonError_(req, 422, "MISSING_FIELD", "text field required (string)");
+        return;
+    }
+
+    if (strlen(raw) > MessageBox::kMaxRawLen) {
+        char msg[80];
+        snprintf(msg, sizeof(msg), "text exceeds max length (%u bytes)",
+                 static_cast<unsigned>(MessageBox::kMaxRawLen));
+        sendJsonError_(req, 422, "INVALID_TEXT", msg);
+        return;
+    }
+
+    MessageBox::PostResult result = messageBox_->post(raw);
+    if (result == MessageBox::PostResult::Empty) {
+        sendJsonError_(req, 422, "INVALID_TEXT", "text is empty after sanitization");
+        return;
+    }
+    if (result == MessageBox::PostResult::TooLong) {
+        sendJsonError_(req, 422, "INVALID_TEXT",
+                       "text too long after sanitization (max 96 chars)");
+        return;
+    }
+
+    char sanitized[MessageBox::kMaxLen + 1];
+    size_t displayedChars = TextSanitizer::utf8ToAscii(raw, sanitized, sizeof(sanitized));
+
+    LOG_INFO("[webui] POST /api/v1/message displayedChars=%u", static_cast<unsigned>(displayedChars));
+
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+             "{\"data\":{\"messageAccepted\":true,\"displayedChars\":%u},"
+             "\"meta\":{\"apiVersion\":\"v1\",\"timestamp\":%lu}}",
+             static_cast<unsigned>(displayedChars),
+             static_cast<unsigned long>(millis()));
+
+    AsyncWebServerResponse* resp = req->beginResponse(200, "application/json", buf);
+    resp->addHeader("Cache-Control", "no-store");
+    req->send(resp);
 }
 
 void WebUI::sendActionResponse_(AsyncWebServerRequest* req,

@@ -24,6 +24,16 @@
 //                               del handler porque cortaría la respuesta HTTP,
 //                               que corre en la task async_tcp).
 //
+// Endpoint de mensaje del padre (marquee, hito 8):
+//   POST /api/v1/message      → body: {"text":"..."} (UTF-8, máx
+//                               MessageBox::kMaxRawLen bytes crudos). Sin
+//                               acuse de recibo — 200 al aceptar, el
+//                               Tamagotchi lo muestra async en su pantalla.
+//                               Solo se monta si messageBox != nullptr (ver
+//                               6º parámetro del ctor) — permite que ESP8266
+//                               (src/main.cpp) siga sin este endpoint sin
+//                               tocar su código, pasando el default nullptr.
+//
 // Patrón de acción: WebUI NO llama directo a StatsEngine. Publica evento al bus
 // (síncrono); main.cpp suscribe handlers que aplican la acción y persisten.
 // Como el bus es síncrono, cuando publish() retorna, las stats ya están actualizadas.
@@ -54,6 +64,7 @@ class EventBus;
 class StatsEngine;
 class LifeFSM;
 class WifiManager;
+class MessageBox;
 
 class WebUI {
 public:
@@ -64,8 +75,14 @@ public:
     // BatterySnapshot{} vacío (valid:false) — mismo contrato de API que un
     // BatteryMonitor real sin hardware soldado (ver sendActionResponse_ y los
     // handlers GET en el .cpp).
+    //
+    // messageBox: puntero NULLABLE al MessageBox (lib/core, puro — igual
+    // desacople que battery). Con nullptr (default), mountRoutes_() NO monta
+    // /api/v1/message — así src/main.cpp (ESP8266) sigue compilando y
+    // corriendo sin cambios, sin este endpoint.
     WebUI(EventBus& bus, const StatsEngine& engine, const LifeFSM& fsm,
-          const WifiManager& wifi, const BatteryGauge* battery = nullptr);
+          const WifiManager& wifi, const BatteryGauge* battery = nullptr,
+          MessageBox* messageBox = nullptr);
 
     // Arranca el servidor HTTP en el puerto 80. Idempotente.
     // Llamar solo cuando WiFi.state() == Connected.
@@ -85,7 +102,8 @@ private:
     const StatsEngine&    engine_;
     const LifeFSM&        fsm_;
     const WifiManager&    wifi_;
-    const BatteryGauge*   battery_;  // nullable — ver comentario del ctor
+    const BatteryGauge*   battery_;     // nullable — ver comentario del ctor
+    MessageBox*           messageBox_;  // nullable — ver comentario del ctor
     AsyncWebServer        server_;
     RateLimiter        rateLimiter_;
     bool               running_ = false;
@@ -119,6 +137,11 @@ private:
     // POST /api/v1/reboot — sin body. Persiste (síncrono) y programa el
     // reinicio para ~750ms después de responder (ver rebootAtMs_ y loop()).
     void handlePostReboot_(AsyncWebServerRequest* req);
+
+    // POST /api/v1/message — body: {"text":"..."}. Sanitiza y encola en
+    // messageBox_ (productor SPSC — ver MessageBox.h). Solo se monta si
+    // messageBox_ != nullptr (ver mountRoutes_ y el ctor).
+    void handlePostMessage_(AsyncWebServerRequest* req, JsonVariant& json);
 
     // Serializa y envía la respuesta estándar de acción:
     //   { "data": <state completo>, "meta": {...}, "actionApplied": {"type":..., "amount":...} }
