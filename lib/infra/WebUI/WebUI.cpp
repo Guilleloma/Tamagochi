@@ -32,7 +32,10 @@
 #include "StatsEngine.h"
 #include "LifeFSM.h"
 #include "WifiManager.h"
-#include "BatteryMonitor.h"
+// NOTA: NO incluir BatteryMonitor.h aquí — WebUI depende solo de BatteryGauge
+// (vía WebUI.h), que ya trae el tipo BatterySnapshot. Incluir BatteryMonitor.h
+// arrastraría infra ESP32-only (analogSetPinAttenuation) al LDF de builds que
+// compilan WebUI sin necesitarlo. Ver comentario del ctor en WebUI.h.
 #include "JsonCodec.h"
 #include "AuthChecker.h"
 
@@ -41,7 +44,7 @@
 // =============================================================================
 
 WebUI::WebUI(EventBus& bus, const StatsEngine& engine, const LifeFSM& fsm,
-             const WifiManager& wifi, const BatteryMonitor& battery)
+             const WifiManager& wifi, const BatteryGauge* battery)
     : bus_(bus)
     , engine_(engine)
     , fsm_(fsm)
@@ -184,7 +187,7 @@ void WebUI::handleGetState_(AsyncWebServerRequest* req) {
         deathCount,
         turbo,
         millis(),
-        battery_.snapshot(),
+        batterySnapshot_(),
         buf,
         sizeof(buf)
     );
@@ -210,7 +213,7 @@ void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
         millis(),
         ESP.getFreeHeap(),
         WiFi.RSSI(),
-        battery_.snapshot(),
+        batterySnapshot_(),
         buf,
         sizeof(buf)
     );
@@ -340,7 +343,7 @@ void WebUI::sendActionResponse_(AsyncWebServerRequest* req,
         millis(),
         actionType,
         actionValue,
-        battery_.snapshot(),
+        batterySnapshot_(),
         buf,
         sizeof(buf)
     );
@@ -420,6 +423,17 @@ void WebUI::sendJsonError_(AsyncWebServerRequest* req, int code,
         return;
     }
     req->send(code, "application/json", buf);
+}
+
+// -----------------------------------------------------------------------------
+// batterySnapshot_ — {valid:false, percent:0, charging:false, millivolts:0} si
+// battery_ es nullptr. Mismo contrato de API que un BatteryMonitor real sin
+// hardware detectado (ver BatteryGauge.h) — el cliente de la API nunca ve la
+// diferencia entre "sin sensor de batería compilado" y "sensor presente pero
+// aún sin validar".
+// -----------------------------------------------------------------------------
+BatterySnapshot WebUI::batterySnapshot_() const {
+    return battery_ ? battery_->snapshot() : BatterySnapshot{};
 }
 
 #endif  // UNIT_TEST

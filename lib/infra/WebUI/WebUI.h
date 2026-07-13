@@ -37,17 +37,28 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncJson.h>
 #include "RateLimiter.h"
+// BatteryGauge (lib/core) es lógica pura — sin Arduino.h, compila igual en
+// env:native, ESP8266 y ESP32. A propósito WebUI NO incluye BatteryMonitor.h
+// (infra ESP32-only: analogSetPinAttenuation vía Arduino.h) — ver comentario
+// del 5º parámetro del ctor más abajo sobre por qué este desacople importa.
+#include "BatteryGauge.h"
 
 class EventBus;
 class StatsEngine;
 class LifeFSM;
 class WifiManager;
-class BatteryMonitor;
 
 class WebUI {
 public:
+    // battery: puntero NULLABLE al BatteryGauge puro (no BatteryMonitor). Esto
+    // desacopla WebUI de la infra específica de ESP32 — WebUI se compila igual
+    // en ESP8266 (que nunca tendrá medidor de batería) pasando nullptr, y en
+    // ESP32-S3 pasando &battery.gauge(). Con nullptr, los handlers usan un
+    // BatterySnapshot{} vacío (valid:false) — mismo contrato de API que un
+    // BatteryMonitor real sin hardware soldado (ver sendActionResponse_ y los
+    // handlers GET en el .cpp).
     WebUI(EventBus& bus, const StatsEngine& engine, const LifeFSM& fsm,
-          const WifiManager& wifi, const BatteryMonitor& battery);
+          const WifiManager& wifi, const BatteryGauge* battery = nullptr);
 
     // Arranca el servidor HTTP en el puerto 80. Idempotente.
     // Llamar solo cuando WiFi.state() == Connected.
@@ -66,7 +77,7 @@ private:
     const StatsEngine&    engine_;
     const LifeFSM&        fsm_;
     const WifiManager&    wifi_;
-    const BatteryMonitor& battery_;
+    const BatteryGauge*   battery_;  // nullable — ver comentario del ctor
     AsyncWebServer        server_;
     RateLimiter        rateLimiter_;
     bool               running_ = false;
@@ -107,4 +118,9 @@ private:
     // Serializa y envía una respuesta de error JSON estándar (api-conventions.md).
     void sendJsonError_(AsyncWebServerRequest* req, int code,
                         const char* errorCode, const char* message);
+
+    // Snapshot de batería para los handlers — {valid:false,...} si battery_
+    // es nullptr (ESP8266, o ESP32 con BATTERY_SENSE_ENABLED=0). Centraliza el
+    // null-check en un solo sitio en vez de repetirlo en cada handler.
+    BatterySnapshot batterySnapshot_() const;
 };

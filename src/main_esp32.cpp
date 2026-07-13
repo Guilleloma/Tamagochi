@@ -623,7 +623,17 @@ void setup() {
     // ── WebUI — construir en heap tras renderer y bus para inyectar dependencias ─
     // WebUI publica eventos al bus; los handlers de acción en main los procesan.
     // Se activa solo cuando WiFi Connected (en onWifiStateChanged).
-    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi, battery);
+    //
+    // WebUI solo depende de BatteryGauge (lib/core, puro) — no de BatteryMonitor
+    // (infra ESP32-only) — ver comentario del ctor en WebUI.h. Con
+    // BATTERY_SENSE_ENABLED=0 se pasa nullptr explícitamente: aunque `battery`
+    // siempre existe como objeto, su gauge_ nunca deja Unknown en ese caso, así
+    // que nullptr documenta la intención sin cambiar el comportamiento observable.
+#if BATTERY_SENSE_ENABLED
+    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi, &battery.gauge());
+#else
+    webUI = new WebUI(bus, statsEngine, lifeFSM, wifi, nullptr);
+#endif
 
     // ── Suscripciones EventBus ────────────────────────────────────────────────
     // Llamar en setup(), nunca en loop() — EventBus no es thread-safe.

@@ -44,6 +44,13 @@ public:
     // Sin hardware detectado devuelve {valid:false, percent:0, charging:false, mv:0}.
     BatterySnapshot snapshot() const { return gauge_.snapshot(); }
 
+    // Referencia al BatteryGauge puro subyacente — permite a los consumidores
+    // que solo necesitan el gauge (p.ej. WebUI) depender de BatteryGauge (lib/core,
+    // sin Arduino.h, compila en cualquier plataforma) en lugar de BatteryMonitor
+    // (infra, arrastra analogRead*/Arduino.h — ver comentario de desacople en
+    // WebUI.h sobre por qué esto importa para el build ESP8266).
+    const BatteryGauge& gauge() const { return gauge_; }
+
 private:
     EventBus&    bus_;
     BatteryGauge gauge_;
