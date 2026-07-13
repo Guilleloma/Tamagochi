@@ -221,13 +221,34 @@ void WebUI::handleGetState_(AsyncWebServerRequest* req) {
 void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
     if (!checkAuthAndRate_(req)) return;
 
-    char buf[320];  // 256 se quedaba justo al añadir batteryRawMillivolts/batteryGateProgress
+    char buf[448];  // 320 se quedaba corto al añadir ipAddress/hostname/macAddress
+
+    // WiFi.localIP().toString() y WiFi.macAddress() devuelven Arduino String
+    // TEMPORALES — hay que guardarlos en variables locales antes de pasar sus
+    // .c_str() a serializeInfo(). JsonCodec (ver su .cpp) NO copia los
+    // const char* que recibe (zero-copy, guarda el puntero), así que el
+    // buffer subyacente debe seguir vivo durante toda la llamada; si se
+    // encadenaran los .toString().c_str() como temporales inline, el String
+    // temporal se destruiría antes de que serializeJson() los usara —
+    // use-after-free silencioso.
+    //
+    // ipAddress/macAddress caen a "" si WiFi no está Connected (defensivo:
+    // en la práctica WebUI solo corre con WiFi Connected — ver
+    // onWifiStateChanged en main_esp32.cpp — pero así el contrato de "SIEMPRE
+    // presentes, vacío si WiFi caído" se cumple incluso en una carrera justo
+    // antes de que WifiManager detecte la caída).
+    bool    wifiConnected = (WiFi.status() == WL_CONNECTED);
+    String  ipStr         = wifiConnected ? WiFi.localIP().toString() : String("");
+    String  macStr        = wifiConnected ? WiFi.macAddress()         : String("");
 
     size_t len = JsonCodec::serializeInfo(
         FIRMWARE_VERSION,
         millis(),
         ESP.getFreeHeap(),
         WiFi.RSSI(),
+        ipStr.c_str(),
+        OTA_HOSTNAME ".local",  // concatenación de literales en compile-time
+        macStr.c_str(),
         batterySnapshot_(),
         batteryRawMillivolts_(),
         batteryGateProgress_(),
