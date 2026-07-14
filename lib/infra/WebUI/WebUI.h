@@ -15,7 +15,9 @@
 //   POST /api/v1/feed         → body: {"amount":1-100}  publica ActionFeedRequested
 //   POST /api/v1/play         → body: {"amount":1-100}  publica ActionPlayRequested
 //   POST /api/v1/discipline   → body: {"amount":1-100}  publica ActionDisciplineRequested
-//   POST /api/v1/sleep        → body: {"value":true|false} publica ActionSleepRequested
+//   POST /api/v1/lights       → body: {"value":true|false} publica ActionLightsRequested
+//                                (ex-/sleep — el sueño ya NO es controlable por el
+//                                usuario, ver StatsEngine; esto alterna solo lightsOn)
 //   POST /api/v1/clean        → sin body                publica ActionCleanRequested
 //   POST /api/v1/medicate     → sin body                publica ActionMedicateRequested
 //
@@ -133,7 +135,7 @@ private:
     void handlePostFeed_(AsyncWebServerRequest* req, JsonVariant& json);
     void handlePostPlay_(AsyncWebServerRequest* req, JsonVariant& json);
     void handlePostDiscipline_(AsyncWebServerRequest* req, JsonVariant& json);
-    void handlePostSleep_(AsyncWebServerRequest* req, JsonVariant& json);
+    void handlePostLights_(AsyncWebServerRequest* req, JsonVariant& json);
     void handlePostClean_(AsyncWebServerRequest* req);
     void handlePostMedicate_(AsyncWebServerRequest* req);
 

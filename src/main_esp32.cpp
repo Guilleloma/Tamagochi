@@ -13,7 +13,7 @@
 //   - Boot       → carga PersistedState v2 → aplica a StatsEngine/LifeFSM
 //   - Schedulers → decay, envejecimiento, render, autosave (no-bloqueante)
 //   - Botón      → short click=moveCursor, long press=acción HUD
-//   - Acciones   → Feed/Play/Clean/Medicate/Discipline/Sleep
+//   - Acciones   → Feed/Play/Clean/Medicate/Discipline/Lights
 //   - Animaciones → EAT, Evolve, Hatch
 //   - Muerte/Resurrección → DeadScreen → nuevo Egg tras kResurrectionMs
 //   - Persistencia automática tras cada acción crítica y cada 5 min
@@ -223,11 +223,12 @@ static void executeSelectedAction_() {
         case ActionKind::Discipline:
             bus.publish({EventType::ActionDisciplineRequested, 10});
             break;
-        case ActionKind::Sleep:
-            // Toggle: si estaba durmiendo, despertar (0); si no, dormir (1).
-            // Sleep no dispara animación one-shot — el estado isSleeping activa
+        case ActionKind::Lights:
+            // TODO(sleep→lights): toggle transicional sobre isSleeping — el
+            // siguiente commit lo cambia a alternar lightsOn (StatsEngine::applyLights).
+            // Lights no dispara animación one-shot — el estado isSleeping activa
             // la animación sleep de forma permanente en computeMood_().
-            bus.publish({EventType::ActionSleepRequested,
+            bus.publish({EventType::ActionLightsRequested,
                          statsEngine.stats().isSleeping ? 0 : 1});
             break;
         case ActionKind::Stats:
@@ -236,7 +237,7 @@ static void executeSelectedAction_() {
     }
 
     // Disparar animación one-shot para acciones que la tengan (Feed/Play/
-    // Clean/Medicate/Discipline). triggerActionAnimation es no-op para Sleep/Stats.
+    // Clean/Medicate/Discipline). triggerActionAnimation es no-op para Lights/Stats.
     renderer->triggerActionAnimation(action);
 
     LOG_INFO("Action HUD: executed %u", static_cast<unsigned>(action));
@@ -540,12 +541,14 @@ static void onActionDiscipline(const Event& e) {
              static_cast<int>(e.payload), statsEngine.stats().discipline);
 }
 
-static void onActionSleep(const Event& e) {
+// TODO(sleep→lights): sigue llamando a applySleep (toggle transicional de
+// isSleeping) — el siguiente commit lo sustituye por applyLights(on).
+static void onActionLights(const Event& e) {
     bool on = (e.payload != 0);
     statsEngine.applySleep(on);
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
-    LOG_INFO("[action] sleep %s -> isSleeping=%u", on ? "on" : "off",
+    LOG_INFO("[action] lights %s -> isSleeping=%u", on ? "on" : "off",
              statsEngine.stats().isSleeping);
 }
 
@@ -796,7 +799,7 @@ void setup() {
     bus.subscribe(EventType::ActionCleanRequested,     onActionClean);
     bus.subscribe(EventType::ActionMedicateRequested,  onActionMedicate);
     bus.subscribe(EventType::ActionDisciplineRequested, onActionDiscipline);
-    bus.subscribe(EventType::ActionSleepRequested,     onActionSleep);
+    bus.subscribe(EventType::ActionLightsRequested,    onActionLights);
 
     // ── WiFi no bloqueante — Fase 5 ───────────────────────────────────────────
     // begin() devuelve en < 5 ms. Si WIFI_SSID está vacío en secrets.h, marca

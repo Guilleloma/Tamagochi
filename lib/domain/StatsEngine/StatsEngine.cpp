@@ -368,7 +368,8 @@ bool StatsEngine::consumeDirtyFlag() {
 //   - Clean:      poopCount > 0          (applyClean es no-op si poop=0)
 //   - Medicate:   isSick                 (applyMedicate es no-op si !sick)
 //   - Discipline: siempre                (sin precondición en dominio)
-//   - Sleep:      siempre                (toggle on/off — label dinámico en UI)
+//   - Lights:     siempre                (toggle luces on/off — label dinámico en UI;
+//                                          TODO(sleep→lights): próximo commit desacopla de isSleeping)
 //   - Stats:      siempre (último)       (no es acción real, abre StatsView)
 // -----------------------------------------------------------------------------
 uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) const {
@@ -379,9 +380,9 @@ uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) c
     if (stats_.poopCount > 0) { out[n++] = ActionKind::Clean; }
     if (stats_.isSick)        { out[n++] = ActionKind::Medicate; }
 
-    // Discipline y Sleep son incondicionales — Sleep alterna en la UI según isSleeping.
+    // Discipline y Lights son incondicionales — Lights alterna en la UI según lightsOn.
     out[n++] = ActionKind::Discipline;
-    out[n++] = ActionKind::Sleep;
+    out[n++] = ActionKind::Lights;
 
     // Stats siempre como última entrada — el HUD inferior la usa para abrir StatsView.
     out[n++] = ActionKind::Stats;

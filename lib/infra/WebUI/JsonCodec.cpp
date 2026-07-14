@@ -212,7 +212,7 @@ ParseError parseAmountPayload(const char* body, size_t bodyLen, uint8_t& outAmou
     return ParseError::Ok;
 }
 
-ParseError parseSleepPayload(const char* body, size_t bodyLen, bool& outValue) {
+ParseError parseLightsPayload(const char* body, size_t bodyLen, bool& outValue) {
     if (body == nullptr || bodyLen == 0) {
         return ParseError::MissingField;
     }

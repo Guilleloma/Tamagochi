@@ -145,7 +145,7 @@ static const MenuIconSpec kMenuIconSpecs[] = {
     { ActionKind::Feed,       "cdccb195-6db4-43fd-886c-093d8c04b541" },  // ic-apple
     { ActionKind::Play,       "1bd2767f-f5dd-478f-b2bb-94e3d8c0f871" },  // ic-ball
     { ActionKind::Discipline, "7793e238-9159-465a-9965-5d8c83458a5a" },  // ic-disc
-    { ActionKind::Sleep,      "2196aed8-2ebe-4dba-a7c6-58ea65a1ce97" },  // ic-moon
+    { ActionKind::Lights,     "2196aed8-2ebe-4dba-a7c6-58ea65a1ce97" },  // ic-moon
     { ActionKind::Stats,      "03fc9466-8147-4c78-8c2b-b8932e355103" },  // ic-stats
 };
 static constexpr uint8_t kMenuIconSpecCount =
@@ -186,7 +186,7 @@ static const char* actionLabelColor(ActionKind action, bool sleeping) {
         case ActionKind::Clean:      return "CLEAN";
         case ActionKind::Medicate:   return "MED";
         case ActionKind::Discipline: return "DISC";
-        case ActionKind::Sleep:      return sleeping ? "WAKE" : "SLEEP";
+        case ActionKind::Lights:     return sleeping ? "WAKE" : "SLEEP";
         case ActionKind::Stats:      return "STATS";
     }
     return "?";
@@ -425,9 +425,9 @@ void DisplayRendererColor::triggerActionAnimation(ActionKind action) {
             mood    = MoodColor::Idle;
             overlay = (overlayBroom_.count > 0) ? &overlayBroom_ : nullptr;
             break;
-        case ActionKind::Sleep:
+        case ActionKind::Lights:
         case ActionKind::Stats:
-            // Sleep lo gestiona isSleeping (permanente); Stats no es una acción.
+            // Lights no dispara animación one-shot (permanente vía isSleeping); Stats no es una acción.
             return;
     }
 

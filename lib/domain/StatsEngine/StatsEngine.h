@@ -14,12 +14,25 @@
 //   weight     0=anoréxico,    50=sano, 100=obeso → metabolismo BAJA weight
 //   poopCount  0-9 cacas visibles acumuladas
 //   isSick     flag de enfermedad
-//   isSleeping flag de sueño — paraliza hunger/happiness/discipline decay
+//   energy     0=agotado,      100=descansado  → el decay BAJA energy despierto,
+//              lo SUBE dormido. Gobierna isSleeping en tick() (ver kEnergy*Threshold) —
+//              ya NO es un toggle manual del usuario.
+//   isSleeping flag de sueño — gobernado SOLO por tick() (auto-sleep/auto-wake por
+//              energy). Paraliza hunger/happiness/discipline decay mientras está activo.
+//   lightsOn   flag de luces de la habitación — único control manual (applyLights),
+//              reemplaza al viejo toggle de sleep. NO afecta isSleeping. Dormido con
+//              lightsOn=true: la mascota se molesta (penaliza happiness/health, energy
+//              recupera más lento). Al auto-despertar, lightsOn se fuerza a true.
 //   attentionScore 0-1000, métrica acumulada que dirige la evolución
 // =============================================================================
 
 // Número máximo de cacas visibles simultáneas
 static constexpr uint8_t kMaxPoopCount = 9;
+
+// Umbrales de histéresis para el sueño automático por energía (ver tick()).
+// Ancha (20↔80) para evitar flip-flop cerca de un único punto de corte.
+static constexpr uint8_t kEnergySleepThreshold = 20;  // despierto, energy<=20 → auto-sleep
+static constexpr uint8_t kEnergyWakeThreshold  = 80;  // dormido,   energy>=80 → auto-wake
 
 // -----------------------------------------------------------------------------
 // ActionKind — enumera los items navegables del HUD inferior de IdleMain.
@@ -34,7 +47,7 @@ enum class ActionKind : uint8_t {
     Clean,
     Medicate,
     Discipline,
-    Sleep,
+    Lights,
     Stats   // abre la pantalla densa de stats (no genera evento de acción)
 };
 
@@ -55,6 +68,10 @@ struct Stats {
     bool     isSick         = false;
     bool     isSleeping     = false;
     uint16_t attentionScore = 500;   // 0-1000
+
+    // Energía/luces — sueño automático + mecánica de luces (fiel Tamagotchi 97)
+    uint8_t  energy  = 100;   // 0 = agotado, 100 = descansado
+    bool     lightsOn = true; // luces de la habitación — único control manual
 };
 
 struct DecayRates {
@@ -73,6 +90,13 @@ struct DecayRates {
     float poopSpawnPerHungerEat  = 0.30f;   // 30% prob de caca al alimentar
     float sicknessProbPerPoop    = 0.005f;  // 0.5% por segundo y por caca presente
     float healthDecayWhenSickMul = 5.0f;    // si sick, health decay × 5
+
+    // Energía / luces (sueño automático)
+    float energyDrainPerSec             = 0.01f;  // despierto: ~2.2h hasta dormirse
+    float energyRecoverPerSec           = 0.02f;  // dormido, luces-OFF: ~50 min de descanso
+    float energyRecoverLightsOnMul      = 0.4f;   // dormido, luces-ON: recupera ×0.4 (descansa peor)
+    float lightsOnHappinessPenaltyPerSec = 0.02f; // dormido+luces-ON: baja happiness
+    float lightsOnHealthPenaltyPerSec    = 0.01f; // dormido+luces-ON: baja health
 };
 
 class StatsEngine {
@@ -92,7 +116,8 @@ public:
     void applyClean();                  // resetea poopCount a 0
     void applyMedicate();               // cura isSick, health +20
     void applyDiscipline(uint8_t amt);  // discipline += amt; happiness -= 5 (coste social)
-    void applySleep(bool on);           // setea isSleeping flag — paraliza decay
+    void applySleep(bool on);           // TODO(sleep→lights): setea isSleeping flag — paraliza decay.
+                                         // Transicional — se sustituye por applyLights() en el siguiente commit.
 
     // Pasivo: resetea todos los stats a defaults v2 (para nuevo ciclo de vida)
     void resetForNewLife();
@@ -125,6 +150,7 @@ private:
     float weightAcc_     = 0.0f;     // acumula pérdida de peso por metabolismo
     float disciplineAcc_ = 0.0f;     // acumula pérdida de disciplina
     float attentionAcc_  = 0.0f;     // acumula tiempo para actualizar attentionScore (ms)
+    float energyAcc_     = 0.0f;     // acumula drain/recover de energy (signo según régimen)
 
     bool dirty_ = false;
 

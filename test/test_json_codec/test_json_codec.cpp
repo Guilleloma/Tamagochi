@@ -471,39 +471,39 @@ void test_parse_feed_payload_amount_wrong_type() {
 }
 
 // =============================================================================
-// 10. parse_sleep_payload_valid_true
+// 10. parse_lights_payload_valid_true
 // { "value": true } → ParseError::Ok, outValue = true.
 // =============================================================================
-void test_parse_sleep_payload_valid_true() {
+void test_parse_lights_payload_valid_true() {
     const char* body = "{\"value\":true}";
     bool value = false;
-    JsonCodec::ParseError result = JsonCodec::parseSleepPayload(body, strlen(body), value);
+    JsonCodec::ParseError result = JsonCodec::parseLightsPayload(body, strlen(body), value);
 
     TEST_ASSERT_EQUAL(JsonCodec::ParseError::Ok, result);
     TEST_ASSERT_TRUE(value);
 }
 
 // =============================================================================
-// 11. parse_sleep_payload_valid_false
+// 11. parse_lights_payload_valid_false
 // { "value": false } → ParseError::Ok, outValue = false.
 // =============================================================================
-void test_parse_sleep_payload_valid_false() {
+void test_parse_lights_payload_valid_false() {
     const char* body = "{\"value\":false}";
     bool value = true;
-    JsonCodec::ParseError result = JsonCodec::parseSleepPayload(body, strlen(body), value);
+    JsonCodec::ParseError result = JsonCodec::parseLightsPayload(body, strlen(body), value);
 
     TEST_ASSERT_EQUAL(JsonCodec::ParseError::Ok, result);
     TEST_ASSERT_FALSE(value);
 }
 
 // =============================================================================
-// 12. parse_sleep_payload_invalid_value
+// 12. parse_lights_payload_invalid_value
 // { "value": 42 } → ParseError::InvalidValue (número en vez de bool).
 // =============================================================================
-void test_parse_sleep_payload_invalid_value() {
+void test_parse_lights_payload_invalid_value() {
     const char* body = "{\"value\":42}";
     bool value = false;
-    JsonCodec::ParseError result = JsonCodec::parseSleepPayload(body, strlen(body), value);
+    JsonCodec::ParseError result = JsonCodec::parseLightsPayload(body, strlen(body), value);
 
     TEST_ASSERT_EQUAL(JsonCodec::ParseError::InvalidValue, result);
 }
@@ -568,9 +568,9 @@ int main() {
     RUN_TEST(test_parse_feed_payload_missing_amount);
     RUN_TEST(test_parse_feed_payload_amount_out_of_range);
     RUN_TEST(test_parse_feed_payload_amount_wrong_type);
-    RUN_TEST(test_parse_sleep_payload_valid_true);
-    RUN_TEST(test_parse_sleep_payload_valid_false);
-    RUN_TEST(test_parse_sleep_payload_invalid_value);
+    RUN_TEST(test_parse_lights_payload_valid_true);
+    RUN_TEST(test_parse_lights_payload_valid_false);
+    RUN_TEST(test_parse_lights_payload_invalid_value);
     RUN_TEST(test_parse_clean_accepts_empty_body);
     RUN_TEST(test_parse_malformed_json);
 

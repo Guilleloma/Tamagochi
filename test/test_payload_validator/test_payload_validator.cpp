@@ -71,7 +71,7 @@ void test_validate_action_name_known() {
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::Ok,
                       PayloadValidator::validateActionName("discipline"));
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::Ok,
-                      PayloadValidator::validateActionName("sleep"));
+                      PayloadValidator::validateActionName("lights"));
 }
 
 // =============================================================================
@@ -93,7 +93,11 @@ void test_validate_action_name_unknown() {
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,
                       PayloadValidator::validateActionName("Feed"));
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,
-                      PayloadValidator::validateActionName("SLEEP"));
+                      PayloadValidator::validateActionName("LIGHTS"));
+    // "sleep" ya no es una acción conocida — el sueño ya no es controlable
+    // por el usuario (ver StatsEngine, sueño automático por energía).
+    TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,
+                      PayloadValidator::validateActionName("sleep"));
 }
 
 // =============================================================================

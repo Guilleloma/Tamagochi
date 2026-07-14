@@ -628,7 +628,7 @@ static const char* actionLabel(ActionKind action, bool sleeping) {
         case ActionKind::Clean:      return "CLEAN";
         case ActionKind::Medicate:   return "MED";
         case ActionKind::Discipline: return "DISC";
-        case ActionKind::Sleep:      return sleeping ? "WAKE" : "SLEEP";
+        case ActionKind::Lights:     return sleeping ? "WAKE" : "SLEEP";
         case ActionKind::Stats:      return "STATS";
     }
     return "?";
@@ -645,7 +645,7 @@ static const uint8_t* actionIcon(ActionKind action) {
         case ActionKind::Clean:      return kSpriteActionClean;
         case ActionKind::Medicate:   return kSpriteActionMedicate;
         case ActionKind::Discipline: return kSpriteActionDiscipline;
-        case ActionKind::Sleep:      return kSpriteActionSleep;
+        case ActionKind::Lights:     return kSpriteActionSleep;
         case ActionKind::Stats:      return kSpriteActionStats;
     }
     return nullptr;
