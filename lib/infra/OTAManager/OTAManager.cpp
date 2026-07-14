@@ -19,6 +19,13 @@
 #include "Logger.h"
 #include "secrets.h"
 
+// TWDT (Task Watchdog Timer) — solo existe en el core ESP32 (IDF). El fix de
+// abajo (alimentar el watchdog durante el progreso del OTA) es exclusivo de
+// ESP32-S3: ver comentario largo en onProgress_() más abajo.
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_task_wdt.h>
+#endif
+
 // Definición del puntero singleton — nullptr hasta que se construya el objeto.
 OTAManager* OTAManager::instance_ = nullptr;
 
@@ -98,6 +105,12 @@ void OTAManager::onStart_() {
     instance_->updating_ = true;
     instance_->bus_.publish({EventType::OtaStarted, 0});
     LOG_INFO("[ota] update started");
+#if defined(ARDUINO_ARCH_ESP32)
+    // Alimenta el TWDT justo al arrancar el OTA: da margen completo de
+    // WDT_TIMEOUT_S antes del primer onProgress_ (que llega tras recibir el
+    // primer chunk). Ver onProgress_() para el porqué del fix completo.
+    esp_task_wdt_reset();
+#endif
 }
 
 void OTAManager::onEnd_() {
@@ -110,6 +123,27 @@ void OTAManager::onEnd_() {
 
 void OTAManager::onProgress_(unsigned int progress, unsigned int total) {
     if (!instance_) return;
+#if defined(ARDUINO_ARCH_ESP32)
+    // FIX (campo, 2 intentos de OTA fallidos a 65%/78% con señal excelente):
+    // ArduinoOTA.handle() bloquea el loopTask durante TODA la recepción del
+    // binario (no vuelve a loop() hasta terminar) — el binario (~940 KB) tarda
+    // >WDT_TIMEOUT_S (10 s) en llegar, así que el esp_task_wdt_reset() del final
+    // de loop() (main_esp32.cpp) nunca se ejecuta durante el OTA y el TWDT
+    // (commit 08fc952) aborta el flasheo con panic=true a mitad de transferencia.
+    //
+    // onProgress_ se invoca síncronamente dentro de ArduinoOTA.handle(), en la
+    // misma pila de llamadas que loop() → ota.loop() → ArduinoOTA.handle() —
+    // es decir, corre en loopTask, la misma task suscrita al TWDT (ver
+    // esp_task_wdt_add(NULL) en setup(), main_esp32.cpp). Alimentar aquí, en
+    // cada chunk recibido, mantiene vivo al TWDT sin desactivarlo.
+    //
+    // Diseño clave: si el OTA se cuelga de verdad (deja de llegar progreso),
+    // onProgress_ deja de llamarse → el TWDT vuelve a saltar a los
+    // WDT_TIMEOUT_S y rescata el dispositivo — comportamiento ya validado en
+    // campo, que NO queremos perder. Por eso no se desactiva el TWDT durante
+    // el OTA, solo se alimenta junto con el progreso real.
+    esp_task_wdt_reset();
+#endif
     // Evitar división por cero (no debería ocurrir, pero total puede ser 0 al inicio).
     if (total == 0) return;
     uint8_t pct = static_cast<uint8_t>((static_cast<uint32_t>(progress) * 100u) / total);

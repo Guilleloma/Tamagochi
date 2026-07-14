@@ -33,6 +33,8 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <esp_random.h>      // esp_random() — TRNG del ESP32-S3 (hardware)
+#include <esp_task_wdt.h>    // Task Watchdog Timer — API antigua (core 2.x/IDF4.4):
+                             // esp_task_wdt_init(timeout_s, panic), NO la struct de IDF5.
 #include <Arduino_GFX_Library.h>
 #include <ESPmDNS.h>         // mDNS en ESP32 (sin MDNS.update() — no es necesario)
 
@@ -55,6 +57,7 @@
 #include "BootSplash.h"
 #include "BatteryMonitor.h"
 #include "MessageBox.h"
+#include "BootLoopGuard.h"   // anti-boot-loop del watchdog de conectividad (hito 9)
 
 // =============================================================================
 // Verificación de versión de firmware en compile-time.
@@ -138,6 +141,7 @@ static uint32_t lastRenderMs    = 0;
 static uint32_t lastSaveMs      = 0;
 static uint32_t lastFpsReportMs = 0;
 static uint32_t framesRendered  = 0;
+static uint32_t lastNetSupervisorMs = 0;
 
 // =============================================================================
 // Helpers de persistencia
@@ -372,6 +376,91 @@ static void onWifiStateChanged(const Event& e) {
     }
 }
 
+// -----------------------------------------------------------------------------
+// netSupervisor_ — red de seguridad idempotente contra WebUI/OTA muertos con
+// WiFi sano (ver plan de robustez de red — incidente real: ping/mDNS vivos
+// pero puertos 80/3232 con RST porque nunca se re-invocó begin() tras un
+// reconnect de bajo nivel).
+//
+// Complementa a WifiManager::onEvent (fuente rápida, ver WifiManager.cpp):
+// esto es la última línea de defensa por si CUALQUIER causa (evento perdido,
+// orden de arranque, etc.) deja isRunning()/isReady() en false con WiFi
+// Connected. begin() en ambos módulos es idempotente (no-op si ya estaban
+// arriba — ver WebUI::begin()/OTAManager::begin() y el fork AsyncTCP
+// verificado en el PASO 0 del plan: AsyncServer::begin() no re-crea el pcb
+// si _pcb ya existe), así que llamarlo de más nunca fuga PCBs LWIP.
+//
+// Corre en loopTask (llamado desde loop()) — nunca desde async_tcp, así que
+// es seguro tocar renderer/estado global si hiciera falta (aquí no hace falta).
+// -----------------------------------------------------------------------------
+static void netSupervisor_() {
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    if (webUI && !webUI->isRunning()) {
+        LOG_WARN("[net-supervisor] WebUI caído con WiFi conectado — relevantando begin()");
+        webUI->begin();
+    }
+    if (!ota.isReady()) {
+        LOG_WARN("[net-supervisor] OTA caído con WiFi conectado — relevantando begin()");
+        ota.begin();
+    }
+}
+
+// -----------------------------------------------------------------------------
+// connectivityWatchdog_ — última línea de defensa cuando netSupervisor_() no
+// basta: si el WiFi lleva caído más de WIFI_DEAD_RESTART_MS SEGUIDOS (no el
+// uptime total, ver ConnectivityWatchdogLogic.h) habiendo estado conectado
+// antes, algo en el stack de red quedó en un estado que ni el re-begin
+// idempotente recupera. Reiniciar el chip es la única salida, con guarda
+// anti-boot-loop (BootLoopGuard) para no entrar en ciclo infinito si el
+// router está apagado de verdad.
+//
+// Sin conexión previa (wifi.hasEverConnected()==false) NUNCA reinicia por
+// esto — un dispositivo que arrancó sin WiFi disponible (router apagado
+// desde el boot) debe poder seguir jugando offline indefinidamente.
+//
+// BUG DE CAMPO corregido aquí: la condición de reinicio usaba
+// wifi.lastConnectedMs() (instante de la ÚLTIMA conexión, no de la caída) —
+// con uptime > WIFI_DEAD_RESTART_MS, cualquier microcorte de WiFi disparaba
+// un reinicio inmediato en vez de esperar los 5 min de caída continua.
+// wifi.isWifiDeadFor() usa wifiDownSinceMs_ (instante de la PRIMERA pérdida
+// de la racha actual), que es la marca correcta para esta pregunta.
+// -----------------------------------------------------------------------------
+static void connectivityWatchdog_() {
+    if (!wifi.hasEverConnected()) return;
+
+    uint32_t now = millis();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        // Conexión estable durante BOOT_LOOP_RESET_STABLE_MS -> restaurar
+        // confianza del anti-boot-loop (idempotente, ver BootLoopGuard.h).
+        if (now - wifi.lastConnectedMs() >= BOOT_LOOP_RESET_STABLE_MS) {
+            BootLoopGuard::reportStableConnection();
+        }
+        return;
+    }
+
+    if (!wifi.isWifiDeadFor(WIFI_DEAD_RESTART_MS)) return;
+
+    if (!BootLoopGuard::allowRestart()) {
+        LOG_ERROR("[net-watchdog] WiFi caido >%lu ms — boot-loop guard agotado (%u/%u), "
+                  "modo degradado (sin reinicio)",
+                  (unsigned long)WIFI_DEAD_RESTART_MS,
+                  (unsigned)BootLoopGuard::count(), (unsigned)BOOT_LOOP_MAX);
+        return;
+    }
+
+    LOG_ERROR("[net-watchdog] WiFi caido >%lu ms — reiniciando (intento %u/%u)",
+              (unsigned long)WIFI_DEAD_RESTART_MS,
+              (unsigned)BootLoopGuard::count(), (unsigned)BOOT_LOOP_MAX);
+    // Persistir antes de reiniciar — el bus es síncrono (misma garantía que
+    // handlePostReboot_ en WebUI), así que al llegar al delay() de abajo el
+    // estado ya está a salvo en LittleFS.
+    bus.publish({EventType::PersistRequested, 0});
+    delay(2000);  // margen para que el log salga por serie antes del reset
+    ESP.restart();
+}
+
 // OtaStarted: cambiar a pantalla de progreso OTA (misma lógica que ESP8266).
 static void onOtaStarted(const Event&) {
     LOG_INFO("[ota] update started — switching to OtaProgress scene");
@@ -520,6 +609,12 @@ void setup() {
     Serial.println();
     LOG_INFO("Boot ESP32-S3 Fase 5 (WiFi+OTA+WebUI) — version=0x%04X", FIRMWARE_VERSION);
 
+    // Anti-boot-loop del watchdog de conectividad (commit 3) — lo primero,
+    // antes de cualquier init que pudiera decidir reiniciar. Detecta arranque
+    // en frío (power-on/brownout) y resetea el contador; en un soft-reset lo
+    // preserva. Ver BootLoopGuard.h para el diseño completo.
+    BootLoopGuard::begin();
+
 #ifdef TURBO_MODE
     LOG_WARN("=================================================");
     LOG_WARN("== TURBO_MODE ACTIVE - factor %u", (unsigned)TURBO_FACTOR);
@@ -535,11 +630,13 @@ void setup() {
     // ── Panel TFT ─────────────────────────────────────────────────────────────
     if (!tft->begin(27000000)) {
         LOG_ERROR("tft->begin() fallo — pantalla no responde");
-        // Sin pantalla no se puede mostrar nada; bucle infinito con log.
-        while (true) {
-            delay(5000);
-            LOG_ERROR("tft->begin() fallo — reset para reintentar");
-        }
+        // Sin pantalla no se puede mostrar nada. Reiniciar y reintentar el
+        // boot es mejor que colgar para siempre (antes: while(true){delay});
+        // un fallo transitorio (glitch de arranque del panel) se recupera
+        // solo en el siguiente boot. delay(2000) da tiempo a que el log
+        // salga por el puerto serie antes del reset.
+        delay(2000);
+        ESP.restart();
     }
     LOG_INFO("TFT begin OK");
 
@@ -552,10 +649,10 @@ void setup() {
     // ── Canvas framebuffer en PSRAM ───────────────────────────────────────────
     if (!canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) {
         LOG_ERROR("canvas->begin() fallo — PSRAM no disponible");
-        while (true) {
-            delay(5000);
-            LOG_ERROR("Sin PSRAM — reset para reintentar");
-        }
+        // Mismo criterio que el fallo de tft->begin() arriba: reset y
+        // reintentar en vez de colgar para siempre.
+        delay(2000);
+        ESP.restart();
     }
     LOG_INFO("Canvas OK. PSRAM libre: %u B", ESP.getFreePsram());
 
@@ -709,12 +806,31 @@ void setup() {
     // ── Medidor de batería — independiente de WiFi, funciona offline ─────────
     battery.begin();
 
+    // ── Task Watchdog Timer — loopTask ────────────────────────────────────────
+    // Se activa aquí, tras todos los inits pesados y bloqueantes de arriba
+    // (TFT/canvas/LittleFS/SpriteStore/WiFi.begin() no bloqueante) — así el
+    // primer esp_task_wdt_reset() (final de loop()) llega muy por debajo de
+    // WDT_TIMEOUT_S. panic=true: si loop() se cuelga sin alimentar el
+    // watchdog, el chip resetea solo (antes: cero recuperación posible sin
+    // ir físicamente a pulsar reset).
+    //
+    // Solo vigila loopTask (NULL = task actual = loopTask en Arduino-ESP32).
+    // NO se añade la task async_tcp — la gestiona ESPAsyncWebServer/AsyncTCP
+    // internamente y añadirla aquí daría falsos positivos (ver plan).
+    if (esp_task_wdt_init(WDT_TIMEOUT_S, true) == ESP_OK) {
+        esp_task_wdt_add(NULL);
+        LOG_INFO("TWDT activo: timeout=%ds panic=true", WDT_TIMEOUT_S);
+    } else {
+        LOG_ERROR("esp_task_wdt_init() fallo — TWDT deshabilitado");
+    }
+
     // ── Schedulers: inicializar todos a now para evitar ticks espurios al boot ─
     uint32_t now = millis();
     lastStatsTickMs = now;
     lastRenderMs    = now;
     lastSaveMs      = now;   // evita un save espurio en el primer tick de autosave
     lastFpsReportMs = now;
+    lastNetSupervisorMs = now;
 
     LOG_INFO("Setup done (stage=%u ageMin=%u heap=%u psram=%u wifi=%s)",
              static_cast<unsigned>(lifeFSM.stage()),
@@ -837,6 +953,17 @@ void loop() {
         lastSaveMs = now;
     }
 
+    // ── Supervisor de red cada NET_SUPERVISOR_INTERVAL_MS (~5 s) ─────────────
+    // Ver netSupervisor_() — red de seguridad idempotente, complementa a
+    // WifiManager::onEvent (fuente rápida) contra WebUI/OTA muertos con WiFi vivo.
+    // connectivityWatchdog_() comparte el mismo intervalo — última línea de
+    // defensa si el re-begin no basta (ver su comentario).
+    if (now - lastNetSupervisorMs >= NET_SUPERVISOR_INTERVAL_MS) {
+        netSupervisor_();
+        connectivityWatchdog_();
+        lastNetSupervisorMs = now;
+    }
+
     // ── Reporte de FPS real cada FPS_REPORT_MS (5 s) ─────────────────────────
     if (now - lastFpsReportMs >= FPS_REPORT_MS) {
         float elapsed = (now - lastFpsReportMs) / 1000.0f;
@@ -847,4 +974,10 @@ void loop() {
         framesRendered  = 0;
         lastFpsReportMs = now;
     }
+
+    // ── Task Watchdog Timer — alimentar al final de cada vuelta ──────────────
+    // Debe ser SIEMPRE la última línea de loop(): si algo entre aquí y el
+    // próximo esp_task_wdt_reset() se cuelga (p.ej. un futuro cambio que
+    // bloquee), el TWDT lo detecta en WDT_TIMEOUT_S y resetea el chip.
+    esp_task_wdt_reset();
 }

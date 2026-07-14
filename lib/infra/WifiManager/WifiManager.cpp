@@ -68,6 +68,24 @@ void WifiManager::begin() {
     // mejora genuina de latencia/estabilidad de red, no como "fix" de OTA.
     WiFi.setSleep(false);
     WiFi.hostname(OTA_HOSTNAME);
+
+#if defined(ARDUINO_ARCH_ESP32)
+    // Fuente de verdad rápida de conectividad (ver comentario de clase en el
+    // .h): WiFi.onEvent() corre en la task "arduino_events" del core, así que
+    // el lambda SOLO delega en onWifiEvent_(), que a su vez solo escribe
+    // flags `volatile` — nunca bus_.publish() (EventBus no es thread-safe).
+    // La lambda captura `this` (permitido aquí: no es un handler de EventBus,
+    // que sí exige function pointers planos sin captura).
+    WiFi.onEvent(
+        [this](arduino_event_id_t event, arduino_event_info_t) { onWifiEvent_(event); },
+        ARDUINO_EVENT_WIFI_STA_GOT_IP
+    );
+    WiFi.onEvent(
+        [this](arduino_event_id_t event, arduino_event_info_t) { onWifiEvent_(event); },
+        ARDUINO_EVENT_WIFI_STA_DISCONNECTED
+    );
+#endif
+
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
     state_              = WifiState::Connecting;
@@ -78,13 +96,68 @@ void WifiManager::begin() {
     LOG_INFO("[wifi] conectando a SSID=%s (hostname=%s)", WIFI_SSID, OTA_HOSTNAME);
 }
 
+#if defined(ARDUINO_ARCH_ESP32)
 // -----------------------------------------------------------------------------
-// loop — polea el estado WiFi y gestiona transiciones + reintentos.
+// onWifiEvent_ — callback de WiFi.onEvent(), corre en la task "arduino_events".
 //
-// Guard de tiempo: solo actúa cada kWifiPollIntervalMs (500 ms).
-// En el 99% de las llamadas: un compare de uint32_t → < 1 µs.
+// Contrato estricto: SOLO escribe flags `volatile`. Nada de bus_.publish(),
+// nada de LOG_* (Logger no está documentado como thread-safe y su coste no
+// está acotado — mismo criterio conservador que con el EventBus), nada de
+// tocar state_/disconnectAtMs_ directamente (eso lo hace consumePendingEvents_,
+// desde loopTask, en el próximo loop()).
+// -----------------------------------------------------------------------------
+void WifiManager::onWifiEvent_(arduino_event_id_t event) {
+    if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+        eventGotIpPending_ = true;
+    } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+        eventDisconnectedPending_ = true;
+    }
+}
+#endif
+
+// -----------------------------------------------------------------------------
+// consumePendingEvents_ — procesa los flags escritos por onWifiEvent_() desde
+// la task "arduino_events". Llamado en CADA loop() (sin gate de tiempo) para
+// no perder blips de reconexión más cortos que kWifiPollIntervalMs (ver
+// comentario de clase en el .h — este es el fix del incidente real).
+//
+// Orden importa: se procesa primero el flag de desconexión y luego el de
+// GOT_IP. Si ambos llegaron entre dos llamadas a loop() (blip muy corto), este
+// orden garantiza que se pase por Disconnected (que apaga WebUI/OTA en
+// onWifiStateChanged) antes de volver a Connected (que los relevanta) — así
+// no se pierde el ciclo end()/begin() aunque el blip completo quepa entre dos
+// iteraciones del loop principal.
+// -----------------------------------------------------------------------------
+void WifiManager::consumePendingEvents_() {
+    if (eventDisconnectedPending_) {
+        eventDisconnectedPending_ = false;
+        if (state_ == WifiState::Connected) {
+            LOG_WARN("[wifi] evento STA_DISCONNECTED (onEvent) — marcando Disconnected");
+            disconnectAtMs_ = millis();
+            publishState_(WifiState::Disconnected);
+        }
+    }
+
+    if (eventGotIpPending_) {
+        eventGotIpPending_ = false;
+        if (state_ != WifiState::Connected) {
+            LOG_INFO("[wifi] evento GOT_IP (onEvent) — marcando Connected");
+            publishState_(WifiState::Connected);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// loop — consume eventos WiFi pendientes y polea el estado como respaldo.
+//
+// consumePendingEvents_() corre en CADA llamada (barato: 2 bools). El resto
+// (polling clásico) mantiene su guard de tiempo: solo actúa cada
+// kWifiPollIntervalMs (500 ms). En el 99% de las llamadas: un compare de
+// uint32_t → < 1 µs.
 // -----------------------------------------------------------------------------
 void WifiManager::loop() {
+    consumePendingEvents_();
+
     if (state_ == WifiState::Disabled) return;
 
     uint32_t now = millis();
@@ -146,7 +219,35 @@ void WifiManager::publishState_(WifiState newState) {
     LOG_INFO("[wifi] estado %u -> %u", static_cast<unsigned>(state_),
              static_cast<unsigned>(newState));
     state_ = newState;
+
+    // Sellar el instante de conexión exitosa aquí, en el único punto que
+    // decide una transición A Connected (evento o polling) — evita duplicar
+    // esta lógica en consumePendingEvents_() y en el polling de abajo.
+    // Usado por el watchdog de conectividad (commit 3, WIFI_DEAD_RESTART_MS).
+    if (newState == WifiState::Connected) {
+        hasEverConnected_ = true;
+        lastConnectedMs_  = millis();
+    }
+
+    // Sellar/limpiar el sello de "tiempo caído" en el MISMO punto único de
+    // transición (evento o polling) — igual que lastConnectedMs_ arriba, pero
+    // con la semántica distinta que necesita el watchdog: ver
+    // ConnectivityWatchdogLogic.h para el porqué de separar esta marca de
+    // lastConnectedMs_ (bug de campo: reinicio casi inmediato al perder WiFi
+    // en vez de esperar WIFI_DEAD_RESTART_MS caído).
+    wifiDownLogic_.onWifiStatus(newState == WifiState::Connected, millis());
+
     bus_.publish({EventType::WifiStateChanged, static_cast<int32_t>(newState)});
+}
+
+// -----------------------------------------------------------------------------
+// isWifiDeadFor — decisión completa del watchdog de conectividad. Delega
+// enteramente en ConnectivityWatchdogLogic::shouldRestart() (pura, cubierta
+// por tests en test/test_connectivity_watchdog_logic/) para que
+// connectivityWatchdog_() en main_esp32.cpp no reimplemente esta aritmética.
+// -----------------------------------------------------------------------------
+bool WifiManager::isWifiDeadFor(uint32_t thresholdMs) const {
+    return wifiDownLogic_.shouldRestart(hasEverConnected_, millis(), thresholdMs);
 }
 
 #endif  // UNIT_TEST

@@ -7,6 +7,9 @@
 //                                + batteryPercent/batteryCharging/batteryValid
 //   GET  /api/v1/info         → telemetría del dispositivo (firmware, heap, RSSI)
 //                                + battery* (igual que /state) + batteryMillivolts
+//                                + resetReason/bootCount/minFreeHeap (hito 9 —
+//                                  bootCount/minFreeHeap siempre 0 en ESP8266,
+//                                  ver JsonCodec.h)
 //
 // Endpoints (hito 6 — acciones de juego):
 //   POST /api/v1/feed         → body: {"amount":1-100}  publica ActionFeedRequested
