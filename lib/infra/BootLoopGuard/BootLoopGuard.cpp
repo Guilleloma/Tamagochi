@@ -3,6 +3,10 @@
 //
 // Cumple rules/error-handling.md: cada decisión (reset limpio, incremento,
 // modo degradado) se loguea con contexto.
+//
+// La decisión (¿se agotó el tope de reinicios?) se delega a BootLoopGuardLogic
+// para no duplicarla — ver BootLoopGuardLogic.h. Este archivo solo aporta la
+// persistencia RTC_NOINIT_ATTR y la detección cold-boot vs soft-reset.
 // =============================================================================
 
 #ifndef UNIT_TEST  // Guard: este archivo no se compila en env:native (Arduino-only)
@@ -13,6 +17,7 @@
 #include <esp_system.h>
 #include "config.h"
 #include "Logger.h"
+#include "BootLoopGuardLogic.h"
 
 namespace {
 
@@ -27,6 +32,12 @@ constexpr uint32_t kBootLoopMagic = 0x544D4731UL;  // "TMG1" en ASCII, arbitrari
 // no exponer estado mutable directo fuera de este archivo.
 RTC_NOINIT_ATTR uint32_t rtcMagic_;
 RTC_NOINIT_ATTR uint32_t rtcCount_;
+
+// Lógica pura de decisión. Vive en RAM normal (se reinicializa en cada boot,
+// a diferencia de rtcCount_) — se resincroniza con rtcCount_ en begin() y se
+// escribe de vuelta a rtcCount_ tras cada mutación, para que el contador siga
+// sobreviviendo al soft-reset exactamente igual que antes de este refactor.
+BootLoopGuardLogic logic_;
 
 }  // namespace
 
@@ -49,22 +60,23 @@ void begin() {
         LOG_INFO("[boot-loop-guard] contador preservado tras soft-reset: %u/%u (reset_reason=%d)",
                   rtcCount_, (unsigned)BOOT_LOOP_MAX, (int)reason);
     }
+
+    logic_.reset(BOOT_LOOP_MAX, rtcCount_);
 }
 
 bool allowRestart() {
-    if (rtcCount_ >= BOOT_LOOP_MAX) {
-        return false;
-    }
-    rtcCount_++;
-    return true;
+    bool allowed = logic_.allowRestart();
+    rtcCount_ = logic_.count();  // persistir el nuevo contador en RTC_NOINIT_ATTR
+    return allowed;
 }
 
 void reportStableConnection() {
-    rtcCount_ = 0;
+    logic_.reportStableConnection();
+    rtcCount_ = logic_.count();
 }
 
 uint32_t count() {
-    return rtcCount_;
+    return logic_.count();
 }
 
 }  // namespace BootLoopGuard

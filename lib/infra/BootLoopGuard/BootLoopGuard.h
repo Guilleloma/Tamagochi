@@ -29,6 +29,12 @@
 //
 // Arduino-ESP32 only (RTC_NOINIT_ATTR, esp_reset_reason()). No testeable en
 // env:native — ver guard #ifndef UNIT_TEST en el .cpp.
+//
+// La decisión de negocio pura (contador + comparación contra BOOT_LOOP_MAX)
+// vive en BootLoopGuardLogic (lib/infra/BootLoopGuardLogic), SIN RTC_NOINIT_ATTR
+// ni esp_reset_reason() — por eso sí es testeable en env:native. Este wrapper
+// solo añade la persistencia RTC y la detección cold-boot vs soft-reset,
+// delegando la decisión para no duplicarla. Ver test/test_bootloop_guard/.
 // =============================================================================
 
 #include <stdint.h>
