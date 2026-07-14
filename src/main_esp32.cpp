@@ -57,6 +57,7 @@
 #include "BootSplash.h"
 #include "BatteryMonitor.h"
 #include "MessageBox.h"
+#include "BootLoopGuard.h"   // anti-boot-loop del watchdog de conectividad (hito 9)
 
 // =============================================================================
 // Verificación de versión de firmware en compile-time.
@@ -405,6 +406,53 @@ static void netSupervisor_() {
     }
 }
 
+// -----------------------------------------------------------------------------
+// connectivityWatchdog_ — última línea de defensa cuando netSupervisor_() no
+// basta: si el WiFi lleva caído más de WIFI_DEAD_RESTART_MS habiendo estado
+// conectado antes, algo en el stack de red quedó en un estado que ni el
+// re-begin idempotente recupera. Reiniciar el chip es la única salida, con
+// guarda anti-boot-loop (BootLoopGuard) para no entrar en ciclo infinito si
+// el router está apagado de verdad.
+//
+// Sin conexión previa (wifi.hasEverConnected()==false) NUNCA reinicia por
+// esto — un dispositivo que arrancó sin WiFi disponible (router apagado
+// desde el boot) debe poder seguir jugando offline indefinidamente.
+// -----------------------------------------------------------------------------
+static void connectivityWatchdog_() {
+    if (!wifi.hasEverConnected()) return;
+
+    uint32_t now = millis();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        // Conexión estable durante BOOT_LOOP_RESET_STABLE_MS -> restaurar
+        // confianza del anti-boot-loop (idempotente, ver BootLoopGuard.h).
+        if (now - wifi.lastConnectedMs() >= BOOT_LOOP_RESET_STABLE_MS) {
+            BootLoopGuard::reportStableConnection();
+        }
+        return;
+    }
+
+    if (now - wifi.lastConnectedMs() <= WIFI_DEAD_RESTART_MS) return;
+
+    if (!BootLoopGuard::allowRestart()) {
+        LOG_ERROR("[net-watchdog] WiFi caido >%lu ms — boot-loop guard agotado (%u/%u), "
+                  "modo degradado (sin reinicio)",
+                  (unsigned long)WIFI_DEAD_RESTART_MS,
+                  (unsigned)BootLoopGuard::count(), (unsigned)BOOT_LOOP_MAX);
+        return;
+    }
+
+    LOG_ERROR("[net-watchdog] WiFi caido >%lu ms — reiniciando (intento %u/%u)",
+              (unsigned long)WIFI_DEAD_RESTART_MS,
+              (unsigned)BootLoopGuard::count(), (unsigned)BOOT_LOOP_MAX);
+    // Persistir antes de reiniciar — el bus es síncrono (misma garantía que
+    // handlePostReboot_ en WebUI), así que al llegar al delay() de abajo el
+    // estado ya está a salvo en LittleFS.
+    bus.publish({EventType::PersistRequested, 0});
+    delay(2000);  // margen para que el log salga por serie antes del reset
+    ESP.restart();
+}
+
 // OtaStarted: cambiar a pantalla de progreso OTA (misma lógica que ESP8266).
 static void onOtaStarted(const Event&) {
     LOG_INFO("[ota] update started — switching to OtaProgress scene");
@@ -552,6 +600,12 @@ void setup() {
     Serial.begin(115200);
     Serial.println();
     LOG_INFO("Boot ESP32-S3 Fase 5 (WiFi+OTA+WebUI) — version=0x%04X", FIRMWARE_VERSION);
+
+    // Anti-boot-loop del watchdog de conectividad (commit 3) — lo primero,
+    // antes de cualquier init que pudiera decidir reiniciar. Detecta arranque
+    // en frío (power-on/brownout) y resetea el contador; en un soft-reset lo
+    // preserva. Ver BootLoopGuard.h para el diseño completo.
+    BootLoopGuard::begin();
 
 #ifdef TURBO_MODE
     LOG_WARN("=================================================");
@@ -894,8 +948,11 @@ void loop() {
     // ── Supervisor de red cada NET_SUPERVISOR_INTERVAL_MS (~5 s) ─────────────
     // Ver netSupervisor_() — red de seguridad idempotente, complementa a
     // WifiManager::onEvent (fuente rápida) contra WebUI/OTA muertos con WiFi vivo.
+    // connectivityWatchdog_() comparte el mismo intervalo — última línea de
+    // defensa si el re-begin no basta (ver su comentario).
     if (now - lastNetSupervisorMs >= NET_SUPERVISOR_INTERVAL_MS) {
         netSupervisor_();
+        connectivityWatchdog_();
         lastNetSupervisorMs = now;
     }
 

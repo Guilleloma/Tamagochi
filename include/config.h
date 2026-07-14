@@ -162,12 +162,14 @@
 // stack de red y se reinicia (con guarda anti-boot-loop, ver BOOT_LOOP_MAX).
 #define WIFI_DEAD_RESTART_MS          (5UL * 60UL * 1000UL)   // 5 min
 
-// Anti-boot-loop: máximo de reinicios "por WiFi caído" tolerados dentro de
-// BOOT_LOOP_WINDOW_MS antes de entrar en modo degradado (seguir jugando sin
-// reintentar reinicio — evita ciclo infinito si el router está apagado de
-// verdad). El contador vive en RTC_NOINIT_ATTR (sobrevive a ESP.restart(),
-// se pierde al desconectar la alimentación) y se resetea tras
-// BOOT_LOOP_RESET_STABLE_MS de conexión estable.
+// Anti-boot-loop: máximo de reinicios "por WiFi caído" tolerados antes de
+// entrar en modo degradado (seguir jugando offline sin reintentar reinicio —
+// evita ciclo infinito si el router está apagado de verdad). El contador vive
+// en RTC_NOINIT_ATTR (sobrevive a ESP.restart(), se pierde al desconectar la
+// alimentación — ver BootLoopGuard.h) y se resetea a 0 tras
+// BOOT_LOOP_RESET_STABLE_MS de conexión estable. Sin ventana de tiempo
+// persistida entre reinicios (millis() no sirve para eso sin NTP) — el reset
+// por conexión estable ya cubre el caso "el router volvió" de forma más
+// simple y igual de efectiva.
 #define BOOT_LOOP_MAX                  5
-#define BOOT_LOOP_WINDOW_MS           (30UL * 60UL * 1000UL)  // 30 min
 #define BOOT_LOOP_RESET_STABLE_MS     (60UL * 1000UL)         // 1 min
