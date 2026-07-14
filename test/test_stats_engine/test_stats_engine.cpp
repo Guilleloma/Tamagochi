@@ -184,7 +184,12 @@ void test_play_also_increases_hunger() {
 // Si isSleeping, applyPlay no toca nada (no se juega dormido).
 // =============================================================================
 void test_play_ignored_when_sleeping() {
-    g_engine->applySleep(true);
+    // isSleeping ya no es controlable vía applySleep (eliminado) — se fuerza
+    // directamente vía setStats, igual que haría una carga desde Persistence.
+    Stats s = g_engine->stats();
+    s.isSleeping = true;
+    g_engine->setStats(s);
+
     Stats before = g_engine->stats();
     g_engine->applyPlay(50);
     Stats after = g_engine->stats();
@@ -379,10 +384,19 @@ void test_discipline_clamps_at_100() {
 
 // =============================================================================
 // 22. test_sleep_paralyzes_decay
-// Con isSleeping=true, hunger y happiness no cambian tras muchos ticks.
+// Con isSleeping=true y lightsOn=false (descanso correcto), hunger y happiness
+// no cambian tras muchos ticks. energy se fija a 50 (medio) para que el
+// auto-wake (energy>=80) no dispare durante los 200s del test — a
+// energyRecoverPerSec=0.02 recupera 4 pts en 200s, muy por debajo del umbral.
+// isSleeping ya no es controlable vía applySleep (eliminado) — se fuerza vía
+// setStats, igual que haría una carga desde Persistence.
 // =============================================================================
 void test_sleep_paralyzes_decay() {
-    g_engine->applySleep(true);
+    Stats s = g_engine->stats();
+    s.isSleeping = true;
+    s.lightsOn   = false;
+    s.energy     = 50;
+    g_engine->setStats(s);
 
     // 200s: suficiente para ver decay en condiciones normales
     for (int i = 0; i < 200; ++i) {
@@ -391,24 +405,36 @@ void test_sleep_paralyzes_decay() {
 
     // Hunger no debe haber subido (paralizado)
     TEST_ASSERT_EQUAL_UINT8(50, g_engine->stats().hunger);
-    // Happiness no debe haber bajado (paralizado)
+    // Happiness no debe haber bajado (paralizado, lightsOn=false no penaliza)
     TEST_ASSERT_EQUAL_UINT8(50, g_engine->stats().happiness);
+    // Sigue dormido: no debe haber cruzado el umbral de auto-wake
+    TEST_ASSERT_TRUE(g_engine->stats().isSleeping);
 }
 
 // =============================================================================
-// 23. test_sleep_off_resumes_decay
-// Tras applySleep(false), el decay de hunger se reanuda normalmente.
+// 23. test_awake_resumes_decay_after_forced_wake
+// Al forzar isSleeping=false (equivalente a lo que hace tick() al llegar a
+// energy>=80, ver test_auto_wake_at_energy_threshold), el decay de hunger se
+// reanuda normalmente.
 // =============================================================================
-void test_sleep_off_resumes_decay() {
-    g_engine->applySleep(true);
+void test_awake_resumes_decay_after_forced_wake() {
+    Stats s = g_engine->stats();
+    s.isSleeping = true;
+    s.lightsOn   = false;
+    s.energy     = 50;
+    g_engine->setStats(s);
+
     // Verificar que dormido no decae
     for (int i = 0; i < 20; ++i) {
         g_engine->tick(1000);
     }
     TEST_ASSERT_EQUAL_UINT8(50, g_engine->stats().hunger);
 
-    // Despertar: el decay vuelve
-    g_engine->applySleep(false);
+    // Despertar (forzado vía setStats): el decay vuelve
+    Stats awake = g_engine->stats();
+    awake.isSleeping = false;
+    g_engine->setStats(awake);
+
     for (int i = 0; i < 20; ++i) {
         g_engine->tick(1000);
     }
@@ -448,9 +474,9 @@ void test_feed_increases_weight() {
 // =============================================================================
 void test_feed_ignored_when_sleeping() {
     Stats s = g_engine->stats();
-    s.hunger = 80;
+    s.hunger     = 80;
+    s.isSleeping = true;
     g_engine->setStats(s);
-    g_engine->applySleep(true);
     g_engine->consumeDirtyFlag();
 
     g_engine->applyFeed(20);
@@ -635,7 +661,7 @@ int main() {
     RUN_TEST(test_discipline_increases_and_drops_happiness);
     RUN_TEST(test_discipline_clamps_at_100);
     RUN_TEST(test_sleep_paralyzes_decay);
-    RUN_TEST(test_sleep_off_resumes_decay);
+    RUN_TEST(test_awake_resumes_decay_after_forced_wake);
     RUN_TEST(test_feed_spawns_poop_with_seeded_rng);
     RUN_TEST(test_feed_increases_weight);
     RUN_TEST(test_feed_ignored_when_sleeping);

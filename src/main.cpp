@@ -175,10 +175,10 @@ static void executeSelectedAction_() {
             renderer.triggerActionAnimation(action);
             break;
         case ActionKind::Lights:
-            // TODO(sleep→lights): toggle transicional sobre isSleeping — el
-            // siguiente commit lo cambia a alternar lightsOn (StatsEngine::applyLights).
+            // Toggle de lightsOn (NO de isSleeping — el sueño es automático,
+            // ver StatsEngine::tick()).
             bus.publish({EventType::ActionLightsRequested,
-                         statsEngine.stats().isSleeping ? 0 : 1});
+                         statsEngine.stats().lightsOn ? 0 : 1});
             break;
         case ActionKind::Stats:
             // Manejado en onLongPress como transición de escena, no debería llegar.
@@ -350,14 +350,12 @@ static void onActionDiscipline(const Event& e) {
     LOG_INFO("[action] discipline +%d -> discipline=%u", static_cast<int>(e.payload), statsEngine.stats().discipline);
 }
 
-// TODO(sleep→lights): sigue llamando a applySleep (toggle transicional de
-// isSleeping) — el siguiente commit lo sustituye por applyLights(on).
 static void onActionLights(const Event& e) {
     bool on = (e.payload != 0);
-    statsEngine.applySleep(on);
+    statsEngine.applyLights(on);
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
-    LOG_INFO("[action] lights %s -> isSleeping=%u", on ? "on" : "off", statsEngine.stats().isSleeping);
+    LOG_INFO("[action] lights %s -> lightsOn=%u", on ? "on" : "off", statsEngine.stats().lightsOn);
 }
 
 // LifeStateChanged: reacciona a transiciones del LifeFSM.
@@ -558,6 +556,8 @@ void loop() {
         uint32_t dt = now - lastStatsTickMs;
         lastStatsTickMs = now;
 
+        bool wasSleeping = statsEngine.stats().isSleeping;
+
         LifeStage stage = lifeFSM.stage();
         if (stage != LifeStage::Egg && stage != LifeStage::Dead) {
             statsEngine.tick(dt);
@@ -570,6 +570,15 @@ void loop() {
         // Publicar StatsChanged solo si algún stat entero cambió (dirty flag).
         if (statsEngine.consumeDirtyFlag()) {
             bus.publish({EventType::StatsChanged, 0});
+        }
+
+        // Auto sleep/wake (ver StatsEngine::tick): persistir de inmediato para
+        // no perder la transición si hay un power-loss antes del autosave de 5 min.
+        bool isSleepingNow = statsEngine.stats().isSleeping;
+        if (isSleepingNow != wasSleeping) {
+            LOG_INFO("[sleep] auto %s (energy=%u)", isSleepingNow ? "sleep" : "wake",
+                     statsEngine.stats().energy);
+            bus.publish({EventType::PersistRequested, 0});
         }
     }
 

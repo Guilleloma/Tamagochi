@@ -116,8 +116,8 @@ public:
     void applyClean();                  // resetea poopCount a 0
     void applyMedicate();               // cura isSick, health +20
     void applyDiscipline(uint8_t amt);  // discipline += amt; happiness -= 5 (coste social)
-    void applySleep(bool on);           // TODO(sleep→lights): setea isSleeping flag — paraliza decay.
-                                         // Transicional — se sustituye por applyLights() en el siguiente commit.
+    void applyLights(bool on);          // setea lightsOn — único control manual del sueño;
+                                         // NO toca isSleeping (100% automático, ver tick()).
 
     // Pasivo: resetea todos los stats a defaults v2 (para nuevo ciclo de vida)
     void resetForNewLife();
