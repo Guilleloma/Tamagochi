@@ -33,6 +33,8 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <esp_random.h>      // esp_random() — TRNG del ESP32-S3 (hardware)
+#include <esp_task_wdt.h>    // Task Watchdog Timer — API antigua (core 2.x/IDF4.4):
+                             // esp_task_wdt_init(timeout_s, panic), NO la struct de IDF5.
 #include <Arduino_GFX_Library.h>
 #include <ESPmDNS.h>         // mDNS en ESP32 (sin MDNS.update() — no es necesario)
 
@@ -566,11 +568,13 @@ void setup() {
     // ── Panel TFT ─────────────────────────────────────────────────────────────
     if (!tft->begin(27000000)) {
         LOG_ERROR("tft->begin() fallo — pantalla no responde");
-        // Sin pantalla no se puede mostrar nada; bucle infinito con log.
-        while (true) {
-            delay(5000);
-            LOG_ERROR("tft->begin() fallo — reset para reintentar");
-        }
+        // Sin pantalla no se puede mostrar nada. Reiniciar y reintentar el
+        // boot es mejor que colgar para siempre (antes: while(true){delay});
+        // un fallo transitorio (glitch de arranque del panel) se recupera
+        // solo en el siguiente boot. delay(2000) da tiempo a que el log
+        // salga por el puerto serie antes del reset.
+        delay(2000);
+        ESP.restart();
     }
     LOG_INFO("TFT begin OK");
 
@@ -583,10 +587,10 @@ void setup() {
     // ── Canvas framebuffer en PSRAM ───────────────────────────────────────────
     if (!canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) {
         LOG_ERROR("canvas->begin() fallo — PSRAM no disponible");
-        while (true) {
-            delay(5000);
-            LOG_ERROR("Sin PSRAM — reset para reintentar");
-        }
+        // Mismo criterio que el fallo de tft->begin() arriba: reset y
+        // reintentar en vez de colgar para siempre.
+        delay(2000);
+        ESP.restart();
     }
     LOG_INFO("Canvas OK. PSRAM libre: %u B", ESP.getFreePsram());
 
@@ -740,6 +744,24 @@ void setup() {
     // ── Medidor de batería — independiente de WiFi, funciona offline ─────────
     battery.begin();
 
+    // ── Task Watchdog Timer — loopTask ────────────────────────────────────────
+    // Se activa aquí, tras todos los inits pesados y bloqueantes de arriba
+    // (TFT/canvas/LittleFS/SpriteStore/WiFi.begin() no bloqueante) — así el
+    // primer esp_task_wdt_reset() (final de loop()) llega muy por debajo de
+    // WDT_TIMEOUT_S. panic=true: si loop() se cuelga sin alimentar el
+    // watchdog, el chip resetea solo (antes: cero recuperación posible sin
+    // ir físicamente a pulsar reset).
+    //
+    // Solo vigila loopTask (NULL = task actual = loopTask en Arduino-ESP32).
+    // NO se añade la task async_tcp — la gestiona ESPAsyncWebServer/AsyncTCP
+    // internamente y añadirla aquí daría falsos positivos (ver plan).
+    if (esp_task_wdt_init(WDT_TIMEOUT_S, true) == ESP_OK) {
+        esp_task_wdt_add(NULL);
+        LOG_INFO("TWDT activo: timeout=%ds panic=true", WDT_TIMEOUT_S);
+    } else {
+        LOG_ERROR("esp_task_wdt_init() fallo — TWDT deshabilitado");
+    }
+
     // ── Schedulers: inicializar todos a now para evitar ticks espurios al boot ─
     uint32_t now = millis();
     lastStatsTickMs = now;
@@ -887,4 +909,10 @@ void loop() {
         framesRendered  = 0;
         lastFpsReportMs = now;
     }
+
+    // ── Task Watchdog Timer — alimentar al final de cada vuelta ──────────────
+    // Debe ser SIEMPRE la última línea de loop(): si algo entre aquí y el
+    // próximo esp_task_wdt_reset() se cuelga (p.ej. un futuro cambio que
+    // bloquee), el TWDT lo detecta en WDT_TIMEOUT_S y resetea el chip.
+    esp_task_wdt_reset();
 }
