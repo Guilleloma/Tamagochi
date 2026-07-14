@@ -138,6 +138,7 @@ static uint32_t lastRenderMs    = 0;
 static uint32_t lastSaveMs      = 0;
 static uint32_t lastFpsReportMs = 0;
 static uint32_t framesRendered  = 0;
+static uint32_t lastNetSupervisorMs = 0;
 
 // =============================================================================
 // Helpers de persistencia
@@ -369,6 +370,36 @@ static void onWifiStateChanged(const Event& e) {
         if (ota.isReady()) ota.end();
         if (webUI && webUI->isRunning()) webUI->end();
         // mDNS: en ESP32 no hay MDNS.end() estándar; se reinicia con begin() al reconectar.
+    }
+}
+
+// -----------------------------------------------------------------------------
+// netSupervisor_ — red de seguridad idempotente contra WebUI/OTA muertos con
+// WiFi sano (ver plan de robustez de red — incidente real: ping/mDNS vivos
+// pero puertos 80/3232 con RST porque nunca se re-invocó begin() tras un
+// reconnect de bajo nivel).
+//
+// Complementa a WifiManager::onEvent (fuente rápida, ver WifiManager.cpp):
+// esto es la última línea de defensa por si CUALQUIER causa (evento perdido,
+// orden de arranque, etc.) deja isRunning()/isReady() en false con WiFi
+// Connected. begin() en ambos módulos es idempotente (no-op si ya estaban
+// arriba — ver WebUI::begin()/OTAManager::begin() y el fork AsyncTCP
+// verificado en el PASO 0 del plan: AsyncServer::begin() no re-crea el pcb
+// si _pcb ya existe), así que llamarlo de más nunca fuga PCBs LWIP.
+//
+// Corre en loopTask (llamado desde loop()) — nunca desde async_tcp, así que
+// es seguro tocar renderer/estado global si hiciera falta (aquí no hace falta).
+// -----------------------------------------------------------------------------
+static void netSupervisor_() {
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    if (webUI && !webUI->isRunning()) {
+        LOG_WARN("[net-supervisor] WebUI caído con WiFi conectado — relevantando begin()");
+        webUI->begin();
+    }
+    if (!ota.isReady()) {
+        LOG_WARN("[net-supervisor] OTA caído con WiFi conectado — relevantando begin()");
+        ota.begin();
     }
 }
 
@@ -715,6 +746,7 @@ void setup() {
     lastRenderMs    = now;
     lastSaveMs      = now;   // evita un save espurio en el primer tick de autosave
     lastFpsReportMs = now;
+    lastNetSupervisorMs = now;
 
     LOG_INFO("Setup done (stage=%u ageMin=%u heap=%u psram=%u wifi=%s)",
              static_cast<unsigned>(lifeFSM.stage()),
@@ -835,6 +867,14 @@ void loop() {
     if (now - lastSaveMs >= PERSIST_AUTOSAVE_MS) {
         bus.publish({EventType::PersistRequested, 0});
         lastSaveMs = now;
+    }
+
+    // ── Supervisor de red cada NET_SUPERVISOR_INTERVAL_MS (~5 s) ─────────────
+    // Ver netSupervisor_() — red de seguridad idempotente, complementa a
+    // WifiManager::onEvent (fuente rápida) contra WebUI/OTA muertos con WiFi vivo.
+    if (now - lastNetSupervisorMs >= NET_SUPERVISOR_INTERVAL_MS) {
+        netSupervisor_();
+        lastNetSupervisorMs = now;
     }
 
     // ── Reporte de FPS real cada FPS_REPORT_MS (5 s) ─────────────────────────

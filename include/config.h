@@ -133,3 +133,41 @@
 // === Persistence (Hito 7) ===
 #define PERSIST_AUTOSAVE_MS    (5UL * 60UL * 1000UL)   // 5 min wall-clock
 // Política: NO se escala con TURBO_MODE — evita escribir flash en tests
+
+// =============================================================================
+// Robustez de red y auto-recuperación (Fase 5, hito 9 — solo ESP32-S3)
+// =============================================================================
+//
+// Contexto del incidente que motiva estas constantes: WiFi.setAutoReconnect(true)
+// reconecta a nivel bajo sin pasar siempre por el polling de 500ms de
+// WifiManager::loop() (ver WifiManager.cpp) — un blip de reconexión más corto
+// que ese intervalo puede dejar WebUI/OTA con el socket muerto pero con sus
+// flags running_/ready_ todavía en true (nunca se llamó a end()). El supervisor
+// de red (NET_SUPERVISOR_INTERVAL_MS) es la red de seguridad idempotente;
+// WifiManager::onEvent (WiFi.onEvent) es la fuente rápida que corrige esos
+// flags en cuanto ocurre el blip, sin esperar al poll.
+
+// Cada cuánto el loop principal revisa si WebUI/OTA siguen realmente arriba
+// con WiFi conectado, y los relevanta si no (ver loop() en main_esp32.cpp).
+// Idempotente y barato — begin()/isRunning()/isReady() son simples getters.
+#define NET_SUPERVISOR_INTERVAL_MS   5000UL
+
+// Timeout del Task Watchdog Timer sobre la loopTask (segundos). Generoso:
+// canvas->flush() por SPI (~138 KB framebuffer) + accesos LittleFS pueden
+// tardar bastante en el peor caso; no queremos falsos positivos.
+#define WDT_TIMEOUT_S                 10
+
+// Si WiFi lleva caído más de esto habiendo estado conectado antes
+// (WifiManager::hasEverConnected()), se asume un estado irrecuperable del
+// stack de red y se reinicia (con guarda anti-boot-loop, ver BOOT_LOOP_MAX).
+#define WIFI_DEAD_RESTART_MS          (5UL * 60UL * 1000UL)   // 5 min
+
+// Anti-boot-loop: máximo de reinicios "por WiFi caído" tolerados dentro de
+// BOOT_LOOP_WINDOW_MS antes de entrar en modo degradado (seguir jugando sin
+// reintentar reinicio — evita ciclo infinito si el router está apagado de
+// verdad). El contador vive en RTC_NOINIT_ATTR (sobrevive a ESP.restart(),
+// se pierde al desconectar la alimentación) y se resetea tras
+// BOOT_LOOP_RESET_STABLE_MS de conexión estable.
+#define BOOT_LOOP_MAX                  5
+#define BOOT_LOOP_WINDOW_MS           (30UL * 60UL * 1000UL)  // 30 min
+#define BOOT_LOOP_RESET_STABLE_MS     (60UL * 1000UL)         // 1 min
