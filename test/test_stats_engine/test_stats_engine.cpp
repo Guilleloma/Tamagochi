@@ -612,6 +612,8 @@ void test_reset_for_new_life_restores_defaults() {
     s.isSick        = true;
     s.isSleeping    = true;
     s.attentionScore = 0;
+    s.energy        = 3;
+    s.lightsOn      = false;
     g_engine->setStats(s);
     g_engine->consumeDirtyFlag();
 
@@ -626,7 +628,223 @@ void test_reset_for_new_life_restores_defaults() {
     TEST_ASSERT_FALSE(g_engine->stats().isSick);
     TEST_ASSERT_FALSE(g_engine->stats().isSleeping);
     TEST_ASSERT_EQUAL_UINT16(500, g_engine->stats().attentionScore);
+    TEST_ASSERT_EQUAL_UINT8(100, g_engine->stats().energy);
+    TEST_ASSERT_TRUE(g_engine->stats().lightsOn);
     TEST_ASSERT_TRUE(g_engine->consumeDirtyFlag());
+}
+
+// =============================================================================
+// ================================================== ENERGÍA / SUEÑO / LUCES ===
+// Feature: sueño automático por energía + mecánica de luces (fiel Tamagotchi 97)
+// =============================================================================
+
+// =============================================================================
+// 33. test_energy_drains_while_awake
+// Despierto, energy baja con el tiempo a energyDrainPerSec (0.01 pts/s).
+// En 150s se acumulan 1.5 pts → al menos 1 punto entero de caída.
+// =============================================================================
+void test_energy_drains_while_awake() {
+    StatsEngine::setRandomSource(&rngAlwaysOne);   // no enfermar por poop (no aplica aquí, pero consistente)
+
+    uint8_t energyBefore = g_engine->stats().energy;   // 100
+
+    for (int i = 0; i < 150; ++i) {
+        g_engine->tick(1000);
+    }
+
+    TEST_ASSERT_LESS_THAN_UINT8(energyBefore, g_engine->stats().energy);
+    // No debe haber cruzado el umbral de auto-sleep (100 - 1.5 = 98.5 → 99)
+    TEST_ASSERT_FALSE(g_engine->stats().isSleeping);
+}
+
+// =============================================================================
+// 34. test_auto_sleep_at_energy_threshold
+// Despierto con energy justo por encima del umbral, tras drenar lo suficiente
+// isSleeping pasa a true automáticamente (sin acción del usuario).
+// =============================================================================
+void test_auto_sleep_at_energy_threshold() {
+    Stats s = g_engine->stats();
+    s.energy = 22;   // unos puntos por encima de kEnergySleepThreshold (20)
+    g_engine->setStats(s);
+
+    TEST_ASSERT_FALSE(g_engine->stats().isSleeping);
+
+    // energyDrainPerSec=0.01 → 250s acumula 2.5 pts, margen de sobra sobre el
+    // imprecision float de acumular 0.01 repetidamente (evita boundary exacto).
+    for (int i = 0; i < 250; ++i) {
+        g_engine->tick(1000);
+    }
+
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(kEnergySleepThreshold, g_engine->stats().energy);
+    TEST_ASSERT_TRUE(g_engine->stats().isSleeping);
+}
+
+// =============================================================================
+// 35. test_auto_wake_at_energy_threshold
+// Dormido con lightsOn=false, al recuperar energy hasta kEnergyWakeThreshold
+// (80) se despierta sola y fuerza lightsOn=true (amanece).
+// =============================================================================
+void test_auto_wake_at_energy_threshold() {
+    Stats s = g_engine->stats();
+    s.isSleeping = true;
+    s.lightsOn   = false;   // el usuario había dejado las luces apagadas
+    s.energy     = 76;      // unos puntos por debajo de kEnergyWakeThreshold (80)
+    g_engine->setStats(s);
+
+    // energyRecoverPerSec=0.02 (lightsOn=false) → 220s acumula 4.4 pts, margen
+    // de sobra: cruza el umbral (+4 pts) bastante antes de agotar el budget,
+    // y el resto de ticks (ya despierto) no llegan a drenar 1 pt entero (a
+    // energyDrainPerSec=0.01 harían falta 100s más).
+    for (int i = 0; i < 220; ++i) {
+        g_engine->tick(1000);
+    }
+
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT8(kEnergyWakeThreshold, g_engine->stats().energy);
+    TEST_ASSERT_FALSE(g_engine->stats().isSleeping);
+    TEST_ASSERT_TRUE(g_engine->stats().lightsOn);   // amanece: se fuerzan las luces
+}
+
+// =============================================================================
+// 36. test_lights_on_slows_energy_recovery_while_sleeping
+// Dos engines dormidos desde el mismo punto de partida (energy=50): el que
+// tiene lightsOn=true recupera energy más lento que el que tiene lightsOn=false
+// (×energyRecoverLightsOnMul = 0.4).
+// =============================================================================
+void test_lights_on_slows_energy_recovery_while_sleeping() {
+    StatsEngine engineLightsOff;
+    {
+        Stats s; s.isSleeping = true; s.lightsOn = false; s.energy = 50;
+        engineLightsOff.setStats(s);
+    }
+    StatsEngine engineLightsOn;
+    {
+        Stats s; s.isSleeping = true; s.lightsOn = true; s.energy = 50;
+        engineLightsOn.setStats(s);
+    }
+
+    for (int i = 0; i < 100; ++i) {
+        engineLightsOff.tick(1000);
+        engineLightsOn.tick(1000);
+    }
+
+    TEST_ASSERT_GREATER_THAN_UINT8(engineLightsOn.stats().energy, engineLightsOff.stats().energy);
+}
+
+// =============================================================================
+// 37. test_lights_on_penalizes_happiness_and_health_while_sleeping
+// Dormido con lightsOn=true (molesto), happiness y health bajan con el tiempo
+// — comportamiento inexistente con lightsOn=false (descanso correcto).
+// =============================================================================
+void test_lights_on_penalizes_happiness_and_health_while_sleeping() {
+    Stats s = g_engine->stats();
+    s.isSleeping = true;
+    s.lightsOn   = true;
+    s.energy     = 50;
+    s.happiness  = 50;
+    s.health     = 100;
+    g_engine->setStats(s);
+
+    // lightsOnHappinessPenaltyPerSec=0.02, lightsOnHealthPenaltyPerSec=0.01
+    // 150s → 3.0 pts happiness, 1.5 pt health — margen sobre imprecisión float.
+    // energy solo recupera 150×0.008=1.2 pts (lightsOn=true), lejos de
+    // kEnergyWakeThreshold (80) — no hay riesgo de auto-wake a mitad del test.
+    for (int i = 0; i < 150; ++i) {
+        g_engine->tick(1000);
+    }
+
+    TEST_ASSERT_LESS_THAN_UINT8(50, g_engine->stats().happiness);
+    TEST_ASSERT_LESS_THAN_UINT8(100, g_engine->stats().health);
+}
+
+// =============================================================================
+// 38. test_lights_off_regenerates_health_while_sleeping
+// Dormido con lightsOn=false (descanso correcto), health regenera con el
+// tiempo (comportamiento legado, +0.002 pts/ms) partiendo de un valor dañado.
+// =============================================================================
+void test_lights_off_regenerates_health_while_sleeping() {
+    Stats s = g_engine->stats();
+    s.isSleeping = true;
+    s.lightsOn   = false;
+    s.energy     = 50;
+    s.health     = 60;
+    g_engine->setStats(s);
+
+    for (int i = 0; i < 100; ++i) {
+        g_engine->tick(1000);
+    }
+
+    TEST_ASSERT_GREATER_THAN_UINT8(60, g_engine->stats().health);
+}
+
+// =============================================================================
+// 39. test_apply_lights_does_not_change_is_sleeping
+// applyLights() alterna lightsOn pero nunca toca isSleeping, dormido o despierto.
+// =============================================================================
+void test_apply_lights_does_not_change_is_sleeping() {
+    // Despierto
+    TEST_ASSERT_FALSE(g_engine->stats().isSleeping);
+    g_engine->applyLights(false);
+    TEST_ASSERT_FALSE(g_engine->stats().isSleeping);
+    TEST_ASSERT_FALSE(g_engine->stats().lightsOn);
+
+    // Dormido
+    Stats s = g_engine->stats();
+    s.isSleeping = true;
+    g_engine->setStats(s);
+    g_engine->applyLights(true);
+    TEST_ASSERT_TRUE(g_engine->stats().isSleeping);
+    TEST_ASSERT_TRUE(g_engine->stats().lightsOn);
+}
+
+// =============================================================================
+// 40. test_apply_lights_noop_when_same_value
+// applyLights(on) con el mismo valor que ya tenía lightsOn es no-op (dirty false).
+// =============================================================================
+void test_apply_lights_noop_when_same_value() {
+    TEST_ASSERT_TRUE(g_engine->stats().lightsOn);   // default true
+    g_engine->consumeDirtyFlag();
+
+    g_engine->applyLights(true);
+
+    TEST_ASSERT_TRUE(g_engine->stats().lightsOn);
+    TEST_ASSERT_FALSE(g_engine->consumeDirtyFlag());
+}
+
+// =============================================================================
+// 41. test_list_available_actions_lights_always_present
+// Lights está siempre presente, dormido o despierto — a diferencia de Feed/Play
+// que se ocultan dormido.
+// =============================================================================
+void test_list_available_actions_lights_always_present() {
+    ActionKind out[kMaxActionMenuItems];
+
+    // Despierto: Feed y Play presentes
+    uint8_t nAwake = g_engine->listAvailableActions(out);
+    bool hasFeedAwake = false, hasPlayAwake = false, hasLightsAwake = false;
+    for (uint8_t i = 0; i < nAwake; ++i) {
+        if (out[i] == ActionKind::Feed)   hasFeedAwake = true;
+        if (out[i] == ActionKind::Play)   hasPlayAwake = true;
+        if (out[i] == ActionKind::Lights) hasLightsAwake = true;
+    }
+    TEST_ASSERT_TRUE(hasFeedAwake);
+    TEST_ASSERT_TRUE(hasPlayAwake);
+    TEST_ASSERT_TRUE(hasLightsAwake);
+
+    // Dormido: Feed y Play ocultos, Lights sigue presente
+    Stats s = g_engine->stats();
+    s.isSleeping = true;
+    g_engine->setStats(s);
+
+    uint8_t nAsleep = g_engine->listAvailableActions(out);
+    bool hasFeedAsleep = false, hasPlayAsleep = false, hasLightsAsleep = false;
+    for (uint8_t i = 0; i < nAsleep; ++i) {
+        if (out[i] == ActionKind::Feed)   hasFeedAsleep = true;
+        if (out[i] == ActionKind::Play)   hasPlayAsleep = true;
+        if (out[i] == ActionKind::Lights) hasLightsAsleep = true;
+    }
+    TEST_ASSERT_FALSE(hasFeedAsleep);
+    TEST_ASSERT_FALSE(hasPlayAsleep);
+    TEST_ASSERT_TRUE(hasLightsAsleep);
 }
 
 // =============================================================================
@@ -671,6 +889,17 @@ int main() {
     RUN_TEST(test_attention_score_rises_when_healthy);
     RUN_TEST(test_attention_score_drops_when_neglected);
     RUN_TEST(test_reset_for_new_life_restores_defaults);
+
+    // --- Energía / sueño automático / luces (fiel Tamagotchi 97) ---
+    RUN_TEST(test_energy_drains_while_awake);
+    RUN_TEST(test_auto_sleep_at_energy_threshold);
+    RUN_TEST(test_auto_wake_at_energy_threshold);
+    RUN_TEST(test_lights_on_slows_energy_recovery_while_sleeping);
+    RUN_TEST(test_lights_on_penalizes_happiness_and_health_while_sleeping);
+    RUN_TEST(test_lights_off_regenerates_health_while_sleeping);
+    RUN_TEST(test_apply_lights_does_not_change_is_sleeping);
+    RUN_TEST(test_apply_lights_noop_when_same_value);
+    RUN_TEST(test_list_available_actions_lights_always_present);
 
     return UNITY_END();
 }
