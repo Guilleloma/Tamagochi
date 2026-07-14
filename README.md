@@ -7,7 +7,7 @@ Este repositorio contiene **dos variantes de firmware** para el mismo Tamagotchi
 | **ESP8266 mono** (original) | ideaspark ESP8266 0.96" OLED V3.2 | SSD1306 128×64 mono | `src/main.cpp` |
 | **ESP32-S3 color** (Furbygotchi) | Waveshare ESP32-S3 Zero | JD9853 240×296 IPS TFT | `src/main_esp32.cpp` |
 
-El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 171 tests `native` aplican a las dos.
+El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 190 tests `native` aplican a las dos.
 
 ---
 
@@ -62,18 +62,21 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 | **ui** | Animaciones IDLE / HAPPY / SAD / EAT one-shot | ✅ |
 | **ui** | BootSplash — pantalla de arranque | ✅ |
 | **ui** | MarqueeLogic — scroll de texto (lógica pura) + MessageView | ✅ |
-| **infra** | WifiManager STA no bloqueante + reconexión | ✅ |
-| **infra** | OTAManager (ArduinoOTA + password) | ✅ |
+| **infra** | WifiManager STA no bloqueante + reconexión (eventos `WiFi.onEvent`) | ✅ |
+| **infra** | OTAManager (ArduinoOTA + password + TWDT alimentado durante OTA) | ✅ |
 | **infra** | WebUI — AsyncWebServer + 10 endpoints REST + mDNS | ✅ |
 | **infra** | `POST /api/v1/message` — mensaje del padre (marquee) | ✅ |
 | **infra** | `POST /api/v1/reboot` — reinicio remoto con persist previo | ✅ |
 | **infra** | `GET /api/v1/info` — identidad de red (IP/hostname/MAC) + ADC crudo | ✅ |
 | **infra** | RateLimiter (token bucket por IP) + AuthChecker (HTTP Basic) | ✅ |
+| **infra** | Supervisor de red — re-levanta WebUI/OTA en caliente vía `WiFi.onEvent` | ✅ |
+| **infra** | Task Watchdog Timer (loop) + watchdog de conectividad con anti-boot-loop | ✅ |
+| **infra** | Telemetría de reinicios en `/api/v1/info` (resetReason/bootCount/minFreeHeap) | ✅ |
 | **ui** | Frontend HTML/CSS/JS mobile-first servido desde LittleFS | ✅ |
 | **ui** | Dashboard: panel Sistema (diagnóstico) + panel Mensaje + botón Reiniciar | ✅ |
 | **build** | TURBO_MODE ×60 (env `esp12e_turbo`) para QA | ✅ |
 | **build** | OTA upload via WiFi (env `esp12e_ota`) | ✅ |
-| **build** | Tests host-native — **171 tests pasando** | ✅ |
+| **build** | Tests host-native — **190 tests pasando** | ✅ |
 | **build** | Script integración HTTP — **26 tests pasando** | ✅ |
 | **diferido** | Sprites EGG/KID/ADULT/OLD/DEAD reales (mono) | ⏸️ usando BABY como placeholder |
 | **diferido** | Gestión de energía (auto-dim, sleep) | ⏸️ Fase 5 |
@@ -103,7 +106,7 @@ OTA_PASSWORD="tu_password" pio run -e esp12e_ota -t upload
 # Monitor serie (115200 baud)
 pio device monitor
 
-# Tests host-native (no necesita la placa) — 171/171
+# Tests host-native (no necesita la placa) — 190/190
 pio test -e native
 ```
 
@@ -160,19 +163,21 @@ Tamagotchi/
 ├── src/
 │   ├── main.cpp               ← orquestación ESP8266: singletons + suscripciones + loop
 │   └── main_esp32.cpp         ← orquestación ESP32-S3 (incluye consumo del MessageBox)
-├── test/                      ← 171 tests host-native (12 suites)
+├── test/                      ← 190 tests host-native (14 suites)
 │   ├── test_smoke/            ← canario del env native (1)
 │   ├── test_stats_engine/     ← 33 tests
 │   ├── test_persistence/      ← 22 tests (incluye migrate v1→v2)
 │   ├── test_life_fsm/         ← 16 tests (transiciones de etapas)
-│   ├── test_json_codec/       ← 22 tests (parse + render JSON)
+│   ├── test_json_codec/       ← 23 tests (parse + render JSON + telemetría)
 │   ├── test_payload_validator/← 6 tests
 │   ├── test_rate_limiter/     ← 9 tests (token bucket)
 │   ├── test_auth_checker/     ← 6 tests (HTTP Basic Auth)
 │   ├── test_battery_gauge/    ← 25 tests (filtrado + gate)
 │   ├── test_boot_splash/      ← 5 tests
 │   ├── test_marquee_logic/    ← 13 tests (scroll)
-│   └── test_message_box/      ← 13 tests (sanitizado UTF-8→ASCII)
+│   ├── test_message_box/      ← 13 tests (sanitizado UTF-8→ASCII)
+│   ├── test_bootloop_guard/   ← 9 tests (anti-boot-loop, decisión pura)
+│   └── test_connectivity_watchdog_logic/ ← 9 tests (tiempo real sin WiFi)
 ├── assets/sprites/            ← PNGs fuente (1-bit, 32×32 y 16×16)
 ├── tools/
 │   ├── slice_sheet.py         ← trocea sprite sheets (Nano Banana)
@@ -209,6 +214,7 @@ Además de `firmwareVersion`, `uptimeMs`, `freeHeap`, `wifiRssi`:
 - **Identidad de red** (siempre presente): `ipAddress`, `hostname`, `macAddress`.
 - **Batería** (gateada por validez): `batteryPercent`, `batteryCharging`, `batteryValid`, `batteryMillivolts`.
 - **Diagnóstico de soldadura** (nunca gateado — sirve para depurar el divisor de VBAT): `batteryRawMillivolts` (última lectura ADC cruda) y `batteryGateProgress` (0-8 muestras consecutivas plausibles hacia la validez).
+- **Telemetría de reinicios**: `resetReason` (`POWERON` / `SW` / `TASK_WDT` / `BROWNOUT` / `PANIC`…), `bootCount` (reinicios soft consecutivos — contador anti-boot-loop) y `minFreeHeap` (mínimo histórico de heap; **incluye PSRAM**, por eso puede salir mayor que `freeHeap`, que es solo DRAM interna). Sirven para diagnosticar por qué se reinició el dispositivo sin cable serie.
 
 #### `POST /api/v1/message` — mensaje del padre
 
@@ -242,7 +248,7 @@ Cubre 26 escenarios: auth (401), happy path por endpoint (200 + `actionApplied`)
 
 ### Tests automáticos
 ```bash
-pio test -e native   # 171/171 deben pasar
+pio test -e native   # 190/190 deben pasar
 ```
 
 ### Pruebas funcionales en hardware
@@ -291,7 +297,7 @@ Comprueba:
 
 ## Variante ESP32-S3 color (Furbygotchi)
 
-Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 171 tests `native` validan ambas variantes.
+Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 190 tests `native` validan ambas variantes.
 
 ### Hardware ESP32-S3
 
@@ -389,6 +395,14 @@ cp include/secrets.h.example include/secrets.h
 - **Fase 5** — gestión de energía (auto-dim/off del OLED/TFT, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
 
 ### Changelog reciente (13-14 jul 2026)
+
+**14 jul (noche) — Robustez de red y auto-recuperación:**
+- **Supervisor de red** (`WiFi.onEvent` + re-`begin()` idempotente en el `loop`): re-levanta WebUI (puerto 80) y OTA (3232) **en caliente** si caen tras una reconexión de WiFi, sin reiniciar. Corrige el fallo donde `tamagotchi.local` quedaba muerto (ping + mDNS vivos, puerto 80 `connection refused`) hasta reset físico.
+- **Task Watchdog Timer** (TWDT, 10 s) sobre la `loopTask` + reemplazo de los 2 `while(true)` fatales de `setup()` (fallo TFT/PSRAM) por reinicio: si el `loop` se cuelga, el chip se reinicia solo.
+- **Watchdog de conectividad** con anti-boot-loop (`BootLoopGuard` + `RTC_NOINIT_ATTR`): si el WiFi lleva caído > 5 min habiendo conectado antes, reinicia; sin entrar en bucle si el router está apagado desde el arranque (juego offline indefinido).
+- **Telemetría de reinicios** en `GET /api/v1/info`: `uptimeMs`, `resetReason`, `bootCount`, `minFreeHeap` — permite diagnosticar por qué se reinició sin cable serie.
+- **2 bugs cazados en pruebas de hardware** (ni QA ni los tests los vieron): el watchdog de conectividad medía mal el tiempo sin WiFi (reiniciaba al instante de perder señal si el uptime > 5 min) y el TWDT abortaba el OTA (mataba el flasheo a los 10 s). Ambos con cobertura de la lógica pura (`BootLoopGuardLogic`, `ConnectivityWatchdogLogic`).
+- Tests host-native: **171 → 190**.
 
 **14 jul — Mensajes del padre (marquee):**
 - `MessageBox` (core, SPSC + sanitizado UTF-8→ASCII) — 13 tests host.
