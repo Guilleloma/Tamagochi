@@ -82,6 +82,7 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
                      const char* ipAddress, const char* hostname, const char* macAddress,
                      const BatterySnapshot& battery,
                      uint16_t batteryRawMillivolts, uint8_t batteryGateProgress,
+                     const char* resetReason, uint32_t bootCount, uint32_t minFreeHeap,
                      char* out, size_t outSize) {
     JsonDocument doc;
 
@@ -109,6 +110,12 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
     // (a diferencia de batteryMillivolts). Ver comentario del .h.
     data["batteryRawMillivolts"] = batteryRawMillivolts;
     data["batteryGateProgress"]  = batteryGateProgress;
+    // Telemetría de reinicios (Fase 5, hito 9) — ver comentario del .h para
+    // el detalle de qué representa cada campo y por qué difiere entre
+    // ESP32/ESP8266 (resuelto por el caller, no aquí).
+    data["resetReason"] = resetReason;
+    data["bootCount"]   = bootCount;
+    data["minFreeHeap"] = minFreeHeap;
 
     return serializeJson(doc, out, outSize);
 }

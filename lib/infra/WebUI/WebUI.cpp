@@ -20,6 +20,7 @@
 // Platform-conditional WiFi header (same API surface: WiFi.RSSI, remoteIP, etc.)
 #if defined(ARDUINO_ARCH_ESP32)
   #include <WiFi.h>
+  #include <esp_system.h>    // esp_reset_reason()/esp_get_minimum_free_heap_size() — telemetría hito 9
 #else
   #include <ESP8266WiFi.h>
 #endif
@@ -39,6 +40,12 @@
 #include "JsonCodec.h"
 #include "AuthChecker.h"
 #include "MessageBox.h"
+// BootLoopGuard: bootCount de telemetría (hito 9), solo ESP32 — mismo motivo
+// que el guard de arriba, BootLoopGuard.cpp usa RTC_NOINIT_ATTR/esp_reset_reason,
+// APIs que no existen en el core ESP8266.
+#if defined(ARDUINO_ARCH_ESP32)
+  #include "BootLoopGuard.h"
+#endif
 
 // =============================================================================
 // Constructor
@@ -227,10 +234,37 @@ void WebUI::handleGetState_(AsyncWebServerRequest* req) {
     req->send(resp);
 }
 
+#if defined(ARDUINO_ARCH_ESP32)
+// -----------------------------------------------------------------------------
+// resetReasonToString_ — mapea esp_reset_reason() (enum, ESP-IDF) a un string
+// legible para GET /api/v1/info (hito 9). Solo ESP32 — ESP8266 usa
+// ESP.getResetReason() directamente en handleGetInfo_ (ya devuelve un String
+// legible, formato distinto pero mismo propósito).
+//
+// Literales de duración estática — seguros de devolver como const char*
+// (mismo patrón que JsonCodec::lifeStageToString).
+// -----------------------------------------------------------------------------
+static const char* resetReasonToString_(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_POWERON:   return "POWERON";
+        case ESP_RST_EXT:       return "EXT";
+        case ESP_RST_SW:        return "SW";
+        case ESP_RST_PANIC:     return "PANIC";
+        case ESP_RST_INT_WDT:   return "INT_WDT";
+        case ESP_RST_TASK_WDT:  return "TASK_WDT";
+        case ESP_RST_WDT:       return "WDT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT:  return "BROWNOUT";
+        case ESP_RST_SDIO:      return "SDIO";
+        default:                return "UNKNOWN";
+    }
+}
+#endif
+
 void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
     if (!checkAuthAndRate_(req)) return;
 
-    char buf[448];  // 320 se quedaba corto al añadir ipAddress/hostname/macAddress
+    char buf[560];  // 448 se quedaba corto al añadir resetReason/bootCount/minFreeHeap (hito 9)
 
     // WiFi.localIP().toString() y WiFi.macAddress() devuelven Arduino String
     // TEMPORALES — hay que guardarlos en variables locales antes de pasar sus
@@ -250,6 +284,21 @@ void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
     String  ipStr         = wifiConnected ? WiFi.localIP().toString() : String("");
     String  macStr        = wifiConnected ? WiFi.macAddress()         : String("");
 
+    // Telemetría de reinicios (hito 9) — ver comentario de JsonCodec.h para
+    // el contrato exacto de cada campo. resetReasonStr sigue el mismo patrón
+    // que ipStr/macStr arriba: String local viva durante toda la llamada a
+    // serializeInfo() para que su .c_str() no sea un puntero colgante.
+#if defined(ARDUINO_ARCH_ESP32)
+    const char* resetReason = resetReasonToString_(esp_reset_reason());
+    uint32_t    bootCount   = BootLoopGuard::count();
+    uint32_t    minFreeHeap = esp_get_minimum_free_heap_size();
+#else
+    String      resetReasonStr = ESP.getResetReason();
+    const char* resetReason    = resetReasonStr.c_str();
+    uint32_t    bootCount      = 0;   // BootLoopGuard es ESP32-only (ver JsonCodec.h)
+    uint32_t    minFreeHeap    = 0;   // ESP8266 core no expone un equivalente
+#endif
+
     size_t len = JsonCodec::serializeInfo(
         FIRMWARE_VERSION,
         millis(),
@@ -261,6 +310,9 @@ void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
         batterySnapshot_(),
         batteryRawMillivolts_(),
         batteryGateProgress_(),
+        resetReason,
+        bootCount,
+        minFreeHeap,
         buf,
         sizeof(buf)
     );

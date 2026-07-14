@@ -39,7 +39,8 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
 
 // Serializa info de telemetría del dispositivo.
 // Formato: { "data": { "firmwareVersion", "uptimeMs", "freeHeap", "wifiRssi",
-//                      "ipAddress", "hostname", "macAddress", ... } }
+//                      "ipAddress", "hostname", "macAddress", ...,
+//                      "resetReason", "bootCount", "minFreeHeap" } }
 // Además de batteryPercent/batteryCharging/batteryValid, incluye batteryMillivolts
 // (mV filtrados del gauge, 0 si !valid) — /info es el endpoint canónico de
 // telemetría detallada.
@@ -60,11 +61,28 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
 //     el gate está "a punto" de validar o si cada muestra rompe la racha.
 // Exclusivos de /info (no de /state): son datos de diagnóstico de hardware,
 // no de estado de juego.
+//
+// resetReason / bootCount / minFreeHeap — telemetría de reinicios (Fase 5,
+// hito 9). Permiten saber POR QUÉ se reinició el dispositivo (¿watchdog?
+// ¿brownout de batería? ¿reinicio manual?) sin cable serie. El caller
+// (WebUI::handleGetInfo_) resuelve estos valores con la API nativa de cada
+// plataforma (esp_reset_reason() en ESP32, ESP.getResetReason() en ESP8266
+// -- formatos de string distintos por plataforma, mismo propósito).
+//   - resetReason: string legible (p.ej. "POWERON", "SW", "TASK_WDT",
+//     "BROWNOUT", "PANIC" en ESP32). SIEMPRE presente.
+//   - bootCount: reinicios "por WiFi caído" acumulados desde el último
+//     power-on-reset (ver lib/infra/BootLoopGuard, solo ESP32 — 0 en ESP8266,
+//     mismo criterio "0 == no soportado en esta plataforma" que los campos
+//     de batería).
+//   - minFreeHeap: mínimo histórico de heap libre desde el boot
+//     (esp_get_minimum_free_heap_size(), solo ESP32 — 0 en ESP8266, que no
+//     expone un equivalente nativo).
 size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
                      uint32_t freeHeap, int8_t wifiRssi,
                      const char* ipAddress, const char* hostname, const char* macAddress,
                      const BatterySnapshot& battery,
                      uint16_t batteryRawMillivolts, uint8_t batteryGateProgress,
+                     const char* resetReason, uint32_t bootCount, uint32_t minFreeHeap,
                      char* out, size_t outSize);
 
 // Serializa respuesta de acción: state completo + actionApplied.

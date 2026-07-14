@@ -156,7 +156,8 @@ void test_serialize_state_below_buffer_limit() {
 void test_serialize_info_includes_required_fields() {
     size_t written = JsonCodec::serializeInfo(0x0300u, 142567u, 38240u, -54,
                                               "", "", "",
-                                              makeValidBattery(), 4120u, 8u, g_buf, sizeof(g_buf));
+                                              makeValidBattery(), 4120u, 8u,
+                                              "SW", 0u, 0u, g_buf, sizeof(g_buf));
 
     TEST_ASSERT_GREATER_THAN(0u, written);
 
@@ -184,7 +185,8 @@ void test_serialize_info_includes_required_fields() {
 void test_serialize_info_battery_fields_valid() {
     size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
                                               "", "", "",
-                                              makeValidBattery(), 4120u, 8u, g_buf, sizeof(g_buf));
+                                              makeValidBattery(), 4120u, 8u,
+                                              "SW", 0u, 0u, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -213,7 +215,8 @@ void test_serialize_info_battery_fields_valid() {
 void test_serialize_info_battery_fields_unknown() {
     size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
                                               "", "", "",
-                                              makeUnknownBattery(), 0u, 0u, g_buf, sizeof(g_buf));
+                                              makeUnknownBattery(), 0u, 0u,
+                                              "SW", 0u, 0u, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -244,7 +247,8 @@ void test_serialize_info_battery_fields_unknown() {
 void test_serialize_info_battery_raw_fields_present_while_gate_in_progress() {
     size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
                                               "", "", "",
-                                              makeUnknownBattery(), 3550u, 5u, g_buf, sizeof(g_buf));
+                                              makeUnknownBattery(), 3550u, 5u,
+                                              "SW", 0u, 0u, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -266,7 +270,8 @@ void test_serialize_info_battery_raw_fields_present_while_gate_in_progress() {
 void test_serialize_info_network_identity_fields_present() {
     size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, -54,
                                               "192.168.1.42", "tamagotchi.local", "AA:BB:CC:DD:EE:FF",
-                                              makeValidBattery(), 4120u, 8u, g_buf, sizeof(g_buf));
+                                              makeValidBattery(), 4120u, 8u,
+                                              "SW", 0u, 0u, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -294,7 +299,8 @@ void test_serialize_info_network_identity_fields_present() {
 void test_serialize_info_network_identity_fields_empty_when_wifi_down() {
     size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
                                               "", "tamagotchi.local", "",
-                                              makeUnknownBattery(), 0u, 0u, g_buf, sizeof(g_buf));
+                                              makeUnknownBattery(), 0u, 0u,
+                                              "SW", 0u, 0u, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -306,6 +312,35 @@ void test_serialize_info_network_identity_fields_empty_when_wifi_down() {
     TEST_ASSERT_EQUAL_STRING("", data["ipAddress"].as<const char*>());
     TEST_ASSERT_EQUAL_STRING("", data["macAddress"].as<const char*>());
     TEST_ASSERT_EQUAL_STRING("tamagotchi.local", data["hostname"].as<const char*>());
+}
+
+// =============================================================================
+// 5h. serialize_info_reset_telemetry_fields_present
+// serializeInfo() expone resetReason/bootCount/minFreeHeap tal cual los pasa
+// el caller (hito 9 — WebUI::handleGetInfo_ los resuelve con la API nativa
+// de cada plataforma, ver JsonCodec.h). Aquí solo se verifica que JsonCodec
+// los serializa en camelCase con los tipos correctos, sin alterarlos.
+// =============================================================================
+void test_serialize_info_reset_telemetry_fields_present() {
+    size_t written = JsonCodec::serializeInfo(0x0300u, 0u, 0u, 0,
+                                              "", "", "",
+                                              makeUnknownBattery(), 0u, 0u,
+                                              "TASK_WDT", 3u, 21400u, g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, g_buf, written);
+    TEST_ASSERT_EQUAL(DeserializationError::Ok, err.code());
+
+    JsonObject data = doc["data"];
+    TEST_ASSERT_FALSE(data["resetReason"].isNull());
+    TEST_ASSERT_FALSE(data["bootCount"].isNull());
+    TEST_ASSERT_FALSE(data["minFreeHeap"].isNull());
+
+    TEST_ASSERT_TRUE(data["resetReason"].is<const char*>());
+    TEST_ASSERT_EQUAL_STRING("TASK_WDT", data["resetReason"].as<const char*>());
+    TEST_ASSERT_EQUAL_UINT32(3u,     data["bootCount"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(21400u, data["minFreeHeap"].as<uint32_t>());
 }
 
 // =============================================================================
@@ -525,6 +560,7 @@ int main() {
     RUN_TEST(test_serialize_info_battery_raw_fields_present_while_gate_in_progress);
     RUN_TEST(test_serialize_info_network_identity_fields_present);
     RUN_TEST(test_serialize_info_network_identity_fields_empty_when_wifi_down);
+    RUN_TEST(test_serialize_info_reset_telemetry_fields_present);
     RUN_TEST(test_serialize_state_battery_fields_unknown);
     RUN_TEST(test_serialize_action_response_battery_fields_valid);
     RUN_TEST(test_serialize_action_response_battery_fields_unknown);
