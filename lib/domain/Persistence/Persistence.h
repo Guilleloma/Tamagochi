@@ -31,11 +31,13 @@ enum LifeStage : uint8_t {
 
 // -----------------------------------------------------------------------------
 // PersistedState — 40 bytes exactos, layout documentado en fase-2-plan.md §3.1
+// (v3 extiende el layout v2 SIN cambiar tamaño ni offsets — reinterpreta los
+// 2 bytes [34..36) que en v2 eran `reservedV2b` como `energy`+`reservedV3`).
 // -----------------------------------------------------------------------------
 struct PersistedState {
     // === Bloque heredado de v1 (idéntico layout, no tocar) ===
     uint16_t magic;               // [0..2]   0xCAFE
-    uint16_t version;             // [2..4]   2 en Fase 2
+    uint16_t version;             // [2..4]   3 en Fase 2 (energía/luces)
     uint32_t bornAtEpoch;         // [4..8]   0 hasta NTP (Fase 1.5)
     uint32_t lastSavedAtEpoch;    // [8..12]
     uint32_t ageMinutes;          // [12..16] contador local, independiente de NTP
@@ -44,23 +46,27 @@ struct PersistedState {
     uint8_t  happiness;           // [18]     0-100
     uint8_t  health;              // [19]     0-100
     uint16_t deathCount;          // [20..22] veces que ha muerto desde fábrica
-    uint16_t reserved;            // [22..24] padding v1 — en v2 sigue siendo 0
+    uint16_t reserved;            // [22..24] padding v1 — en v2/v3 sigue siendo 0
 
     // === Bloque nuevo v2 (12 bytes) ===
     uint8_t  discipline;          // [24]     0-100, 50 default (0=indisciplinado)
     uint8_t  weight;              // [25]     0-100, 50 default (50=sano, 0=anoréxico, 100=obeso)
     uint8_t  poopCount;           // [26]     número de cacas visibles, 0-9
-    uint8_t  flags;               // [27]     bit0=isSick, bit1=isSleeping, bit2..7 reservados
+    uint8_t  flags;               // [27]     bit0=isSick, bit1=isSleeping, bit2=lightsOn (v3),
+                                   //          bit3..7 reservados
     uint16_t attentionScore;      // [28..30] 0-1000, 500 default — métrica acumulada que dirige evolución
     uint16_t deathSustainMs;      // [30..32] cuenta atrás de health=0 — persistido para no perderlo en power-loss
     uint8_t  lastDeathCauseCode;  // [32]     0=none, 1=hunger, 2=sickness, 3=oldAge, 4=neglect, 5=unknown
     uint8_t  adultType;           // [33]     0=normal, 1=athletic, 2=obese, 3=grumpy (antes reservedV2)
-    uint16_t reservedV2b;         // [34..36] padding, debe ser 0
+
+    // === Bloque nuevo v3 (2 bytes — antes `reservedV2b` v2) ===
+    uint8_t  energy;              // [34]     0-100, 100 default (0=agotado, 100=descansado)
+    uint8_t  reservedV3;          // [35]     padding v3, debe ser 0
 
     // === CRC ===
     uint32_t crc32;               // [36..40] CRC32 sobre bytes [0..36]
 };
-static_assert(sizeof(PersistedState) == 40, "PersistedState v2 debe ser exactamente 40 bytes");
+static_assert(sizeof(PersistedState) == 40, "PersistedState v3 debe ser exactamente 40 bytes");
 
 // -----------------------------------------------------------------------------
 // IStorage — interfaz de almacenamiento inyectable por constructor.
@@ -98,7 +104,7 @@ class Persistence {
 public:
     static constexpr uint8_t  kSlotCount      = 4;
     static constexpr uint16_t kPersistMagic   = 0xCAFE;
-    static constexpr uint16_t kCurrentVersion = 2;
+    static constexpr uint16_t kCurrentVersion = 3;
 
     explicit Persistence(IStorage& storage);
 
@@ -130,7 +136,13 @@ private:
 
     // Migración específica v1 → v2. Rellena los 12 bytes nuevos con defaults.
     // Premisa: los bytes [24..40] ya están a 0 por el memset en load().
+    // Deja version=2 (NO kCurrentVersion) — migrate() encadena a v2_to_v3_ después.
     static bool migrate_v1_to_v2_(PersistedState& state);
+
+    // Migración específica v2 → v3. energy=100, flags|=0x04 (lightsOn=true).
+    // Imprescindible: un blob v2 tiene esos bytes en 0 (reservedV2b) — sin esto
+    // arrancaría con energy=0 (dormido) y lightsOn=false (a oscuras).
+    static bool migrate_v2_to_v3_(PersistedState& state);
 
     // Devuelve el path de un slot dado. Buffer estático — no reentrant.
     static const char* slotPath_(uint8_t slot);
