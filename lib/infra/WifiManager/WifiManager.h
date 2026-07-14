@@ -47,6 +47,10 @@
 // el enum (DisplayRendererColor) puedan incluirlo sin arrastrar este header
 // completo, que en esp12e viene acompañado de <ESP8266WiFi.h>.
 #include "WifiState.h"  // reside en lib/core — siempre accesible
+// Lógica pura del watchdog de conectividad (downSinceMs_ + decisión de
+// reinicio). Sin dependencias de Arduino/WiFi — ver ConnectivityWatchdogLogic.h
+// para el porqué de esta marca de tiempo, distinta de lastConnectedMs_.
+#include "ConnectivityWatchdogLogic.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
   // Solo para el tipo arduino_event_id_t usado en la firma de onWifiEvent_()
@@ -83,7 +87,31 @@ public:
 
     // millis() del último sello de conexión exitosa (0 si nunca se conectó).
     // Se sella cada vez que se transiciona A Connected (evento o polling).
+    // Semántica: "instante de la última conexión" — la usa la métrica de
+    // estabilidad del anti-boot-loop (BOOT_LOOP_RESET_STABLE_MS en
+    // main_esp32.cpp). NO representa "tiempo caído" — ver wifiDownSinceMs()
+    // abajo y ConnectivityWatchdogLogic.h para el porqué de la separación
+    // (bug de campo: el watchdog reiniciaba casi al instante de perder WiFi
+    // en vez de esperar WIFI_DEAD_RESTART_MS, porque reusaba esta marca).
     uint32_t lastConnectedMs() const { return lastConnectedMs_; }
+
+    // true si el WiFi está caído ahora mismo (hubo una transición
+    // Connected -> no-Connected sin haber vuelto a Connected desde entonces).
+    bool isWifiDown() const { return wifiDownLogic_.isDown(); }
+
+    // millis() de la PRIMERA pérdida de conexión de la racha de caída actual.
+    // 0 si está conectado, o si nunca ha caído desde la última conexión.
+    // Distinto de lastConnectedMs() — ver comentario arriba y
+    // ConnectivityWatchdogLogic.h.
+    uint32_t wifiDownSinceMs() const { return wifiDownLogic_.downSinceMs(); }
+
+    // Decisión completa del watchdog: ¿lleva el WiFi caído más de
+    // thresholdMs habiendo estado conectado alguna vez? Delega en
+    // ConnectivityWatchdogLogic (pura, testeada en env:native) para que
+    // connectivityWatchdog_() en main_esp32.cpp no duplique esta aritmética.
+    // Implementada en el .cpp (necesita millis(), que este header no incluye
+    // para mantenerse ligero — ver comentario de includes arriba).
+    bool isWifiDeadFor(uint32_t thresholdMs) const;
 
 private:
     EventBus& bus_;
@@ -95,6 +123,12 @@ private:
     // Ver hasEverConnected()/lastConnectedMs() arriba. Sellados en publishState_().
     bool     hasEverConnected_ = false;
     uint32_t lastConnectedMs_  = 0;
+
+    // Tracking de "tiempo caído" (ver isWifiDown()/wifiDownSinceMs()/
+    // isWifiDeadFor() arriba y ConnectivityWatchdogLogic.h). Actualizado en
+    // el mismo punto único de transición de estado que lastConnectedMs_
+    // (publishState_()), para no dejar un camino sin sellar.
+    ConnectivityWatchdogLogic wifiDownLogic_;
 
     // Flags escritos por los callbacks de WiFi.onEvent() (task "arduino_events",
     // ver comentario de begin() en el .cpp) y consumidos por loop() (loopTask).

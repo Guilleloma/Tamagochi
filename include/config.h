@@ -157,9 +157,11 @@
 // tardar bastante en el peor caso; no queremos falsos positivos.
 #define WDT_TIMEOUT_S                 10
 
-// Si WiFi lleva caído más de esto habiendo estado conectado antes
-// (WifiManager::hasEverConnected()), se asume un estado irrecuperable del
-// stack de red y se reinicia (con guarda anti-boot-loop, ver BOOT_LOOP_MAX).
+// Si WiFi lleva caído SEGUIDO más de esto (WifiManager::wifiDownSinceMs(),
+// NO el uptime total ni lastConnectedMs() — ver ConnectivityWatchdogLogic.h)
+// habiendo estado conectado antes (WifiManager::hasEverConnected()), se asume
+// un estado irrecuperable del stack de red y se reinicia (con guarda
+// anti-boot-loop, ver BOOT_LOOP_MAX).
 #define WIFI_DEAD_RESTART_MS          (5UL * 60UL * 1000UL)   // 5 min
 
 // Anti-boot-loop: máximo de reinicios "por WiFi caído" tolerados antes de

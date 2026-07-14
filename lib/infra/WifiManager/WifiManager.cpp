@@ -229,7 +229,25 @@ void WifiManager::publishState_(WifiState newState) {
         lastConnectedMs_  = millis();
     }
 
+    // Sellar/limpiar el sello de "tiempo caído" en el MISMO punto único de
+    // transición (evento o polling) — igual que lastConnectedMs_ arriba, pero
+    // con la semántica distinta que necesita el watchdog: ver
+    // ConnectivityWatchdogLogic.h para el porqué de separar esta marca de
+    // lastConnectedMs_ (bug de campo: reinicio casi inmediato al perder WiFi
+    // en vez de esperar WIFI_DEAD_RESTART_MS caído).
+    wifiDownLogic_.onWifiStatus(newState == WifiState::Connected, millis());
+
     bus_.publish({EventType::WifiStateChanged, static_cast<int32_t>(newState)});
+}
+
+// -----------------------------------------------------------------------------
+// isWifiDeadFor — decisión completa del watchdog de conectividad. Delega
+// enteramente en ConnectivityWatchdogLogic::shouldRestart() (pura, cubierta
+// por tests en test/test_connectivity_watchdog_logic/) para que
+// connectivityWatchdog_() en main_esp32.cpp no reimplemente esta aritmética.
+// -----------------------------------------------------------------------------
+bool WifiManager::isWifiDeadFor(uint32_t thresholdMs) const {
+    return wifiDownLogic_.shouldRestart(hasEverConnected_, millis(), thresholdMs);
 }
 
 #endif  // UNIT_TEST

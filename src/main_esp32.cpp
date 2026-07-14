@@ -408,15 +408,23 @@ static void netSupervisor_() {
 
 // -----------------------------------------------------------------------------
 // connectivityWatchdog_ — última línea de defensa cuando netSupervisor_() no
-// basta: si el WiFi lleva caído más de WIFI_DEAD_RESTART_MS habiendo estado
-// conectado antes, algo en el stack de red quedó en un estado que ni el
-// re-begin idempotente recupera. Reiniciar el chip es la única salida, con
-// guarda anti-boot-loop (BootLoopGuard) para no entrar en ciclo infinito si
-// el router está apagado de verdad.
+// basta: si el WiFi lleva caído más de WIFI_DEAD_RESTART_MS SEGUIDOS (no el
+// uptime total, ver ConnectivityWatchdogLogic.h) habiendo estado conectado
+// antes, algo en el stack de red quedó en un estado que ni el re-begin
+// idempotente recupera. Reiniciar el chip es la única salida, con guarda
+// anti-boot-loop (BootLoopGuard) para no entrar en ciclo infinito si el
+// router está apagado de verdad.
 //
 // Sin conexión previa (wifi.hasEverConnected()==false) NUNCA reinicia por
 // esto — un dispositivo que arrancó sin WiFi disponible (router apagado
 // desde el boot) debe poder seguir jugando offline indefinidamente.
+//
+// BUG DE CAMPO corregido aquí: la condición de reinicio usaba
+// wifi.lastConnectedMs() (instante de la ÚLTIMA conexión, no de la caída) —
+// con uptime > WIFI_DEAD_RESTART_MS, cualquier microcorte de WiFi disparaba
+// un reinicio inmediato en vez de esperar los 5 min de caída continua.
+// wifi.isWifiDeadFor() usa wifiDownSinceMs_ (instante de la PRIMERA pérdida
+// de la racha actual), que es la marca correcta para esta pregunta.
 // -----------------------------------------------------------------------------
 static void connectivityWatchdog_() {
     if (!wifi.hasEverConnected()) return;
@@ -432,7 +440,7 @@ static void connectivityWatchdog_() {
         return;
     }
 
-    if (now - wifi.lastConnectedMs() <= WIFI_DEAD_RESTART_MS) return;
+    if (!wifi.isWifiDeadFor(WIFI_DEAD_RESTART_MS)) return;
 
     if (!BootLoopGuard::allowRestart()) {
         LOG_ERROR("[net-watchdog] WiFi caido >%lu ms — boot-loop guard agotado (%u/%u), "
