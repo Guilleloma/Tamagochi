@@ -502,6 +502,10 @@ void DisplayRenderer::drawLightsOffSleep_() {
     // que drawIdleMain_).
     drawActionHud_();
 
+    // WiFi (esquina superior derecha) — info de SISTEMA, se mantiene visible
+    // igual que el HUD inferior (el ESP8266 no tiene icono de batería).
+    drawWifiIcon_();
+
     u8g2_->sendBuffer();
 }
 

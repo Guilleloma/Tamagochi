@@ -1323,6 +1323,11 @@ void DisplayRendererColor::drawLightsOffSleep_() {
     // para reencender sin quedar atrapado en la pantalla a oscuras.
     drawHudBottom_();
 
+    // WiFi + batería (esquinas superiores) — info de SISTEMA, se mantiene
+    // visible igual que el HUD inferior. Sus propios guards ya ocultan la
+    // batería si no es válida, parpadean el WiFi en Connecting, etc.
+    drawHudTop_();
+
     canvas_.flush();
 }
 
