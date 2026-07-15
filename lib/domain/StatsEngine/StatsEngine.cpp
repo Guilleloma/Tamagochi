@@ -468,7 +468,7 @@ bool StatsEngine::consumeDirtyFlag() {
 //   - Medicate:   isSick                 (applyMedicate es no-op si !sick)
 //   - Discipline: siempre                (sin precondición en dominio)
 //   - Lights:     siempre                (toggle luces on/off — label dinámico en UI;
-//                                          TODO(sleep→lights): próximo commit desacopla de isSleeping)
+//                                          nunca afecta isSleeping, ver applyLights())
 //   - Stats:      siempre (último)       (no es acción real, abre StatsView)
 // -----------------------------------------------------------------------------
 uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) const {
