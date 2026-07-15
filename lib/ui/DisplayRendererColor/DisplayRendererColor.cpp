@@ -1253,8 +1253,11 @@ void DisplayRendererColor::drawStatBar_(int16_t x, int16_t y,
 // =============================================================================
 // drawLightsOffSleep_ — pantalla oscura mientras duerme con las luces
 // apagadas (descanso correcto, fiel al 97): fondo negro con solo "zZZ"
-// flotante — sin HUD, sin iconos, sin sprite. NO toca TFT_BL: el backlight
-// físico sigue encendido, lo que se apaga es el CONTENIDO (la habitación).
+// flotante — sin iconos de estado ni sprite. El HUD inferior SÍ se mantiene
+// (drawHudBottom_) para que el usuario pueda ver y alcanzar la acción
+// "LUCES ON" y reencenderlas — si no, quedaría sin forma de despertar la
+// pantalla. NO toca TFT_BL: el backlight físico sigue encendido, lo que se
+// apaga es el CONTENIDO (la habitación).
 // =============================================================================
 
 void DisplayRendererColor::drawLightsOffSleep_() {
@@ -1280,6 +1283,10 @@ void DisplayRendererColor::drawLightsOffSleep_() {
     const int16_t cy    = kScreenH / 2 - 12 + bobY;   // -12 ≈ mitad de la altura del glifo
     canvas_.setCursor(cx, cy);
     canvas_.print("zZZ");
+
+    // HUD inferior visible/operable — permite ver y seleccionar "LUCES ON"
+    // para reencender sin quedar atrapado en la pantalla a oscuras.
+    drawHudBottom_();
 
     canvas_.flush();
 }

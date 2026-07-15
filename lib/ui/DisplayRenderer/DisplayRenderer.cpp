@@ -453,10 +453,12 @@ void DisplayRenderer::drawIdleMain_() {
 
 // -----------------------------------------------------------------------------
 // drawLightsOffSleep_ — pantalla oscura mientras duerme con las luces
-// apagadas (descanso correcto, fiel al 97): solo "zZZ" flotante — sin HUD,
-// sin iconos, sin sprite. NO toca ningún pin de backlight (el OLED SSD1306
-// no lo tiene; en el color sí existe TFT_BL y tampoco se toca, ver
-// DisplayRendererColor::drawLightsOffSleep_).
+// apagadas (descanso correcto, fiel al 97): solo "zZZ" flotante — sin
+// iconos de estado ni sprite. El HUD inferior (drawActionHud_) SÍ se
+// mantiene para que el usuario pueda ver y alcanzar la acción "LUZ ON" y
+// reencenderlas — si no, quedaría sin forma de despertar la pantalla. NO
+// toca ningún pin de backlight (el OLED SSD1306 no lo tiene; en el color sí
+// existe TFT_BL y tampoco se toca, ver DisplayRendererColor::drawLightsOffSleep_).
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawLightsOffSleep_() {
     u8g2_->clearBuffer();
@@ -474,6 +476,12 @@ void DisplayRenderer::drawLightsOffSleep_() {
 
     u8g2_->setFont(u8g2_font_9x15B_tf);
     u8g2_->drawStr(18, 68 + bobY, "zZZ");
+
+    // HUD inferior visible/operable — permite ver y seleccionar "LUZ ON"
+    // para reencender sin quedar atrapado en la pantalla a oscuras.
+    // drawActionHud_() no llama a sendBuffer() por su cuenta (mismo patrón
+    // que drawIdleMain_).
+    drawActionHud_();
 
     u8g2_->sendBuffer();
 }
