@@ -24,7 +24,7 @@ ValidationError validateActionName(const char* name) {
 
     // Lista fija de acciones conocidas del dominio (Fase 2)
     static const char* const kKnownActions[] = {
-        "feed", "play", "clean", "medicate", "discipline", "sleep"
+        "feed", "play", "clean", "medicate", "discipline", "lights"
     };
     static constexpr size_t kKnownActionsCount =
         sizeof(kKnownActions) / sizeof(kKnownActions[0]);

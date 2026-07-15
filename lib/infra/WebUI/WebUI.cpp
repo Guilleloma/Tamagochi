@@ -2,7 +2,7 @@
 // WebUI.cpp — Implementación del servidor HTTP REST para el Tamagochi.
 //
 // Hito 5, Fase 3. Endpoints GET /api/v1/state y GET /api/v1/info.
-// Hito 6, Fase 3. Endpoints POST /api/v1/{feed,play,discipline,sleep,clean,medicate}.
+// Hito 6, Fase 3. Endpoints POST /api/v1/{feed,play,discipline,lights,clean,medicate}.
 //
 // Patrón de acciones: WebUI publica eventos al EventBus (síncrono). Los handlers
 // en main.cpp aplican la acción sobre StatsEngine y persisten. Como el bus es
@@ -142,13 +142,13 @@ void WebUI::mountRoutes_() {
     disciplineHandler->setMethod(HTTP_POST);
     server_.addHandler(disciplineHandler);
 
-    auto* sleepHandler = new AsyncCallbackJsonWebHandler("/api/v1/sleep",
+    auto* lightsHandler = new AsyncCallbackJsonWebHandler("/api/v1/lights",
         [this](AsyncWebServerRequest* req, JsonVariant& json) {
-            handlePostSleep_(req, json);
+            handlePostLights_(req, json);
         }
     );
-    sleepHandler->setMethod(HTTP_POST);
-    server_.addHandler(sleepHandler);
+    lightsHandler->setMethod(HTTP_POST);
+    server_.addHandler(lightsHandler);
 
     // --- POST endpoints sin body (clean, medicate) ---
     // Usan server_.on() directo: no requieren Content-Type ni body.
@@ -379,7 +379,7 @@ void WebUI::handlePostDiscipline_(AsyncWebServerRequest* req, JsonVariant& json)
     sendActionResponse_(req, "discipline", static_cast<int32_t>(amount));
 }
 
-void WebUI::handlePostSleep_(AsyncWebServerRequest* req, JsonVariant& json) {
+void WebUI::handlePostLights_(AsyncWebServerRequest* req, JsonVariant& json) {
     if (!checkAuthAndRate_(req)) return;
 
     JsonVariantConst valueVar = json["value"];
@@ -393,10 +393,10 @@ void WebUI::handlePostSleep_(AsyncWebServerRequest* req, JsonVariant& json) {
     }
 
     bool on = valueVar.as<bool>();
-    bus_.publish({EventType::ActionSleepRequested, on ? 1 : 0});
-    LOG_INFO("[webui] POST /api/v1/sleep value=%s", on ? "true" : "false");
-    // Para sleep, actionValue encoda true/false como 1/0
-    sendActionResponse_(req, "sleep", on ? 1 : 0);
+    bus_.publish({EventType::ActionLightsRequested, on ? 1 : 0});
+    LOG_INFO("[webui] POST /api/v1/lights value=%s", on ? "true" : "false");
+    // Para lights, actionValue encoda true/false como 1/0
+    sendActionResponse_(req, "lights", on ? 1 : 0);
 }
 
 void WebUI::handlePostClean_(AsyncWebServerRequest* req) {

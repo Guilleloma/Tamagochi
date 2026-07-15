@@ -27,7 +27,7 @@ enum class ValidationError : uint8_t {
 ValidationError validateAmount(int amount);
 
 // Valida que name corresponde a una acción conocida del dominio.
-// Acciones conocidas: "feed", "play", "clean", "medicate", "discipline", "sleep"
+// Acciones conocidas: "feed", "play", "clean", "medicate", "discipline", "lights"
 // name nulo o vacío → UnknownAction.
 ValidationError validateActionName(const char* name);
 

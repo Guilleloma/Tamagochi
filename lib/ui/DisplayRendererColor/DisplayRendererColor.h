@@ -341,6 +341,10 @@ private:
     void drawDeadScreen_();
     void drawMessageView_();       // mensaje del padre — HUD + personaje + marquee
 
+    // Pantalla oscura + "zZZ" flotante — isSleeping && !lightsOn (luces apagadas
+    // correctamente). NO toca TFT_BL. Llamada desde drawIdleMain_() como guard.
+    void drawLightsOffSleep_();
+
     void drawHudTop_();            // WiFi + batería en esquina sup (etapa/edad movidas a StatsView)
     void drawHudBottom_();         // acción seleccionada
     void drawSprite_();            // personaje centrado

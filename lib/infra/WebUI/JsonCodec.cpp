@@ -56,7 +56,9 @@ size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
     data["weight"]         = stats.weight;
     data["poopCount"]      = stats.poopCount;
     data["isSick"]         = stats.isSick;
-    data["isSleeping"]     = stats.isSleeping;
+    data["isSleeping"]     = stats.isSleeping;   // solo-lectura — gobernado 100% por tick()
+    data["energy"]         = stats.energy;
+    data["lightsOn"]       = stats.lightsOn;     // único control manual, ver POST /api/v1/lights
     data["attentionScore"] = stats.attentionScore;
     data["deathCount"]     = deathCount;
     data["turbo"]          = turbo;
@@ -141,7 +143,9 @@ size_t serializeActionResponse(const Stats& stats, LifeStage stage, uint32_t age
     data["weight"]         = stats.weight;
     data["poopCount"]      = stats.poopCount;
     data["isSick"]         = stats.isSick;
-    data["isSleeping"]     = stats.isSleeping;
+    data["isSleeping"]     = stats.isSleeping;   // solo-lectura — gobernado 100% por tick()
+    data["energy"]         = stats.energy;
+    data["lightsOn"]       = stats.lightsOn;
     data["attentionScore"] = stats.attentionScore;
     data["deathCount"]     = deathCount;
     data["turbo"]          = turbo;
@@ -212,7 +216,7 @@ ParseError parseAmountPayload(const char* body, size_t bodyLen, uint8_t& outAmou
     return ParseError::Ok;
 }
 
-ParseError parseSleepPayload(const char* body, size_t bodyLen, bool& outValue) {
+ParseError parseLightsPayload(const char* body, size_t bodyLen, bool& outValue) {
     if (body == nullptr || bodyLen == 0) {
         return ParseError::MissingField;
     }

@@ -34,13 +34,13 @@ var systemPollTimerId = null;
 
 // DOM refs
 var elSprite, elStage, elAge, elBadges,
-    elBarHunger, elBarHappiness, elBarHealth, elBarDisc,
-    elValHunger, elValHappiness, elValHealth, elValDisc,
+    elBarHunger, elBarHappiness, elBarHealth, elBarDisc, elBarEnergy,
+    elValHunger, elValHappiness, elValHealth, elValDisc, elValEnergy,
     elValWeight, elValPoop,
     elLastUpdate, elOfflineBadge, elWifiIndicator, elBatteryIndicator,
     elToast,
     elBtnFeed, elBtnPlay, elBtnClean, elBtnMedicate,
-    elBtnDiscipline, elBtnSleep, elBtnReboot,
+    elBtnDiscipline, elBtnLights, elBtnReboot,
     elMessageForm, elMessageInput,
     elSysFirmware, elSysUptime, elSysHeap, elSysRssi,
     elSysIp, elSysHostname, elSysMac,
@@ -55,10 +55,12 @@ function cacheDomRefs() {
   elBarHappiness  = document.getElementById('bar-happiness');
   elBarHealth     = document.getElementById('bar-health');
   elBarDisc       = document.getElementById('bar-discipline');
+  elBarEnergy     = document.getElementById('bar-energy');
   elValHunger     = document.getElementById('val-hunger');
   elValHappiness  = document.getElementById('val-happiness');
   elValHealth     = document.getElementById('val-health');
   elValDisc       = document.getElementById('val-discipline');
+  elValEnergy     = document.getElementById('val-energy');
   elValWeight     = document.getElementById('val-weight');
   elValPoop       = document.getElementById('val-poop');
   elLastUpdate    = document.getElementById('last-update');
@@ -71,7 +73,7 @@ function cacheDomRefs() {
   elBtnClean      = document.getElementById('btn-clean');
   elBtnMedicate   = document.getElementById('btn-medicate');
   elBtnDiscipline = document.getElementById('btn-discipline');
-  elBtnSleep      = document.getElementById('btn-sleep');
+  elBtnLights     = document.getElementById('btn-lights');
   elBtnReboot     = document.getElementById('btn-reboot');
   elMessageForm   = document.getElementById('message-form');
   elMessageInput  = document.getElementById('message-input');
@@ -113,11 +115,13 @@ function renderState(data) {
   setBar(elBarHappiness, data.happiness);
   setBar(elBarHealth,    data.health);
   setBar(elBarDisc,      data.discipline);
+  setBar(elBarEnergy,    data.energy);
 
   elValHunger.textContent    = data.hunger     || 0;
   elValHappiness.textContent = data.happiness  || 0;
   elValHealth.textContent    = data.health     || 0;
   elValDisc.textContent      = data.discipline || 0;
+  elValEnergy.textContent    = data.energy     || 0;
   elValWeight.textContent    = data.weight     !== undefined ? data.weight : '?';
   elValPoop.textContent      = data.poopCount  || 0;
 
@@ -135,12 +139,17 @@ function renderState(data) {
     elBadges.appendChild(b2);
   }
 
-  if (data.isSleeping) {
-    elBtnSleep.classList.add('btn--active');
-    elBtnSleep.setAttribute('aria-pressed', 'true');
+  // lightsOn (no isSleeping) es lo que refleja el estado pulsado del boton:
+  // el sueno ahora lo decide el firmware en base a `energy`, el usuario solo
+  // controla la luz de la habitacion (ver POST /api/v1/lights).
+  if (data.lightsOn) {
+    elBtnLights.classList.add('btn--active');
+    elBtnLights.setAttribute('aria-pressed', 'true');
+    elBtnLights.title = 'Apagar luces';
   } else {
-    elBtnSleep.classList.remove('btn--active');
-    elBtnSleep.setAttribute('aria-pressed', 'false');
+    elBtnLights.classList.remove('btn--active');
+    elBtnLights.setAttribute('aria-pressed', 'false');
+    elBtnLights.title = 'Encender luces';
   }
 
   consecutiveFailures = 0;
@@ -429,8 +438,8 @@ function wireButtons() {
   elBtnClean.addEventListener('click',      function() { doAction('/api/v1/clean',      {}); });
   elBtnMedicate.addEventListener('click',   function() { doAction('/api/v1/medicate',   {}); });
   elBtnDiscipline.addEventListener('click', function() { doAction('/api/v1/discipline', { amount: 10 }); });
-  elBtnSleep.addEventListener('click', function() {
-    doAction('/api/v1/sleep', { value: !(state && state.isSleeping) });
+  elBtnLights.addEventListener('click', function() {
+    doAction('/api/v1/lights', { value: !(state && state.lightsOn) });
   });
   if (elBtnReboot) elBtnReboot.addEventListener('click', doReboot);
   if (elMessageForm) {

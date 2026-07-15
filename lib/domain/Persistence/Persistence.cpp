@@ -55,7 +55,7 @@ uint32_t Persistence::computeCrc32(const void* data, size_t size) {
 }
 
 // -----------------------------------------------------------------------------
-// fillDefaults — estado inicial v2: Egg recién nacido.
+// fillDefaults — estado inicial v3: Egg recién nacido.
 // Cambia respecto a Fase 1: lifeStage=Egg (0) en vez de Baby (1).
 // La FSM hará eclosionar el huevo tras kEggHatchMin minutos.
 // -----------------------------------------------------------------------------
@@ -76,12 +76,14 @@ void Persistence::fillDefaults(PersistedState& state) {
     state.discipline     = 50;
     state.weight         = 50;
     state.poopCount      = 0;
-    state.flags          = 0;     // no sick, no sleeping
+    state.flags          = 0x04;  // no sick, no sleeping, lightsOn=true (bit2)
     state.attentionScore = 500;   // neutro
     state.deathSustainMs = 0;
     state.lastDeathCauseCode = 0;
     state.adultType      = 0;
-    state.reservedV2b    = 0;
+    // Campos v3
+    state.energy         = 100;   // descansado
+    state.reservedV3      = 0;
     state.crc32          = computeCrc32(&state, offsetof(PersistedState, crc32));
 }
 
@@ -92,25 +94,50 @@ void Persistence::fillDefaults(PersistedState& state) {
 // los bytes [24..40] ya están a 0 cuando llega aquí. Aun así los asignamos
 // explícitamente para que la función sea correcta aunque se llame directamente
 // desde tests sin pasar por load().
+//
+// FIX bug latente: esta función dejaba `state.version = kCurrentVersion`
+// directamente — con kCurrentVersion=3 eso saltaría por completo el paso
+// v2_to_v3_ (energy/lightsOn quedarían en sus bytes crudos, típicamente 0 →
+// arrancaría dormido a oscuras). Debe dejar SIEMPRE version=2: migrate()
+// encadena a migrate_v2_to_v3_ inmediatamente después.
 // -----------------------------------------------------------------------------
 bool Persistence::migrate_v1_to_v2_(PersistedState& state) {
     state.discipline         = 50;
     state.weight             = 50;
     state.poopCount          = 0;
-    state.flags              = 0;    // no sick, no sleeping
+    state.flags              = 0;    // no sick, no sleeping (lightsOn lo fija v2_to_v3_)
     state.attentionScore     = 500;  // neutro
     state.deathSustainMs     = 0;
     state.lastDeathCauseCode = 0;
     state.adultType          = 0;
-    state.reservedV2b        = 0;
-    state.version            = kCurrentVersion;
+    state.energy             = 0;    // valor "v2" transitorio — v2_to_v3_ lo fija a 100
+    state.reservedV3         = 0;
+    state.version            = 2;    // NO kCurrentVersion — ver comentario arriba
     // Nota: el CRC se recalcula en save() antes de la próxima escritura.
     LOG_INFO("Persist: migrado v1->v2 (defaults para campos nuevos)");
     return true;
 }
 
 // -----------------------------------------------------------------------------
-// migrate — dispatch de versión. Encadena v1→v2→v3... cuando sea necesario.
+// migrate_v2_to_v3_ — energy=100, lightsOn=true (bit2 de flags).
+//
+// Imprescindible: un blob v2 tiene los bytes [34..36) (antes reservedV2b) a 0
+// — sin esta migración explícita, un blob v2 real arrancaría con energy=0
+// (StatsEngine lo interpretaría como "agotado" → auto-sleep en el primer
+// tick) y lightsOn=false (pantalla a oscuras nada más cargar). Ver riesgo
+// documentado en el plan de la feature.
+// -----------------------------------------------------------------------------
+bool Persistence::migrate_v2_to_v3_(PersistedState& state) {
+    state.energy      = 100;
+    state.flags       = state.flags | 0x04;  // lightsOn=true, preserva isSick/isSleeping
+    state.reservedV3  = 0;
+    state.version     = 3;
+    LOG_INFO("Persist: migrado v2->v3 (energy=100, lightsOn=true)");
+    return true;
+}
+
+// -----------------------------------------------------------------------------
+// migrate — dispatch de versión. Encadena v1→v2→v3 cuando sea necesario.
 // -----------------------------------------------------------------------------
 bool Persistence::migrate(PersistedState& state) {
     if (state.version == kCurrentVersion) return true;
@@ -122,11 +149,19 @@ bool Persistence::migrate(PersistedState& state) {
     }
 
     if (state.version == 1) {
-        return migrate_v1_to_v2_(state);
+        if (!migrate_v1_to_v2_(state)) return false;
     }
 
-    LOG_WARN("Persist: version desconocida %u — descartando", (unsigned)state.version);
-    return false;
+    if (state.version == 2) {
+        if (!migrate_v2_to_v3_(state)) return false;
+    }
+
+    if (state.version != kCurrentVersion) {
+        LOG_WARN("Persist: version desconocida %u — descartando", (unsigned)state.version);
+        return false;
+    }
+
+    return true;
 }
 
 // -----------------------------------------------------------------------------
@@ -197,9 +232,12 @@ LoadResult Persistence::load(PersistedState& out) {
         }
 
         // Validar CRC según versión:
-        //   v1 → CRC almacenado en bytes [24..28], cubre payload [0..24].
-        //   v2 → CRC almacenado en bytes [36..40], cubre payload [0..36].
-        //   Versión desconocida → rechazar sin intentar validar.
+        //   v1      → CRC almacenado en bytes [24..28], cubre payload [0..24].
+        //   v2 y v3 → mismo layout exacto (40 bytes, CRC en [36..40) cubriendo
+        //             [0..36)) — v2 solo reinterpreta los bytes [34..36) como
+        //             reservedV2b en vez de energy+reservedV3. Comparten código.
+        //   Versión desconocida → se intenta validar igual (mismo layout de
+        //   cabecera); si pasa, migrate() la rechazará por versión.
         bool crcOk = false;
         if (fileVersion == 1) {
             uint32_t storedCrc;
@@ -210,26 +248,16 @@ LoadResult Persistence::load(PersistedState& out) {
                 LOG_WARN("Persist: slot %u v1 CRC fallo (got 0x%08X expected 0x%08X)",
                          (unsigned)slot, (unsigned)storedCrc, (unsigned)expected);
             }
-        } else if (fileVersion == kCurrentVersion) {
-            // Para v2, copiar al struct y usar offsetof normalente
-            PersistedState tmpV2;
-            memcpy(&tmpV2, rawBuf, sizeof(tmpV2));
-            uint32_t expected = computeCrc32(&tmpV2, offsetof(PersistedState, crc32));
-            crcOk = (tmpV2.crc32 == expected);
-            if (!crcOk) {
-                LOG_WARN("Persist: slot %u v2 CRC fallo (got 0x%08X expected 0x%08X)",
-                         (unsigned)slot, (unsigned)tmpV2.crc32, (unsigned)expected);
-            }
         } else {
-            // Versión futura o desconocida: intentar validar CRC como si fuera v2
-            // (mismo layout de cabecera). Si pasa, migrate() la rechazará por versión.
-            PersistedState tmpUnknown;
-            memcpy(&tmpUnknown, rawBuf, sizeof(tmpUnknown));
-            uint32_t expected = computeCrc32(&tmpUnknown, offsetof(PersistedState, crc32));
-            crcOk = (tmpUnknown.crc32 == expected);
+            // v2, v3 (kCurrentVersion) o versión futura/desconocida: mismo layout.
+            PersistedState tmpV;
+            memcpy(&tmpV, rawBuf, sizeof(tmpV));
+            uint32_t expected = computeCrc32(&tmpV, offsetof(PersistedState, crc32));
+            crcOk = (tmpV.crc32 == expected);
             if (!crcOk) {
-                LOG_WARN("Persist: slot %u version desconocida %u CRC fallo",
-                         (unsigned)slot, (unsigned)fileVersion);
+                LOG_WARN("Persist: slot %u version %u CRC fallo (got 0x%08X expected 0x%08X)",
+                         (unsigned)slot, (unsigned)fileVersion,
+                         (unsigned)tmpV.crc32, (unsigned)expected);
             }
         }
 
@@ -257,7 +285,8 @@ LoadResult Persistence::load(PersistedState& out) {
             tmp.deathSustainMs     = 0;
             tmp.lastDeathCauseCode = 0;
             tmp.adultType          = 0;
-            tmp.reservedV2b        = 0;
+            tmp.energy             = 0;
+            tmp.reservedV3         = 0;
         }
 
         candidates[candidateCount]     = tmp;

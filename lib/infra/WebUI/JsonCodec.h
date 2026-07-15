@@ -32,6 +32,10 @@ namespace JsonCodec {
 // Formato: { "data": {...}, "meta": { "apiVersion": "v1", "timestamp": <uptimeMs> } }
 // Campos de batería siempre presentes en data: batteryPercent, batteryCharging,
 // batteryValid (batteryPercent/batteryCharging valen 0/false si !battery.valid).
+// data.energy (0-100) y data.lightsOn (bool) — sueño automático/luces (ver
+// StatsEngine): energy gobierna isSleeping en tick(), lightsOn es el único
+// control manual (POST /api/v1/lights). isSleeping sigue presente pero es
+// solo-lectura: ya no es controlable por el cliente.
 size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                       uint16_t deathCount, bool turbo, uint32_t uptimeMs,
                       const BatterySnapshot& battery,
@@ -87,7 +91,7 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
 
 // Serializa respuesta de acción: state completo + actionApplied.
 // actionValue se usa para "amount" (feed/play/discipline) o ignorado (-1) para clean/medicate.
-// Para sleep, actionValue: 1=true, 0=false.
+// Para lights, actionValue: 1=true, 0=false.
 size_t serializeActionResponse(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                                uint16_t deathCount, bool turbo, uint32_t uptimeMs,
                                const char* actionType, int32_t actionValue,
@@ -124,7 +128,7 @@ ParseError parseAmountPayload(const char* body, size_t bodyLen, uint8_t& outAmou
 
 // Parsea { "value": true|false }.
 // value con tipo numérico → InvalidValue.
-ParseError parseSleepPayload(const char* body, size_t bodyLen, bool& outValue);
+ParseError parseLightsPayload(const char* body, size_t bodyLen, bool& outValue);
 
 // Para endpoints sin payload (clean, medicate):
 // acepta body nulo, vacío, "{}" o "null" → Ok.

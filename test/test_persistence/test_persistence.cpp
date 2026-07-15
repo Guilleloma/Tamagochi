@@ -1,20 +1,26 @@
 // =============================================================================
-// test_persistence.cpp — tests para Persistence (hito 1, Fase 2).
+// test_persistence.cpp — tests para Persistence (hito 1, Fase 2; schema v3
+// en la feature de energía/sueño automático/luces).
 //
 // Framework: Unity (pio test -e native).
 // Mock: InMemoryStorage (sin LittleFS, sin Arduino).
 //
-// Tests baseline (Fase 1, adaptados a v2):
+// Tests baseline (Fase 1, adaptados a v3):
 //   1-13: lógica de CRC, save/load, rotación de slots — sin cambios funcionales.
-//   14-16: tests de migrate adaptados a la nueva versión actual (v2).
+//   14-16: tests de migrate adaptados a la nueva versión actual (v3).
 //   17: tamaño struct adaptado a 40 bytes.
 //
-// Tests nuevos (Fase 2 — migración v1→v2):
-//   18: test_load_v1_blob_migrates_to_v2
-//   19: test_migrate_v1_to_v2_preserves_v1_fields
-//   20: test_migrate_v1_to_v2_sets_new_field_defaults
+// Tests migración v1→v3 (Fase 2 + energía/luces):
+//   18: test_load_v1_blob_migrates_to_v3 (cadena completa v1→v2→v3)
+//   19: test_migrate_v1_to_v3_preserves_v1_fields
+//   20: test_migrate_v1_to_v3_sets_new_field_defaults
 //   21: test_load_blob_with_short_size_fills_remaining_with_zero
 //   22: test_save_in_v2_format_writes_40_bytes
+//
+// Tests migración v2→v3 (energía/luces — schema v3):
+//   23: test_migrate_v2_to_v3_sets_energy_and_lights_on
+//   24: test_migrate_v2_to_v3_preserves_other_flags
+//   25: test_save_then_load_roundtrip_v3_fields
 // =============================================================================
 
 #include <unity.h>
@@ -119,7 +125,7 @@ void test_fill_defaults_produces_valid_state() {
     Persistence::fillDefaults(state);
 
     TEST_ASSERT_EQUAL_UINT16(0xCAFE, state.magic);
-    TEST_ASSERT_EQUAL_UINT16(2,      state.version);
+    TEST_ASSERT_EQUAL_UINT16(3,      state.version);
     TEST_ASSERT_EQUAL_UINT8(0,       state.lifeStage);  // Egg=0
     TEST_ASSERT_EQUAL_UINT8(0,       state.hunger);     // huevos no tienen hambre
     TEST_ASSERT_EQUAL_UINT8(100,     state.happiness);  // huevos son felices
@@ -130,10 +136,13 @@ void test_fill_defaults_produces_valid_state() {
     TEST_ASSERT_EQUAL_UINT8(50,      state.discipline);
     TEST_ASSERT_EQUAL_UINT8(50,      state.weight);
     TEST_ASSERT_EQUAL_UINT8(0,       state.poopCount);
-    TEST_ASSERT_EQUAL_UINT8(0,       state.flags);
+    TEST_ASSERT_EQUAL_UINT8(0x04,    state.flags);   // no sick, no sleeping, lightsOn=true
     TEST_ASSERT_EQUAL_UINT16(500,    state.attentionScore);
     TEST_ASSERT_EQUAL_UINT16(0,      state.deathSustainMs);
     TEST_ASSERT_EQUAL_UINT8(0,       state.lastDeathCauseCode);
+    // Campos v3
+    TEST_ASSERT_EQUAL_UINT8(100,     state.energy);
+    TEST_ASSERT_EQUAL_UINT8(0,       state.reservedV3);
 
     // CRC coherente
     uint32_t expected = Persistence::computeCrc32(&state, offsetof(PersistedState, crc32));
@@ -180,12 +189,13 @@ void test_load_when_no_files_returns_none_found() {
     LoadResult result = g_persistence->load(out);
 
     TEST_ASSERT_EQUAL(LoadResult::NoneFound, result);
-    // Debe haber rellenado defaults v2
+    // Debe haber rellenado defaults v3
     TEST_ASSERT_EQUAL_UINT16(0xCAFE, out.magic);
-    TEST_ASSERT_EQUAL_UINT16(2,      out.version);
+    TEST_ASSERT_EQUAL_UINT16(3,      out.version);
     TEST_ASSERT_EQUAL_UINT8(0,       out.hunger);   // Egg: hunger=0
     TEST_ASSERT_EQUAL_UINT8(100,     out.health);
     TEST_ASSERT_EQUAL_UINT8(50,      out.discipline);
+    TEST_ASSERT_EQUAL_UINT8(100,     out.energy);
 }
 
 // =============================================================================
@@ -378,17 +388,17 @@ void test_save_does_not_lose_old_state_on_simulated_power_loss() {
 
 // =============================================================================
 // 14. test_migrate_same_version_returns_true
-// migrate() con version == kCurrentVersion (2) devuelve true sin modificar estado.
+// migrate() con version == kCurrentVersion (3) devuelve true sin modificar estado.
 // =============================================================================
 void test_migrate_same_version_returns_true() {
     PersistedState state;
     Persistence::fillDefaults(state);
 
-    TEST_ASSERT_EQUAL_UINT16(2, state.version);  // kCurrentVersion = 2
+    TEST_ASSERT_EQUAL_UINT16(3, state.version);  // kCurrentVersion = 3
     bool result = Persistence::migrate(state);
     TEST_ASSERT_TRUE(result);
     // No debe haber modificado nada
-    TEST_ASSERT_EQUAL_UINT16(2, state.version);
+    TEST_ASSERT_EQUAL_UINT16(3, state.version);
     TEST_ASSERT_EQUAL_UINT8(50, state.discipline);
 }
 
@@ -437,13 +447,14 @@ void test_persistedstate_is_exactly_40_bytes() {
 }
 
 // =============================================================================
-// 18. test_load_v1_blob_migrates_to_v2
+// 18. test_load_v1_blob_migrates_to_v3
 // Simula un slot con un blob v1 (28 bytes, CRC válido sobre primeros 24 bytes).
-// load() debe devolver LoadResult::Migrated, version debe ser 2,
-// campos v1 (hunger/happiness/health/lifeStage) preservados,
-// campos v2 nuevos en defaults.
+// load() debe devolver LoadResult::Migrated, version debe ser 3 (cadena
+// completa v1→v2→v3), campos v1 (hunger/happiness/health/lifeStage)
+// preservados, campos v2/v3 nuevos en defaults (incluido energy=100 y
+// lightsOn=true — ver bug documentado en migrate_v1_to_v2_).
 // =============================================================================
-void test_load_v1_blob_migrates_to_v2() {
+void test_load_v1_blob_migrates_to_v3() {
     V1Blob v1 = makeV1Blob(/*hunger=*/30, /*happiness=*/60, /*health=*/80,
                             /*lifeStage=*/1, /*deathCount=*/0,
                             /*ageMinutes=*/45, /*lastSavedAt=*/100);
@@ -456,8 +467,8 @@ void test_load_v1_blob_migrates_to_v2() {
 
     TEST_ASSERT_EQUAL(LoadResult::Migrated, result);
 
-    // Versión debe haberse actualizado a 2
-    TEST_ASSERT_EQUAL_UINT16(2, out.version);
+    // Versión debe haberse actualizado a 3 (cadena completa)
+    TEST_ASSERT_EQUAL_UINT16(3, out.version);
 
     // Campos v1 preservados
     TEST_ASSERT_EQUAL_UINT8(30,  out.hunger);
@@ -471,18 +482,23 @@ void test_load_v1_blob_migrates_to_v2() {
     TEST_ASSERT_EQUAL_UINT8(50,  out.discipline);
     TEST_ASSERT_EQUAL_UINT8(50,  out.weight);
     TEST_ASSERT_EQUAL_UINT8(0,   out.poopCount);
-    TEST_ASSERT_EQUAL_UINT8(0,   out.flags);
+    TEST_ASSERT_EQUAL_UINT8(0x04, out.flags);   // lightsOn=true (bit2), no sick, no sleeping
     TEST_ASSERT_EQUAL_UINT16(500, out.attentionScore);
     TEST_ASSERT_EQUAL_UINT16(0,  out.deathSustainMs);
     TEST_ASSERT_EQUAL_UINT8(0,   out.lastDeathCauseCode);
+
+    // Campos nuevos v3 en defaults — crítico: sin esto arrancaría energy=0
+    // (agotado, auto-sleep inmediato) y lightsOn=false (a oscuras).
+    TEST_ASSERT_EQUAL_UINT8(100, out.energy);
+    TEST_ASSERT_EQUAL_UINT8(0,   out.reservedV3);
 }
 
 // =============================================================================
-// 19. test_migrate_v1_to_v2_preserves_v1_fields
+// 19. test_migrate_v1_to_v3_preserves_v1_fields
 // migrate() sobre un estado con version=1 preserva hunger/happiness/health/
-// lifeStage y actualiza version a 2.
+// lifeStage y actualiza version a 3 (cadena completa v1→v2→v3).
 // =============================================================================
-void test_migrate_v1_to_v2_preserves_v1_fields() {
+void test_migrate_v1_to_v3_preserves_v1_fields() {
     PersistedState state;
     memset(&state, 0, sizeof(state));
     state.magic      = 0xCAFE;
@@ -497,8 +513,8 @@ void test_migrate_v1_to_v2_preserves_v1_fields() {
     bool ok = Persistence::migrate(state);
     TEST_ASSERT_TRUE(ok);
 
-    // Versión actualizada
-    TEST_ASSERT_EQUAL_UINT16(2, state.version);
+    // Versión actualizada a kCurrentVersion (cadena v1→v2→v3)
+    TEST_ASSERT_EQUAL_UINT16(3, state.version);
 
     // Campos v1 preservados
     TEST_ASSERT_EQUAL_UINT8(55,  state.hunger);
@@ -510,17 +526,17 @@ void test_migrate_v1_to_v2_preserves_v1_fields() {
 }
 
 // =============================================================================
-// 20. test_migrate_v1_to_v2_sets_new_field_defaults
-// migrate() sobre un estado con version=1 asigna defaults correctos
-// para los 12 bytes nuevos del bloque v2.
+// 20. test_migrate_v1_to_v3_sets_new_field_defaults
+// migrate() sobre un estado con version=1 asigna defaults correctos para los
+// campos v2 y v3 (cadena completa v1→v2→v3).
 // =============================================================================
-void test_migrate_v1_to_v2_sets_new_field_defaults() {
+void test_migrate_v1_to_v3_sets_new_field_defaults() {
     PersistedState state;
     memset(&state, 0, sizeof(state));
     state.magic   = 0xCAFE;
     state.version = 1;
 
-    // Poner "basura" en los campos v2 para verificar que se sobreescriben
+    // Poner "basura" en los campos v2/v3 para verificar que se sobreescriben
     state.discipline         = 0xFF;
     state.weight             = 0xFF;
     state.poopCount          = 99;
@@ -529,21 +545,25 @@ void test_migrate_v1_to_v2_sets_new_field_defaults() {
     state.deathSustainMs     = 9999;
     state.lastDeathCauseCode = 99;
     state.adultType          = 99;
-    state.reservedV2b        = 9999;
+    state.energy             = 1;
+    state.reservedV3         = 99;
 
     bool ok = Persistence::migrate(state);
     TEST_ASSERT_TRUE(ok);
 
-    // Defaults v2 correctos
+    // Defaults v2/v3 correctos
     TEST_ASSERT_EQUAL_UINT8(50,   state.discipline);
     TEST_ASSERT_EQUAL_UINT8(50,   state.weight);
     TEST_ASSERT_EQUAL_UINT8(0,    state.poopCount);
-    TEST_ASSERT_EQUAL_UINT8(0,    state.flags);
+    TEST_ASSERT_EQUAL_UINT8(0x04, state.flags);   // lightsOn=true; migrate_v1_to_v2_
+                                                   // resetea flags=0 antes de que
+                                                   // v2_to_v3_ fije el bit2
     TEST_ASSERT_EQUAL_UINT16(500, state.attentionScore);
     TEST_ASSERT_EQUAL_UINT16(0,   state.deathSustainMs);
     TEST_ASSERT_EQUAL_UINT8(0,    state.lastDeathCauseCode);
     TEST_ASSERT_EQUAL_UINT8(0,    state.adultType);
-    TEST_ASSERT_EQUAL_UINT16(0,   state.reservedV2b);
+    TEST_ASSERT_EQUAL_UINT8(100,  state.energy);
+    TEST_ASSERT_EQUAL_UINT8(0,    state.reservedV3);
 }
 
 // =============================================================================
@@ -590,6 +610,79 @@ void test_save_in_v2_format_writes_40_bytes() {
 }
 
 // =============================================================================
+// ============================================ MIGRACIÓN v2→v3 (energía/luces) =
+// =============================================================================
+
+// =============================================================================
+// 23. test_migrate_v2_to_v3_sets_energy_and_lights_on
+// Un estado v2 real (los bytes [34..36) — antes reservedV2b — están a 0, como
+// dejaría cualquier save() de firmware v2) migra a v3 con energy=100 y
+// lightsOn=true (bit2 de flags). Sin esto arrancaría dormido a oscuras
+// (energy=0 → auto-sleep inmediato; lightsOn=false → pantalla en negro).
+// =============================================================================
+void test_migrate_v2_to_v3_sets_energy_and_lights_on() {
+    PersistedState state;
+    memset(&state, 0, sizeof(state));
+    state.magic       = 0xCAFE;
+    state.version     = 2;
+    state.discipline  = 60;
+    state.weight      = 55;
+    state.flags       = 0;      // v2 real: no sick, no sleeping — sin noción de lightsOn
+    state.energy      = 0;      // bytes crudos de un v2 real (antes reservedV2b)
+    state.reservedV3  = 0;
+
+    bool ok = Persistence::migrate(state);
+    TEST_ASSERT_TRUE(ok);
+
+    TEST_ASSERT_EQUAL_UINT16(3,   state.version);
+    TEST_ASSERT_EQUAL_UINT8(100,  state.energy);
+    TEST_ASSERT_EQUAL_UINT8(0x04, state.flags);   // lightsOn=true
+    TEST_ASSERT_EQUAL_UINT8(0,    state.reservedV3);
+    // Campos v2 no tocados por esta migración
+    TEST_ASSERT_EQUAL_UINT8(60,   state.discipline);
+    TEST_ASSERT_EQUAL_UINT8(55,   state.weight);
+}
+
+// =============================================================================
+// 24. test_migrate_v2_to_v3_preserves_other_flags
+// migrate_v2_to_v3_ hace OR con 0x04 — no debe tocar isSick (bit0) ni
+// isSleeping (bit1) si ya estaban activos en el blob v2 original.
+// =============================================================================
+void test_migrate_v2_to_v3_preserves_other_flags() {
+    PersistedState state;
+    memset(&state, 0, sizeof(state));
+    state.magic   = 0xCAFE;
+    state.version = 2;
+    state.flags   = 0x01 | 0x02;   // isSick=true, isSleeping=true
+
+    bool ok = Persistence::migrate(state);
+    TEST_ASSERT_TRUE(ok);
+
+    TEST_ASSERT_EQUAL_UINT8(0x01 | 0x02 | 0x04, state.flags);   // + lightsOn
+}
+
+// =============================================================================
+// 25. test_save_then_load_roundtrip_v3_fields
+// energy y el bit lightsOn de flags sobreviven un ciclo save()/load() completo.
+// =============================================================================
+void test_save_then_load_roundtrip_v3_fields() {
+    PersistedState original;
+    Persistence::fillDefaults(original);
+    original.energy = 37;
+    original.flags  = original.flags & ~0x04;   // lightsOn=false (apagar el bit)
+
+    bool saved = g_persistence->save(original);
+    TEST_ASSERT_TRUE(saved);
+
+    PersistedState loaded;
+    LoadResult result = g_persistence->load(loaded);
+
+    TEST_ASSERT_EQUAL(LoadResult::Ok, result);
+    TEST_ASSERT_EQUAL_UINT8(37, loaded.energy);
+    TEST_ASSERT_EQUAL_UINT8(0,  loaded.flags & 0x04);   // lightsOn=false preservado
+}
+
+// =============================================================================
 // main — punto de entrada Unity para env:native
 // =============================================================================
 int main() {
@@ -612,11 +705,14 @@ int main() {
     RUN_TEST(test_migrate_higher_version_returns_false);
     RUN_TEST(test_load_unknown_version_returns_migration_failed);
     RUN_TEST(test_persistedstate_is_exactly_40_bytes);
-    RUN_TEST(test_load_v1_blob_migrates_to_v2);
-    RUN_TEST(test_migrate_v1_to_v2_preserves_v1_fields);
-    RUN_TEST(test_migrate_v1_to_v2_sets_new_field_defaults);
+    RUN_TEST(test_load_v1_blob_migrates_to_v3);
+    RUN_TEST(test_migrate_v1_to_v3_preserves_v1_fields);
+    RUN_TEST(test_migrate_v1_to_v3_sets_new_field_defaults);
     RUN_TEST(test_load_blob_with_short_size_fills_remaining_with_zero);
     RUN_TEST(test_save_in_v2_format_writes_40_bytes);
+    RUN_TEST(test_migrate_v2_to_v3_sets_energy_and_lights_on);
+    RUN_TEST(test_migrate_v2_to_v3_preserves_other_flags);
+    RUN_TEST(test_save_then_load_roundtrip_v3_fields);
 
     return UNITY_END();
 }

@@ -46,7 +46,8 @@ enum class EventType : uint8_t {
     ActionCleanRequested,       // payload = 0 (sin amount)
     ActionMedicateRequested,    // payload = 0
     ActionDisciplineRequested,  // payload = amount (1-100)
-    ActionSleepRequested,       // payload = 0 (off) / 1 (on)
+    ActionLightsRequested,      // payload = 0 (off) / 1 (on) — luces de la habitación
+                                 // (isSleeping ya NO es controlable por el usuario, ver StatsEngine)
     // BatteryStateChanged: publicado por BatteryMonitor cuando cambia el
     // snapshot {valid, percent, charging} de BatteryGauge. Payload empaquetado
     // en los 9 bits bajos: bits 0-6 = percent (0-100), bit 7 = charging,

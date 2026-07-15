@@ -107,8 +107,8 @@ static const char* loadResultName(LoadResult lr) {
     return "Unknown";
 }
 
-// Aplica un PersistedState v2 recién cargado al StatsEngine vivo.
-// Lee todos los campos v2: discipline, weight, poopCount, flags, attentionScore.
+// Aplica un PersistedState v3 recién cargado al StatsEngine vivo.
+// Lee todos los campos v2/v3: discipline, weight, poopCount, flags, attentionScore, energy.
 static void applyToStatsEngine(const PersistedState& s, StatsEngine& engine) {
     Stats stats;
     stats.hunger         = s.hunger;
@@ -119,12 +119,14 @@ static void applyToStatsEngine(const PersistedState& s, StatsEngine& engine) {
     stats.poopCount      = s.poopCount;
     stats.isSick         = (s.flags & 0x01) != 0;
     stats.isSleeping     = (s.flags & 0x02) != 0;
+    stats.lightsOn       = (s.flags & 0x04) != 0;
     stats.attentionScore = s.attentionScore;
+    stats.energy         = s.energy;
     engine.setStats(stats);
 }
 
 // Copia el estado vivo de StatsEngine + LifeFSM a un PersistedState listo para serializar.
-// Incluye todos los campos v2: lifeStage, deathSustainMs, attentionScore, adultType.
+// Incluye todos los campos v2/v3: lifeStage, deathSustainMs, attentionScore, adultType, energy.
 static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const LifeFSM& fsm) {
     Persistence::fillDefaults(s);           // magic, version, ceros — base limpia
     const Stats& st = engine.stats();
@@ -136,8 +138,9 @@ static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const L
     s.discipline         = st.discipline;
     s.weight             = st.weight;
     s.poopCount          = st.poopCount;
-    s.flags              = (st.isSick ? 0x01 : 0) | (st.isSleeping ? 0x02 : 0);
+    s.flags              = (st.isSick ? 0x01 : 0) | (st.isSleeping ? 0x02 : 0) | (st.lightsOn ? 0x04 : 0);
     s.attentionScore     = st.attentionScore;
+    s.energy             = st.energy;
     s.deathSustainMs     = fsm.deathSustainMs();
     s.lastDeathCauseCode = fsm.lastDeathCause();
     s.adultType          = static_cast<uint8_t>(fsm.adultType());
@@ -174,10 +177,11 @@ static void executeSelectedAction_() {
             bus.publish({EventType::ActionDisciplineRequested, 10});
             renderer.triggerActionAnimation(action);
             break;
-        case ActionKind::Sleep:
-            // Toggle: si estaba durmiendo, despertar (0); si no, dormir (1).
-            bus.publish({EventType::ActionSleepRequested,
-                         statsEngine.stats().isSleeping ? 0 : 1});
+        case ActionKind::Lights:
+            // Toggle de lightsOn (NO de isSleeping — el sueño es automático,
+            // ver StatsEngine::tick()).
+            bus.publish({EventType::ActionLightsRequested,
+                         statsEngine.stats().lightsOn ? 0 : 1});
             break;
         case ActionKind::Stats:
             // Manejado en onLongPress como transición de escena, no debería llegar.
@@ -349,12 +353,12 @@ static void onActionDiscipline(const Event& e) {
     LOG_INFO("[action] discipline +%d -> discipline=%u", static_cast<int>(e.payload), statsEngine.stats().discipline);
 }
 
-static void onActionSleep(const Event& e) {
+static void onActionLights(const Event& e) {
     bool on = (e.payload != 0);
-    statsEngine.applySleep(on);
+    statsEngine.applyLights(on);
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
-    LOG_INFO("[action] sleep %s -> isSleeping=%u", on ? "on" : "off", statsEngine.stats().isSleeping);
+    LOG_INFO("[action] lights %s -> lightsOn=%u", on ? "on" : "off", statsEngine.stats().lightsOn);
 }
 
 // LifeStateChanged: reacciona a transiciones del LifeFSM.
@@ -507,7 +511,7 @@ void setup() {
     bus.subscribe(EventType::ActionCleanRequested,      onActionClean);
     bus.subscribe(EventType::ActionMedicateRequested,   onActionMedicate);
     bus.subscribe(EventType::ActionDisciplineRequested, onActionDiscipline);
-    bus.subscribe(EventType::ActionSleepRequested,      onActionSleep);
+    bus.subscribe(EventType::ActionLightsRequested,     onActionLights);
 
     // WiFi no bloqueante — devuelve inmediatamente. El estado se actualiza en loop().
     // Si WIFI_SSID está vacío en secrets.h, begin() marca Disabled y no hace nada más.
@@ -555,6 +559,8 @@ void loop() {
         uint32_t dt = now - lastStatsTickMs;
         lastStatsTickMs = now;
 
+        bool wasSleeping = statsEngine.stats().isSleeping;
+
         LifeStage stage = lifeFSM.stage();
         if (stage != LifeStage::Egg && stage != LifeStage::Dead) {
             statsEngine.tick(dt);
@@ -567,6 +573,15 @@ void loop() {
         // Publicar StatsChanged solo si algún stat entero cambió (dirty flag).
         if (statsEngine.consumeDirtyFlag()) {
             bus.publish({EventType::StatsChanged, 0});
+        }
+
+        // Auto sleep/wake (ver StatsEngine::tick): persistir de inmediato para
+        // no perder la transición si hay un power-loss antes del autosave de 5 min.
+        bool isSleepingNow = statsEngine.stats().isSleeping;
+        if (isSleepingNow != wasSleeping) {
+            LOG_INFO("[sleep] auto %s (energy=%u)", isSleepingNow ? "sleep" : "wake",
+                     statsEngine.stats().energy);
+            bus.publish({EventType::PersistRequested, 0});
         }
     }
 

@@ -31,6 +31,8 @@ static Stats makeDefaultStats() {
     s.isSick        = false;
     s.isSleeping    = false;
     s.attentionScore = 420;
+    s.energy        = 73;
+    s.lightsOn      = true;
     return s;
 }
 
@@ -96,15 +98,22 @@ void test_serialize_state_camel_case_fields() {
     TEST_ASSERT_FALSE(data["deathCount"].isNull());
     TEST_ASSERT_FALSE(data["isSick"].isNull());
     TEST_ASSERT_FALSE(data["isSleeping"].isNull());
+    TEST_ASSERT_FALSE(data["energy"].isNull());
+    TEST_ASSERT_FALSE(data["lightsOn"].isNull());
     TEST_ASSERT_FALSE(data["lifeStage"].isNull());
     TEST_ASSERT_FALSE(data["batteryPercent"].isNull());
     TEST_ASSERT_FALSE(data["batteryCharging"].isNull());
     TEST_ASSERT_FALSE(data["batteryValid"].isNull());
 
+    // energy/lightsOn con los valores esperados de makeDefaultStats()
+    TEST_ASSERT_EQUAL_UINT8(73, data["energy"].as<uint8_t>());
+    TEST_ASSERT_TRUE(data["lightsOn"].as<bool>());
+
     // Asegurarse que NO hay snake_case
     TEST_ASSERT_TRUE(data["age_minutes"].isNull());
     TEST_ASSERT_TRUE(data["poop_count"].isNull());
     TEST_ASSERT_TRUE(data["battery_percent"].isNull());
+    TEST_ASSERT_TRUE(data["lights_on"].isNull());
 }
 
 // =============================================================================
@@ -139,6 +148,8 @@ void test_serialize_state_below_buffer_limit() {
     s.isSick         = true;
     s.isSleeping     = true;
     s.attentionScore = 1000;
+    s.energy         = 100;
+    s.lightsOn       = true;
 
     size_t written = JsonCodec::serializeState(
         s, LifeStage::Old, 99999u, 9999u, true, 0xFFFFFFFFu, makeValidBattery(), g_buf, sizeof(g_buf));
@@ -471,39 +482,39 @@ void test_parse_feed_payload_amount_wrong_type() {
 }
 
 // =============================================================================
-// 10. parse_sleep_payload_valid_true
+// 10. parse_lights_payload_valid_true
 // { "value": true } → ParseError::Ok, outValue = true.
 // =============================================================================
-void test_parse_sleep_payload_valid_true() {
+void test_parse_lights_payload_valid_true() {
     const char* body = "{\"value\":true}";
     bool value = false;
-    JsonCodec::ParseError result = JsonCodec::parseSleepPayload(body, strlen(body), value);
+    JsonCodec::ParseError result = JsonCodec::parseLightsPayload(body, strlen(body), value);
 
     TEST_ASSERT_EQUAL(JsonCodec::ParseError::Ok, result);
     TEST_ASSERT_TRUE(value);
 }
 
 // =============================================================================
-// 11. parse_sleep_payload_valid_false
+// 11. parse_lights_payload_valid_false
 // { "value": false } → ParseError::Ok, outValue = false.
 // =============================================================================
-void test_parse_sleep_payload_valid_false() {
+void test_parse_lights_payload_valid_false() {
     const char* body = "{\"value\":false}";
     bool value = true;
-    JsonCodec::ParseError result = JsonCodec::parseSleepPayload(body, strlen(body), value);
+    JsonCodec::ParseError result = JsonCodec::parseLightsPayload(body, strlen(body), value);
 
     TEST_ASSERT_EQUAL(JsonCodec::ParseError::Ok, result);
     TEST_ASSERT_FALSE(value);
 }
 
 // =============================================================================
-// 12. parse_sleep_payload_invalid_value
+// 12. parse_lights_payload_invalid_value
 // { "value": 42 } → ParseError::InvalidValue (número en vez de bool).
 // =============================================================================
-void test_parse_sleep_payload_invalid_value() {
+void test_parse_lights_payload_invalid_value() {
     const char* body = "{\"value\":42}";
     bool value = false;
-    JsonCodec::ParseError result = JsonCodec::parseSleepPayload(body, strlen(body), value);
+    JsonCodec::ParseError result = JsonCodec::parseLightsPayload(body, strlen(body), value);
 
     TEST_ASSERT_EQUAL(JsonCodec::ParseError::InvalidValue, result);
 }
@@ -568,9 +579,9 @@ int main() {
     RUN_TEST(test_parse_feed_payload_missing_amount);
     RUN_TEST(test_parse_feed_payload_amount_out_of_range);
     RUN_TEST(test_parse_feed_payload_amount_wrong_type);
-    RUN_TEST(test_parse_sleep_payload_valid_true);
-    RUN_TEST(test_parse_sleep_payload_valid_false);
-    RUN_TEST(test_parse_sleep_payload_invalid_value);
+    RUN_TEST(test_parse_lights_payload_valid_true);
+    RUN_TEST(test_parse_lights_payload_valid_false);
+    RUN_TEST(test_parse_lights_payload_invalid_value);
     RUN_TEST(test_parse_clean_accepts_empty_body);
     RUN_TEST(test_parse_malformed_json);
 

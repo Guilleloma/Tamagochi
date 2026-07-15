@@ -25,12 +25,27 @@
 //    sanos. Sin esto, isSick solo importaría combinado con hambre/tristeza, lo que
 //    haría irrelevante la mecánica de enfermedad como vector de muerte propio.
 //
-// 4. isSleeping paraliza hunger, happiness, discipline decay. Solo health regenera
-//    lentamente (+0.002 × dt/1000 por segundo).
+// 4. isSleeping paraliza hunger, happiness(*), discipline decay. isSleeping ya NO
+//    es un toggle manual: tick() lo gobierna 100% por energy (sueño automático,
+//    fiel Tamagotchi 97):
+//      - Despierto: energy drena a energyDrainPerSec; al llegar a
+//        kEnergySleepThreshold (≤20) se duerme sola.
+//      - Dormido + lightsOn=false (correcto): regenera health (+0.002 × dt/1000,
+//        comportamiento legado) y recupera energy a tasa plena.
+//      - Dormido + lightsOn=true (*) (molesto — el usuario dejó la luz encendida):
+//        SIN regen de health — al contrario, penaliza happiness/health, y la
+//        recuperación de energy es más lenta (×energyRecoverLightsOnMul).
+//      - Al llegar a kEnergyWakeThreshold (≥80) despierta sola y fuerza
+//        lightsOn=true (amanece).
+//    applyLights(bool) es el único control manual — alterna lightsOn sin tocar
+//    isSleeping nunca.
 //
 // 5. Las acciones (feed/play) resetean el acumulador del stat correspondiente
 //    para evitar que una fracción acumulada se aplique inmediatamente en el siguiente
-//    tick y cause un doble descuento justo tras una acción del usuario.
+//    tick y cause un doble descuento justo tras una acción del usuario. Mismo
+//    patrón para applyLights() con happinessAcc_/healthAcc_ (cambian de semántica
+//    entre régimen lightsOn/lightsOff mientras duerme) y para las transiciones
+//    dormido↔despierto con happinessAcc_/healthAcc_/energyAcc_ (ver tick()).
 //
 // 6. El flag dirty_ solo se marca si cambia el valor entero del stat (uint8_t),
 //    no por cambios en los acumuladores fraccionales. Así no se genera ruido en
@@ -89,21 +104,77 @@ void StatsEngine::tick(uint32_t dtMs) {
     // guardado hace semanas/meses con el dispositivo apagado.
     if (dtMs > kMaxDtMs) dtMs = kMaxDtMs;
 
+    float dtSec = static_cast<float>(dtMs) / 1000.0f;
+
     // -------------------------------------------------------------------------
-    // Modo durmiendo: solo health regenera lentamente, nada más decae.
+    // Modo durmiendo — gobernado por energy (ver kEnergyWakeThreshold más abajo).
+    // hunger/happiness(*)/discipline siguen paralizados. Dos regímenes según
+    // lightsOn:
+    //   lightsOn=false (correcto): regenera health (igual que el comportamiento
+    //     legado, +0.002 pts/ms) y recupera energy a tasa plena.
+    //   lightsOn=true (molesto — dejaron la luz encendida): NO hay regen extra
+    //     de health — al contrario, penaliza happiness/health, y la recuperación
+    //     de energy es más lenta (×energyRecoverLightsOnMul).
+    // Auto-wake: al llegar a kEnergyWakeThreshold, despierta y fuerza lightsOn=true
+    // (amanece). Los 3 acumuladores se resetean en la transición porque se
+    // reusan con semántica opuesta entre régimen despierto/dormido.
     // -------------------------------------------------------------------------
     if (stats_.isSleeping) {
-        healthAcc_ += static_cast<float>(dtMs) * 0.002f;
-        while (healthAcc_ >= 1.0f) {
-            healthAcc_ -= 1.0f;
-            uint8_t prev = stats_.health;
-            stats_.health = clamp_(static_cast<int>(stats_.health) + 1);
-            if (stats_.health != prev) dirty_ = true;
+        if (stats_.lightsOn) {
+            // Molesto: energy recupera lento, penaliza happiness/health.
+            energyAcc_ += dtSec * rates_.energyRecoverPerSec * rates_.energyRecoverLightsOnMul;
+            while (energyAcc_ >= 1.0f) {
+                energyAcc_ -= 1.0f;
+                uint8_t prev = stats_.energy;
+                stats_.energy = clamp_(static_cast<int>(stats_.energy) + 1);
+                if (stats_.energy != prev) dirty_ = true;
+            }
+
+            happinessAcc_ += dtSec * rates_.lightsOnHappinessPenaltyPerSec;
+            while (happinessAcc_ >= 1.0f) {
+                happinessAcc_ -= 1.0f;
+                uint8_t prev = stats_.happiness;
+                stats_.happiness = clamp_(static_cast<int>(stats_.happiness) - 1);
+                if (stats_.happiness != prev) dirty_ = true;
+            }
+
+            healthAcc_ += dtSec * rates_.lightsOnHealthPenaltyPerSec;
+            while (healthAcc_ >= 1.0f) {
+                healthAcc_ -= 1.0f;
+                uint8_t prev = stats_.health;
+                stats_.health = clamp_(static_cast<int>(stats_.health) - 1);
+                if (stats_.health != prev) dirty_ = true;
+            }
+        } else {
+            // Descanso correcto: regen de health (comportamiento legado) + recuperación plena.
+            healthAcc_ += static_cast<float>(dtMs) * 0.002f;
+            while (healthAcc_ >= 1.0f) {
+                healthAcc_ -= 1.0f;
+                uint8_t prev = stats_.health;
+                stats_.health = clamp_(static_cast<int>(stats_.health) + 1);
+                if (stats_.health != prev) dirty_ = true;
+            }
+
+            energyAcc_ += dtSec * rates_.energyRecoverPerSec;
+            while (energyAcc_ >= 1.0f) {
+                energyAcc_ -= 1.0f;
+                uint8_t prev = stats_.energy;
+                stats_.energy = clamp_(static_cast<int>(stats_.energy) + 1);
+                if (stats_.energy != prev) dirty_ = true;
+            }
         }
+
+        if (stats_.energy >= kEnergyWakeThreshold) {
+            stats_.isSleeping = false;
+            stats_.lightsOn   = true;   // amanece — se fuerzan las luces
+            happinessAcc_ = 0.0f;
+            healthAcc_    = 0.0f;
+            energyAcc_    = 0.0f;
+            dirty_ = true;
+        }
+
         return;
     }
-
-    float dtSec = static_cast<float>(dtMs) / 1000.0f;
 
     // --- hunger: sube con el tiempo ---
     hungerAcc_ += dtSec * rates_.hungerPerSec;
@@ -182,6 +253,24 @@ void StatsEngine::tick(uint32_t dtMs) {
             stats_.isSick = true;
             dirty_ = true;
         }
+    }
+
+    // --- energy: baja con el tiempo (despierto) ---
+    energyAcc_ += dtSec * rates_.energyDrainPerSec;
+    while (energyAcc_ >= 1.0f) {
+        energyAcc_ -= 1.0f;
+        uint8_t prev = stats_.energy;
+        stats_.energy = clamp_(static_cast<int>(stats_.energy) - 1);
+        if (stats_.energy != prev) dirty_ = true;
+    }
+
+    // Auto-sleep: al caer a kEnergySleepThreshold o menos, se duerme sola.
+    if (stats_.energy <= kEnergySleepThreshold) {
+        stats_.isSleeping = true;
+        happinessAcc_ = 0.0f;
+        healthAcc_    = 0.0f;
+        energyAcc_    = 0.0f;
+        dirty_ = true;
     }
 
     // --- Actualizar attentionScore pasivamente ---
@@ -317,11 +406,18 @@ void StatsEngine::applyDiscipline(uint8_t amt) {
 }
 
 // -----------------------------------------------------------------------------
-// applySleep — activa o desactiva el modo sueño
+// applyLights — enciende o apaga las luces de la habitación (único control
+// manual relacionado con el sueño). NO toca isSleeping — el sueño es 100%
+// automático, gobernado por energy en tick() (ver kEnergySleepThreshold/
+// kEnergyWakeThreshold). Resetea happinessAcc_/healthAcc_ porque ambos
+// acumuladores cambian de semántica entre régimen lightsOn/lightsOff mientras
+// duerme (ver tick()).
 // -----------------------------------------------------------------------------
-void StatsEngine::applySleep(bool on) {
-    if (stats_.isSleeping == on) return;
-    stats_.isSleeping = on;
+void StatsEngine::applyLights(bool on) {
+    if (stats_.lightsOn == on) return;
+    stats_.lightsOn = on;
+    happinessAcc_ = 0.0f;
+    healthAcc_    = 0.0f;
     dirty_ = true;
 }
 
@@ -338,6 +434,8 @@ void StatsEngine::resetForNewLife() {
     stats_.isSick        = false;
     stats_.isSleeping    = false;
     stats_.attentionScore = 500;
+    stats_.energy        = 100;
+    stats_.lightsOn      = true;
 
     // Resetear acumuladores
     hungerAcc_     = 0.0f;
@@ -346,6 +444,7 @@ void StatsEngine::resetForNewLife() {
     weightAcc_     = 0.0f;
     disciplineAcc_ = 0.0f;
     attentionAcc_  = 0.0f;
+    energyAcc_     = 0.0f;
 
     dirty_ = true;
 }
@@ -368,7 +467,8 @@ bool StatsEngine::consumeDirtyFlag() {
 //   - Clean:      poopCount > 0          (applyClean es no-op si poop=0)
 //   - Medicate:   isSick                 (applyMedicate es no-op si !sick)
 //   - Discipline: siempre                (sin precondición en dominio)
-//   - Sleep:      siempre                (toggle on/off — label dinámico en UI)
+//   - Lights:     siempre                (toggle luces on/off — label dinámico en UI;
+//                                          nunca afecta isSleeping, ver applyLights())
 //   - Stats:      siempre (último)       (no es acción real, abre StatsView)
 // -----------------------------------------------------------------------------
 uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) const {
@@ -379,9 +479,9 @@ uint8_t StatsEngine::listAvailableActions(ActionKind out[kMaxActionMenuItems]) c
     if (stats_.poopCount > 0) { out[n++] = ActionKind::Clean; }
     if (stats_.isSick)        { out[n++] = ActionKind::Medicate; }
 
-    // Discipline y Sleep son incondicionales — Sleep alterna en la UI según isSleeping.
+    // Discipline y Lights son incondicionales — Lights alterna en la UI según lightsOn.
     out[n++] = ActionKind::Discipline;
-    out[n++] = ActionKind::Sleep;
+    out[n++] = ActionKind::Lights;
 
     // Stats siempre como última entrada — el HUD inferior la usa para abrir StatsView.
     out[n++] = ActionKind::Stats;

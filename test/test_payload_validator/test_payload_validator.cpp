@@ -71,7 +71,7 @@ void test_validate_action_name_known() {
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::Ok,
                       PayloadValidator::validateActionName("discipline"));
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::Ok,
-                      PayloadValidator::validateActionName("sleep"));
+                      PayloadValidator::validateActionName("lights"));
 }
 
 // =============================================================================
@@ -93,7 +93,22 @@ void test_validate_action_name_unknown() {
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,
                       PayloadValidator::validateActionName("Feed"));
     TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,
-                      PayloadValidator::validateActionName("SLEEP"));
+                      PayloadValidator::validateActionName("LIGHTS"));
+    // "sleep" ya no es una acción conocida — ver test dedicado de regresión
+    // más abajo (test_validate_action_name_sleep_is_now_unknown).
+}
+
+// =============================================================================
+// 7. test_validate_action_name_sleep_is_now_unknown
+// Regresión: "sleep" era una acción válida antes del rename a "lights"
+// (StatsEngine::ActionKind::Sleep → Lights; el sueño pasó a ser 100%
+// automático por energía, ver StatsEngine::tick()). Test dedicado para que
+// el hueco de cobertura sea explícito y no dependa de la lista genérica de
+// "nombres desconocidos" de test_validate_action_name_unknown.
+// =============================================================================
+void test_validate_action_name_sleep_is_now_unknown() {
+    TEST_ASSERT_EQUAL(PayloadValidator::ValidationError::UnknownAction,
+                      PayloadValidator::validateActionName("sleep"));
 }
 
 // =============================================================================
@@ -108,6 +123,7 @@ int main() {
     RUN_TEST(test_validate_amount_rejects_negative);
     RUN_TEST(test_validate_action_name_known);
     RUN_TEST(test_validate_action_name_unknown);
+    RUN_TEST(test_validate_action_name_sleep_is_now_unknown);
 
     return UNITY_END();
 }
