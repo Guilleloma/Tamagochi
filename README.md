@@ -7,7 +7,7 @@ Este repositorio contiene **dos variantes de firmware** para el mismo Tamagotchi
 | **ESP8266 mono** (original) | ideaspark ESP8266 0.96" OLED V3.2 | SSD1306 128×64 mono | `src/main.cpp` |
 | **ESP32-S3 color** (Furbygotchi) | Waveshare ESP32-S3 Zero | JD9853 240×296 IPS TFT | `src/main_esp32.cpp` |
 
-El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 190 tests `native` aplican a las dos.
+El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 203 tests `native` aplican a las dos.
 
 ---
 
@@ -43,6 +43,12 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 
 > Touch capacitivo TTP223 en GPIO4: salida active-HIGH sin rebote. Toque breve (<600 ms) = click corto; mantener pulsado >600 ms = pulsación larga. El LED del módulo se enciende mientras detecta contacto.
 
+### Energía, sueño automático y luces (fiel Tamagotchi 97)
+
+La mascota tiene una stat de **energía** (`energy`, 0-100) además de hambre/ánimo/salud. Se **duerme sola** al bajar de 20 (agotada) y **despierta sola** al llegar a 80 (descansada) — el sueño ya no es un botón manual, es 100% automático. Al despertar, las luces se encienden solas ("amanece").
+
+La acción **"Luces"** (fiel al Tamagotchi original del 97) reemplaza al viejo botón de dormir/despertar y **solo aparece en el menú mientras la mascota duerme**: apágalas para que descanse bien y recupere energía a tasa plena; si las dejas encendidas se molesta — penaliza felicidad y salud, y recupera energía más despacio. Con las luces apagadas la pantalla se pone en negro con unas **Zs flotantes** ascendiendo, pero el menú de acciones sigue visible y operable para poder volver a encenderlas.
+
 ---
 
 ## Estado actual — Fase 3 completada + hitos posteriores
@@ -53,9 +59,9 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 | **core** | EventBus pub/sub (sin allocación dinámica) | ✅ |
 | **core** | BatteryGauge — filtrado + gate de plausibilidad (host-testable) | ✅ |
 | **core** | MessageBox — canal SPSC + sanitizado UTF-8→ASCII | ✅ |
-| **domain** | StatsEngine — 6 stats con decay + 6 acciones | ✅ |
+| **domain** | StatsEngine — 7 stats (incluye `energy`) con decay + 6 acciones (incluye `lights`) | ✅ |
 | **domain** | LifeFSM — 6 etapas + transiciones automáticas + muerte/resurrección | ✅ |
-| **domain** | Persistence LittleFS rotativa + CRC32 + migrate v1→v2 | ✅ |
+| **domain** | Persistence LittleFS rotativa + CRC32 + migrate v1→v2→v3 | ✅ |
 | **ui** | InputHandler con OneButton calibrado | ✅ |
 | **ui** | DisplayRenderer (mono) / DisplayRendererColor (ESP32-S3) | ✅ |
 | **ui** | Overlays asíncronos SICK / SLEEP_Z / HUNGRY / POOP | ✅ |
@@ -74,12 +80,13 @@ Tamagotchi clásico años 90 corriendo en una placa **ideaspark ESP8266 0.96" OL
 | **infra** | Telemetría de reinicios en `/api/v1/info` (resetReason/bootCount/minFreeHeap) | ✅ |
 | **ui** | Frontend HTML/CSS/JS mobile-first servido desde LittleFS | ✅ |
 | **ui** | Dashboard: panel Sistema (diagnóstico) + panel Mensaje + botón Reiniciar | ✅ |
+| **domain/ui** | Mecánica de juego: energía + sueño automático + luces on/off (fiel 97) — ver sección abajo | ✅ |
 | **build** | TURBO_MODE ×60 (env `esp12e_turbo`) para QA | ✅ |
 | **build** | OTA upload via WiFi (env `esp12e_ota`) | ✅ |
-| **build** | Tests host-native — **190 tests pasando** | ✅ |
+| **build** | Tests host-native — **203 tests pasando** | ✅ |
 | **build** | Script integración HTTP — **26 tests pasando** | ✅ |
 | **diferido** | Sprites EGG/KID/ADULT/OLD/DEAD reales (mono) | ⏸️ usando BABY como placeholder |
-| **diferido** | Gestión de energía (auto-dim, sleep) | ⏸️ Fase 5 |
+| **diferido** | Gestión de energía de HARDWARE (auto-dim de panel, modem sleep WiFi) | ⏸️ Fase 5 — distinto de la mecánica de juego `energy`, ya ✅ |
 
 ---
 
@@ -106,7 +113,7 @@ OTA_PASSWORD="tu_password" pio run -e esp12e_ota -t upload
 # Monitor serie (115200 baud)
 pio device monitor
 
-# Tests host-native (no necesita la placa) — 190/190
+# Tests host-native (no necesita la placa) — 203/203
 pio test -e native
 ```
 
@@ -163,13 +170,13 @@ Tamagotchi/
 ├── src/
 │   ├── main.cpp               ← orquestación ESP8266: singletons + suscripciones + loop
 │   └── main_esp32.cpp         ← orquestación ESP32-S3 (incluye consumo del MessageBox)
-├── test/                      ← 190 tests host-native (14 suites)
+├── test/                      ← 203 tests host-native (14 suites)
 │   ├── test_smoke/            ← canario del env native (1)
-│   ├── test_stats_engine/     ← 33 tests
-│   ├── test_persistence/      ← 22 tests (incluye migrate v1→v2)
+│   ├── test_stats_engine/     ← 42 tests (incluye energía/auto-sueño/luces)
+│   ├── test_persistence/      ← 25 tests (incluye migrate v1→v2→v3)
 │   ├── test_life_fsm/         ← 16 tests (transiciones de etapas)
 │   ├── test_json_codec/       ← 23 tests (parse + render JSON + telemetría)
-│   ├── test_payload_validator/← 6 tests
+│   ├── test_payload_validator/← 7 tests (incluye regresión sleep→lights)
 │   ├── test_rate_limiter/     ← 9 tests (token bucket)
 │   ├── test_auth_checker/     ← 6 tests (HTTP Basic Auth)
 │   ├── test_battery_gauge/    ← 25 tests (filtrado + gate)
@@ -197,15 +204,17 @@ Una vez la placa esté en la WiFi y `data/*` esté subido al filesystem:
 | URL | Descripción |
 |---|---|
 | `http://tamagotchi.local/` | Frontend mobile-first (HTML/CSS/JS desde LittleFS) |
-| `GET /api/v1/state` | Snapshot del Tamagotchi (`lifeStage`, stats, flags) |
+| `GET /api/v1/state` | Snapshot del Tamagotchi (`lifeStage`, stats, flags, `energy`, `lightsOn`) |
 | `GET /api/v1/info` | Telemetría + identidad de red + diagnóstico de batería (ver abajo) |
 | `POST /api/v1/{feed,play,discipline}` | Body `{"amount": 1..100}` |
 | `POST /api/v1/{clean,medicate}` | Sin body |
-| `POST /api/v1/sleep` | Body `{"value": true}` o `{"value": false}` |
+| `POST /api/v1/lights` | Body `{"value": true}` o `{"value": false}` — luces on/off (ex-`/sleep`, ver abajo) |
 | `POST /api/v1/message` | Body `{"text": "..."}` — mensaje del padre (marquee). Solo variante color |
 | `POST /api/v1/reboot` | Sin body. Persiste el estado y reinicia el dispositivo (~750ms después de responder) |
 
-> **Nota:** la acción/endpoint **Heal fue eliminada** (redundante con `medicate`) — su sprite, botón y tests salieron del repo. Quedan 6 acciones: feed, play, clean, medicate, discipline, sleep.
+> **Nota:** la acción/endpoint **Heal fue eliminada** (redundante con `medicate`) — su sprite, botón y tests salieron del repo. Quedan 6 acciones: feed, play, clean, medicate, discipline, lights.
+>
+> **Sueño automático + luces (energía/97):** `isSleeping` pasó a ser **solo lectura** en `GET /api/v1/state` — el sueño ya no es controlable por el cliente, lo gobierna `energy` (0-100) en el firmware (duerme sola ≤20, despierta sola ≥80). El antiguo `POST /api/v1/sleep` **fue retirado** (404); `POST /api/v1/lights` alterna `lightsOn` y solo tiene efecto visible mientras la mascota duerme. `GET /api/v1/state` expone `energy` y `lightsOn` junto al resto de stats.
 
 #### `GET /api/v1/info` — campos
 
@@ -248,7 +257,7 @@ Cubre 26 escenarios: auth (401), happy path por endpoint (200 + `actionApplied`)
 
 ### Tests automáticos
 ```bash
-pio test -e native   # 190/190 deben pasar
+pio test -e native   # 203/203 deben pasar
 ```
 
 ### Pruebas funcionales en hardware
@@ -297,7 +306,7 @@ Comprueba:
 
 ## Variante ESP32-S3 color (Furbygotchi)
 
-Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 190 tests `native` validan ambas variantes.
+Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 203 tests `native` validan ambas variantes.
 
 ### Hardware ESP32-S3
 
@@ -394,7 +403,15 @@ cp include/secrets.h.example include/secrets.h
 - **Fase 4 (ESP32-S3)** — Furbygotchi color: JD9853 + sprites RGB565 + LittleFS assets + evolución visual por etapa.
 - **Fase 5** — gestión de energía (auto-dim/off del OLED/TFT, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
 
-### Changelog reciente (13-14 jul 2026)
+### Changelog reciente (13-15 jul 2026)
+
+**15 jul — Energía, sueño automático y luces on/off (fiel Tamagotchi 97):**
+- Nueva stat **`energy`** (0-100) en `StatsEngine`: drena despierta, se duerme sola al llegar a ≤20 y despierta sola al llegar a ≥80 (histéresis 20↔80) — `isSleeping` deja de ser un toggle manual, pasa a ser 100% automático.
+- Acción **`lights`** (reemplaza al antiguo `sleep`): único control manual restante, alterna `lightsOn` sin tocar nunca `isSleeping`. Fiel al Tamagotchi 97 — solo aparece en el menú **mientras la mascota duerme** (despierta no tendría efecto visible). Dejarlas encendidas mientras duerme la molesta: penaliza felicidad/salud y recupera energía más despacio; apagadas descansa correctamente.
+- **Pantalla oscura + Zs flotantes**: con las luces apagadas y dormida, la pantalla se pone en negro con un rastro de "z" ascendiendo y desvaneciéndose (color y mono) — el HUD de acciones se mantiene visible/operable para poder reencenderlas sin quedar atrapado.
+- **Persistencia v3**: nuevo campo `energy` + bit `lightsOn` en `flags`, migración `v1→v2→v3` encadenada (incluye fix de un bug latente que habría saltado el paso `v2→v3`). `sizeof(PersistedState)` se mantiene en 40 bytes.
+- API: `POST /api/v1/sleep` retirado (404) → `POST /api/v1/lights`; `GET /api/v1/state` expone `energy`/`lightsOn`, `isSleeping` pasa a solo lectura.
+- ~13 tests nuevos de dominio/persistencia/API + 1 test de regresión (`"sleep"` ya no es acción válida). Tests host-native: **190 → 203**.
 
 **14 jul (noche) — Robustez de red y auto-recuperación:**
 - **Supervisor de red** (`WiFi.onEvent` + re-`begin()` idempotente en el `loop`): re-levanta WebUI (puerto 80) y OTA (3232) **en caliente** si caen tras una reconexión de WiFi, sin reiniciar. Corrige el fallo donde `tamagotchi.local` quedaba muerto (ping + mDNS vivos, puerto 80 `connection refused`) hasta reset físico.
@@ -427,6 +444,6 @@ cp include/secrets.h.example include/secrets.h
 - **Sprites faltantes** — Adult sad, Old happy/sad. Baja prioridad (placeholders idle son coherentes con los estados emocionales contenidos de adultos serios y ancianos lentos).
 - **AdultType variants** — sprites distintos según `attentionScore` (athletic / normal / obese / grumpy).
 - **`/api/v1/reset`** — endpoint para forzar resurrección (huevo nuevo) desde la web. Planeado pero no implementado en Fase 3.
-- **`actionApplied` de `sleep`** — actualmente reporta `amount: 1`/`0` en lugar de `value: true/false` (cosmético).
+- **`actionApplied` de `lights`** (antes `sleep`) — sigue reportando `amount: 1`/`0` en lugar de `value: true/false` (cosmético).
 
 Planes completos en `docs/fase-1-plan.md`, `docs/fase-2-plan.md` y `docs/fase-3-plan.md`. Plan maestro en `docs/plan.md`.
