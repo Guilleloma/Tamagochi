@@ -58,6 +58,7 @@
 #include "BatteryMonitor.h"
 #include "MessageBox.h"
 #include "BootLoopGuard.h"   // anti-boot-loop del watchdog de conectividad (hito 9)
+#include "ScreenPowerLogic.h" // apagado de pantalla por inactividad (ahorro de batería)
 
 // =============================================================================
 // Verificación de versión de firmware en compile-time.
@@ -200,6 +201,48 @@ static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const L
 }
 
 // =============================================================================
+// Apagado de pantalla por inactividad (ahorro de batería) — ver
+// ScreenPowerLogic.h para la decisión pura (sin hardware). Aquí solo el
+// efecto físico: backlight (TFT_BL) + SLPIN/SLPOUT del panel JD9853.
+// screenPower.update() se llama una vez por vuelta de loop() (ver loop()
+// más abajo); sleepScreen()/wakeScreen() SOLO se invocan desde ahí
+// (loopTask) — nunca desde un handler de evento.
+// =============================================================================
+static ScreenPowerLogic screenPower(SCREEN_TIMEOUT_MS);
+
+// sleepScreen — apaga el panel físico. Backlight PRIMERO (así no se ve el
+// "flash" del panel mientras entra en SLPIN) y luego tft->displayOff()
+// (SLPIN) para que el propio controlador reduzca consumo.
+static void sleepScreen() {
+    digitalWrite(TFT_BL, LOW);
+    tft->displayOff();
+    LOG_INFO("[screen] off");
+}
+
+// wakeScreen — enciende el panel físico. tft->displayOn() (SLPOUT) ya
+// incluye un delay(120) interno (ST7789_SLPOUT_DELAY, ver
+// Arduino_ST7789::displayOn() en la librería) para la estabilización que
+// exige el controlador tras salir de sleep; el delay(120) explícito de aquí
+// es margen adicional documentado frente al WDT de 10 s (WDT_TIMEOUT_S) —
+// sin riesgo real de disparar el watchdog. El backlight se enciende
+// DESPUÉS de displayOn() para no dejar ver el panel aún reinicializándose.
+// Forzamos un render inmediato para no mostrar el frame viejo (hasta
+// RENDER_FRAME_MS de retraso si esperásemos al scheduler normal).
+// lastRenderMs = millis() tras ese render forzado — mismo patrón que el
+// primer frame en setup() (render() seguido de lastRenderMs = now). Sin
+// esto, lastRenderMs queda obsoleto (~SCREEN_TIMEOUT_MS) y el bloque de
+// render programado del loop (más abajo) repite el MISMO frame por SPI en
+// la misma vuelta, justo después de este render forzado.
+static void wakeScreen() {
+    tft->displayOn();
+    delay(120);
+    digitalWrite(TFT_BL, HIGH);
+    if (renderer) renderer->render();
+    lastRenderMs = millis();
+    LOG_INFO("[screen] on");
+}
+
+// =============================================================================
 // Event handlers — función plana; tienen acceso a los singletons globales.
 // Deben ejecutarse en < 2 ms (EventBus síncrono — mismo budget que ESP8266).
 // =============================================================================
@@ -263,6 +306,15 @@ static void dismissMessage_() {
 //   MessageView  → descarta el mensaje del padre y restaura la escena previa.
 //   DeadScreen / otros → ignorar.
 static void onShortClick(const Event&) {
+    // Pantalla apagada: el primer toque SOLO despierta (no mueve cursor ni
+    // ejecuta nada) — el wake real lo hace update() en la siguiente vuelta
+    // de loop() (loopTask), evitando tocar el bus SPI desde este handler.
+    if (!screenPower.isScreenOn()) {
+        screenPower.noteInteraction(millis());
+        return;
+    }
+    screenPower.noteInteraction(millis());
+
     if (lifeFSM.stage() == LifeStage::Dead) return;
 
     switch (currentScene) {
@@ -290,6 +342,14 @@ static void onShortClick(const Event&) {
 //   IdleMain    → ejecuta la acción activa del HUD. Si es Stats, abre StatsView.
 //   StatsView   → no-op (long press solo tiene semántica en IdleMain).
 static void onLongPress(const Event&) {
+    // Pantalla apagada: el primer toque (aunque sea largo) SOLO despierta —
+    // mismo criterio que onShortClick, ver comentario ahí.
+    if (!screenPower.isScreenOn()) {
+        screenPower.noteInteraction(millis());
+        return;
+    }
+    screenPower.noteInteraction(millis());
+
     if (lifeFSM.stage() == LifeStage::Dead) return;
     if (currentScene == SceneColor::MessageView) {
         dismissMessage_();
@@ -467,8 +527,20 @@ static void connectivityWatchdog_() {
 }
 
 // OtaStarted: cambiar a pantalla de progreso OTA (misma lógica que ESP8266).
+//
+// noteInteraction() aquí es imprescindible, no cosmético: inhibitSleep=true
+// (ver loop()) SOLO impide apagar una pantalla que ya está encendida — NO
+// enciende una que ya estaba dormida. Sin este noteInteraction(), un OTA
+// lanzado por red tras >SCREEN_TIMEOUT_MS de inactividad dejaría la barra de
+// progreso invisible (update() seguiría devolviendo None indefinidamente y
+// el render seguiría saltado). onOtaStarted corre en loopTask (invocado
+// síncronamente por ArduinoOTA.onStart() dentro de ota.loop(), al principio
+// de este mismo loop() — ver OTAManager::onStart_), así que el
+// screenPower.update() de esta misma vuelta ya ve currentScene==OtaProgress
+// e idle≈0 y hace el Wake ANTES del bloque de render de esta vuelta.
 static void onOtaStarted(const Event&) {
     LOG_INFO("[ota] update started — switching to OtaProgress scene");
+    screenPower.noteInteraction(millis());
     if (renderer) {
         renderer->setScene(SceneColor::OtaProgress);
         renderer->setOtaProgress(0);
@@ -507,8 +579,17 @@ static void onBatteryStateChanged(const Event& e) {
 
 // Acciones publicadas por el HUD → aplicar a StatsEngine + persistir.
 // Misma semántica que en main.cpp (ESP8266), sin WebUI en esta fase.
+//
+// noteInteraction() al inicio de cada una: pueden llegar desde WebUI (task
+// async_tcp, POST /api/v1/*) además del botón (loopTask) — un comando
+// explícito del dashboard cuenta como interacción igual que el botón. NO se
+// toca hardware aquí (solo lastInteractionMs_, volatile — ver
+// ScreenPowerLogic.h); el wake real lo aplica loop() en la siguiente vuelta.
+// A diferencia del botón, la acción SIEMPRE se ejecuta con normalidad aunque
+// la pantalla estuviera apagada — un comando HTTP explícito no debe perderse.
 
 static void onActionFeed(const Event& e) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyFeed(static_cast<uint8_t>(e.payload));
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
@@ -516,6 +597,7 @@ static void onActionFeed(const Event& e) {
 }
 
 static void onActionPlay(const Event& e) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyPlay(static_cast<uint8_t>(e.payload));
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
@@ -523,6 +605,7 @@ static void onActionPlay(const Event& e) {
 }
 
 static void onActionClean(const Event&) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyClean();
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
@@ -530,6 +613,7 @@ static void onActionClean(const Event&) {
 }
 
 static void onActionMedicate(const Event&) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyMedicate();
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
@@ -538,6 +622,7 @@ static void onActionMedicate(const Event&) {
 }
 
 static void onActionDiscipline(const Event& e) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyDiscipline(static_cast<uint8_t>(e.payload));
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
@@ -546,6 +631,7 @@ static void onActionDiscipline(const Event& e) {
 }
 
 static void onActionLights(const Event& e) {
+    screenPower.noteInteraction(millis());
     bool on = (e.payload != 0);
     statsEngine.applyLights(on);
     bus.publish({EventType::StatsChanged, 0});
@@ -836,6 +922,10 @@ void setup() {
     lastSaveMs      = now;   // evita un save espurio en el primer tick de autosave
     lastFpsReportMs = now;
     lastNetSupervisorMs = now;
+    // Pantalla arranca encendida (backlight ya en HIGH, ver arriba) — sella
+    // el reloj de inactividad en el boot para no contar el tiempo de arranque
+    // (splash, LittleFS, sprites...) como idle.
+    screenPower.noteInteraction(now);
 
     LOG_INFO("Setup done (stage=%u ageMin=%u heap=%u psram=%u wifi=%s)",
              static_cast<unsigned>(lifeFSM.stage()),
@@ -883,6 +973,14 @@ void loop() {
                                || currentScene == SceneColor::MessageView);
 
         if (canShow) {
+            // Cuenta como interacción — igual que el botón o una acción HTTP
+            // (ver plan). NOTA: se usa millis() directo (no la variable local
+            // `now`, que en este punto del loop aún no se ha calculado —
+            // se declara más abajo, justo antes del bloque de decay) — la
+            // diferencia de timing entre ambas llamadas es de microsegundos,
+            // irrelevante frente al timeout de 3 min.
+            screenPower.noteInteraction(millis());
+
             // No pisar sceneBeforeMessage_ si ya estábamos en MessageView
             // (un segundo mensaje mientras se muestra el primero no debe
             // perder la escena ORIGINAL a la que hay que volver al terminar).
@@ -913,6 +1011,18 @@ void loop() {
     }
 
     uint32_t now = millis();
+
+    // ── Apagado de pantalla por inactividad (SCREEN_TIMEOUT_MS) ──────────────
+    // inhibitSleep: no apagar mientras hay una actualización OTA visible en
+    // pantalla (el usuario necesita ver la barra de progreso). ScreenPowerLogic
+    // decide; sleepScreen()/wakeScreen() aplican el efecto físico — SIEMPRE
+    // desde aquí (loopTask), nunca desde un handler de evento.
+    bool inhibitSleep = (currentScene == SceneColor::OtaProgress);
+    switch (screenPower.update(now, inhibitSleep)) {
+        case ScreenPowerLogic::Action::Sleep: sleepScreen(); break;
+        case ScreenPowerLogic::Action::Wake:  wakeScreen();  break;
+        default: break;
+    }
 
     // ── Decay a 1 Hz (STATS_TICK_MS = 1000 ms normal, 16 ms en TURBO_MODE) ───
     //
@@ -955,7 +1065,9 @@ void loop() {
     }
 
     // ── Render a cadencia RENDER_FRAME_MS (200 ms → 5 FPS) ───────────────────
-    if (now - lastRenderMs >= RENDER_FRAME_MS) {
+    // screenPower.isScreenOn(): con la pantalla apagada, saltar el render por
+    // completo — el juego (decay/energía/LifeFSM, arriba) sigue corriendo.
+    if (screenPower.isScreenOn() && now - lastRenderMs >= RENDER_FRAME_MS) {
         if (renderer) {
             renderer->render();
             framesRendered++;

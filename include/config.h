@@ -134,6 +134,14 @@
 #define PERSIST_AUTOSAVE_MS    (5UL * 60UL * 1000UL)   // 5 min wall-clock
 // Política: NO se escala con TURBO_MODE — evita escribir flash en tests
 
+// === Apagado de pantalla por inactividad (ahorro de batería) ===
+// Wall-clock real: NO escala con TURBO_MODE (mismo criterio que
+// PERSIST_AUTOSAVE_MS — evitar que el ahorro de batería se dispare en
+// segundos durante una validación turbo en hardware). Ver ScreenPowerLogic.h
+// para la lógica de decisión (pura, sin hardware) y main*.cpp para el efecto
+// físico (backlight/panel OFF vía sleepScreen()/wakeScreen()).
+#define SCREEN_TIMEOUT_MS      (3UL * 60UL * 1000UL)   // 3 min
+
 // =============================================================================
 // Robustez de red y auto-recuperación (Fase 5, hito 9 — solo ESP32-S3)
 // =============================================================================
