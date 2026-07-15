@@ -135,6 +135,7 @@ private:
     Mood computeMood_() const;
 
     void drawIdleMain_();
+    void drawLightsOffSleep_();   // pantalla oscura + "zZZ" — isSleeping && !lightsOn
     void drawOverlays_();    // overlays asíncronos sobre el sprite principal (hito 6)
     void drawWifiIcon_();    // icono WiFi 8×6 en esquina superior derecha
     void drawActionHud_();   // HUD inferior de acciones en IdleMain (Fase 4.1)

@@ -179,14 +179,16 @@ static const char* lifeStageLabel(LifeStage stage) {
 }
 
 // ─── Etiquetas de acción para HUD inferior ───────────────────────────────────
-static const char* actionLabelColor(ActionKind action, bool sleeping) {
+// Lights: label dinámico según lightsOn (NO según isSleeping — el sueño es
+// automático). lightsOn=true -> la acción que se ejecutaría es apagarlas.
+static const char* actionLabelColor(ActionKind action, bool lightsOn) {
     switch (action) {
         case ActionKind::Feed:       return "FEED";
         case ActionKind::Play:       return "PLAY";
         case ActionKind::Clean:      return "CLEAN";
         case ActionKind::Medicate:   return "MED";
         case ActionKind::Discipline: return "DISC";
-        case ActionKind::Lights:     return sleeping ? "WAKE" : "SLEEP";
+        case ActionKind::Lights:     return lightsOn ? "LUCES OFF" : "LUCES ON";
         case ActionKind::Stats:      return "STATS";
     }
     return "?";
@@ -983,7 +985,7 @@ void DisplayRendererColor::drawHudBottom_() {
     // ── Dimensiones del bloque icono + label ─────────────────────────────────
     // Icono siempre renderizado en 24×24 px (escala ×1 para sprite, área fija
     // para primitivas). Label size 2: cada char es 12 px ancho, 16 px alto.
-    const char*   label     = actionLabelColor(action, stats_.isSleeping);
+    const char*   label     = actionLabelColor(action, stats_.lightsOn);
     const int16_t charW     = 12;
     const int16_t labelW    = static_cast<int16_t>(strlen(label)) * charW;
     const int16_t iconW     = 24;
@@ -1249,10 +1251,53 @@ void DisplayRendererColor::drawStatBar_(int16_t x, int16_t y,
 }
 
 // =============================================================================
+// drawLightsOffSleep_ — pantalla oscura mientras duerme con las luces
+// apagadas (descanso correcto, fiel al 97): fondo negro con solo "zZZ"
+// flotante — sin HUD, sin iconos, sin sprite. NO toca TFT_BL: el backlight
+// físico sigue encendido, lo que se apaga es el CONTENIDO (la habitación).
+// =============================================================================
+
+void DisplayRendererColor::drawLightsOffSleep_() {
+    canvas_.fillScreen(COL_BLACK);
+
+    // Bob vertical triangular (±kBobAmplitude px) impulsado por animFrame_ —
+    // mismo reloj de animación que el resto del renderer (ver render()).
+    // Color tenue (gris) para leerse sobre negro sin deslumbrar.
+    static constexpr uint32_t kBobPeriod    = 30;  // frames por ciclo completo
+    static constexpr int16_t  kBobAmplitude = 6;   // px
+
+    uint32_t phase = animFrame_ % kBobPeriod;
+    int16_t  tri   = (phase < kBobPeriod / 2)
+                    ? static_cast<int16_t>(phase)
+                    : static_cast<int16_t>(kBobPeriod - phase);
+    int16_t  bobY  = static_cast<int16_t>((tri * (2 * kBobAmplitude)) / (kBobPeriod / 2))
+                    - kBobAmplitude;
+
+    canvas_.setTextColor(COL_GRAY);
+    canvas_.setTextSize(3);
+    const int16_t textW = 3 * 18;   // "zZZ" = 3 chars × 18px (size 3: 6px base × 3)
+    const int16_t cx    = (kScreenW - textW) / 2;
+    const int16_t cy    = kScreenH / 2 - 12 + bobY;   // -12 ≈ mitad de la altura del glifo
+    canvas_.setCursor(cx, cy);
+    canvas_.print("zZZ");
+
+    canvas_.flush();
+}
+
+// =============================================================================
 // drawIdleMain_ — pantalla principal: HUD top + personaje + overlays + HUD bottom.
 // =============================================================================
 
 void DisplayRendererColor::drawIdleMain_() {
+    // Dormido con las luces apagadas (correcto): solo zZZ a oscuras. NO tocar
+    // TFT_BL — ver drawLightsOffSleep_(). isSleeping && lightsOn (molesto, el
+    // usuario dejó la luz encendida) sigue el render normal de abajo (sprite
+    // MoodColor::Sleep + badge "Z", ver computeMood_/drawOverlayBadges_).
+    if (stats_.isSleeping && !stats_.lightsOn) {
+        drawLightsOffSleep_();
+        return;
+    }
+
     // Fondo de toda la pantalla
     canvas_.fillScreen(COL_BG);
 

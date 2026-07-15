@@ -386,6 +386,14 @@ static const uint8_t* actionAnimFrame(ActionKind action, uint8_t frameIdx) {
 //   HUD inferior (y=112..127): icono 16×16 + label en una fila (drawActionHud_)
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawIdleMain_() {
+    // Dormido con las luces apagadas (correcto, fiel al 97): solo zZZ a
+    // oscuras — sin HUD, sin sprite. isSleeping && lightsOn (molesto, el
+    // usuario dejó la luz encendida) sigue el render normal de abajo.
+    if (stats_.isSleeping && !stats_.lightsOn) {
+        drawLightsOffSleep_();
+        return;
+    }
+
     u8g2_->clearBuffer();
 
     // ---- HUD top: edad arriba-izquierda ----
@@ -439,6 +447,33 @@ void DisplayRenderer::drawIdleMain_() {
 
     // ---- HUD inferior: acción activa + dots + hint ----
     drawActionHud_();
+
+    u8g2_->sendBuffer();
+}
+
+// -----------------------------------------------------------------------------
+// drawLightsOffSleep_ — pantalla oscura mientras duerme con las luces
+// apagadas (descanso correcto, fiel al 97): solo "zZZ" flotante — sin HUD,
+// sin iconos, sin sprite. NO toca ningún pin de backlight (el OLED SSD1306
+// no lo tiene; en el color sí existe TFT_BL y tampoco se toca, ver
+// DisplayRendererColor::drawLightsOffSleep_).
+// -----------------------------------------------------------------------------
+void DisplayRenderer::drawLightsOffSleep_() {
+    u8g2_->clearBuffer();
+
+    // Bob vertical triangular (±kBobAmplitude px), mismo reloj que animFrame_
+    // (avanza cada 400 ms, ver render()).
+    static constexpr uint8_t kBobPeriod    = 30;
+    static constexpr int8_t  kBobAmplitude = 4;
+    uint8_t phase = animFrame_ % kBobPeriod;
+    int8_t  tri   = (phase < kBobPeriod / 2)
+                   ? static_cast<int8_t>(phase)
+                   : static_cast<int8_t>(kBobPeriod - phase);
+    int8_t  bobY  = static_cast<int8_t>((tri * (2 * kBobAmplitude)) / (kBobPeriod / 2))
+                   - kBobAmplitude;
+
+    u8g2_->setFont(u8g2_font_9x15B_tf);
+    u8g2_->drawStr(18, 68 + bobY, "zZZ");
 
     u8g2_->sendBuffer();
 }
@@ -617,18 +652,21 @@ void DisplayRenderer::drawStatsView_() {
 }
 
 // -----------------------------------------------------------------------------
-// actionLabel — etiqueta del HUD inferior para una ActionKind. Sleep alterna
-// según isSleeping para reflejar el toggle. Stats es la entrada a StatsView.
-// Mayúsculas: contrastan con el resto de fuentes pequeñas y dan presencia.
+// actionLabel — etiqueta del HUD inferior para una ActionKind. Lights alterna
+// según lightsOn (NO isSleeping — el sueño es automático). Stats es la
+// entrada a StatsView. Mayúsculas: contrastan con el resto de fuentes
+// pequeñas y dan presencia. "LUZ" (no "LUCES"): a 6px/char con fuente
+// u8g2_font_6x10_tf, el label arranca en x=18 sobre 64px de pantalla — solo
+// caben ~7-8 chars ("LUZ OFF" = 7 chars = 42px, cabe con margen).
 // -----------------------------------------------------------------------------
-static const char* actionLabel(ActionKind action, bool sleeping) {
+static const char* actionLabel(ActionKind action, bool lightsOn) {
     switch (action) {
         case ActionKind::Feed:       return "FEED";
         case ActionKind::Play:       return "PLAY";
         case ActionKind::Clean:      return "CLEAN";
         case ActionKind::Medicate:   return "MED";
         case ActionKind::Discipline: return "DISC";
-        case ActionKind::Lights:     return sleeping ? "WAKE" : "SLEEP";
+        case ActionKind::Lights:     return lightsOn ? "LUZ OFF" : "LUZ ON";
         case ActionKind::Stats:      return "STATS";
     }
     return "?";
@@ -675,7 +713,7 @@ void DisplayRenderer::drawActionHud_() {
 
     // Label 6×10 a la derecha del icono, centrado verticalmente respecto a él.
     // Centro vertical del icono = y=120 → baseline 6×10 a y=124 deja el cap entre y=115..124.
-    const char* label = actionLabel(action, stats_.isSleeping);
+    const char* label = actionLabel(action, stats_.lightsOn);
     u8g2_->setFont(u8g2_font_6x10_tf);
     u8g2_->drawStr(18, 124, label);
 }
