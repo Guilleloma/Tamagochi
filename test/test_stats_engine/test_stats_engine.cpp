@@ -811,14 +811,16 @@ void test_apply_lights_noop_when_same_value() {
 }
 
 // =============================================================================
-// 41. test_list_available_actions_lights_always_present
-// Lights está siempre presente, dormido o despierto — a diferencia de Feed/Play
-// que se ocultan dormido.
+// 41. test_list_available_actions_lights_only_when_sleeping
+// Lights solo aparece dormido — despierto no tiene efecto visible (la
+// pantalla oscura exige isSleeping) y se ocultaría "rota" si se dejara
+// visible. Feed/Play siguen el patrón inverso: presentes despierto, ocultos
+// dormido.
 // =============================================================================
-void test_list_available_actions_lights_always_present() {
+void test_list_available_actions_lights_only_when_sleeping() {
     ActionKind out[kMaxActionMenuItems];
 
-    // Despierto: Feed y Play presentes
+    // Despierto: Feed y Play presentes, Lights ausente
     uint8_t nAwake = g_engine->listAvailableActions(out);
     bool hasFeedAwake = false, hasPlayAwake = false, hasLightsAwake = false;
     for (uint8_t i = 0; i < nAwake; ++i) {
@@ -828,9 +830,9 @@ void test_list_available_actions_lights_always_present() {
     }
     TEST_ASSERT_TRUE(hasFeedAwake);
     TEST_ASSERT_TRUE(hasPlayAwake);
-    TEST_ASSERT_TRUE(hasLightsAwake);
+    TEST_ASSERT_FALSE(hasLightsAwake);
 
-    // Dormido: Feed y Play ocultos, Lights sigue presente
+    // Dormido: Feed y Play ocultos, Lights presente
     Stats s = g_engine->stats();
     s.isSleeping = true;
     g_engine->setStats(s);
@@ -899,7 +901,7 @@ int main() {
     RUN_TEST(test_lights_off_regenerates_health_while_sleeping);
     RUN_TEST(test_apply_lights_does_not_change_is_sleeping);
     RUN_TEST(test_apply_lights_noop_when_same_value);
-    RUN_TEST(test_list_available_actions_lights_always_present);
+    RUN_TEST(test_list_available_actions_lights_only_when_sleeping);
 
     return UNITY_END();
 }
