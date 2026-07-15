@@ -40,6 +40,7 @@
 #include "DisplayRendererColor.h"
 #include "Logger.h"
 #include "MarqueeLogic.h"
+#include "config.h"          // SPRITE_ANIM_SLOWDOWN — ralentización global de sprites
 #include <string.h>
 #include <stdio.h>
 
@@ -605,7 +606,10 @@ void DisplayRendererColor::render() {
             spriteFps = activeFrames->fps;
         }
     }
-    uint32_t msPerFrame = 1000u / spriteFps;  // e.g. 8fps → 125ms, 2fps → 500ms
+    // SPRITE_ANIM_SLOWDOWN (config.h) ralentiza la animación global sin tocar
+    // los fps declarados en el manifest — único punto de ajuste en este target.
+    // Con factor 2: 8fps → 250ms/frame, 2fps (egg) → 1000ms/frame.
+    uint32_t msPerFrame = (1000u / spriteFps) * SPRITE_ANIM_SLOWDOWN;
 
     if (now - lastAnimTickMs_ >= msPerFrame) {
         lastAnimTickMs_ = now;
