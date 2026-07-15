@@ -44,6 +44,7 @@
 #include "WifiManager.h"
 #include "OTAManager.h"
 #include "WebUI.h"
+#include "ScreenPowerLogic.h" // apagado de pantalla por inactividad (ahorro de batería)
 
 // -----------------------------------------------------------------------------
 // Hardware — SSD1306 128×64 SOFTWARE I2C.
@@ -148,6 +149,31 @@ static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const L
 }
 
 // =============================================================================
+// Apagado de pantalla por inactividad (ahorro de batería) — ver
+// ScreenPowerLogic.h para la decisión pura (sin hardware). El OLED SSD1306
+// es autoiluminado (sin backlight): el efecto físico es solo
+// u8g2.setPowerSave(). screenPower.update() se llama una vez por vuelta de
+// loop() (ver loop() más abajo); sleepScreen()/wakeScreen() SOLO se invocan
+// desde ahí — nunca desde un handler de evento.
+// =============================================================================
+static ScreenPowerLogic screenPower(SCREEN_TIMEOUT_MS);
+
+// sleepScreen — apaga el panel OLED (modo power-save del SSD1306).
+static void sleepScreen() {
+    u8g2.setPowerSave(1);
+    LOG_INFO("[screen] off");
+}
+
+// wakeScreen — reactiva el panel OLED y fuerza un render inmediato para no
+// dejar ver el frame viejo (hasta RENDER_FRAME_MS de retraso si esperásemos
+// al scheduler normal).
+static void wakeScreen() {
+    u8g2.setPowerSave(0);
+    renderer.render();
+    LOG_INFO("[screen] on");
+}
+
+// =============================================================================
 // Event handlers — funciones de archivo; tienen acceso a los singletons globales.
 // Deben ejecutarse en < 2 ms para no romper el budget de 5 FPS (EventBus síncrono).
 // =============================================================================
@@ -195,6 +221,15 @@ static void executeSelectedAction_() {
 //   StatsView → cierra StatsView y vuelve al HUD principal.
 // No reacciona en DeadScreen ni en OtaProgress (UI inerte durante actualizacion).
 static void onShortClick(const Event&) {
+    // Pantalla apagada: el primer toque SOLO despierta (no mueve cursor ni
+    // ejecuta nada) — el wake real lo hace update() en la siguiente vuelta
+    // de loop().
+    if (!screenPower.isScreenOn()) {
+        screenPower.noteInteraction(millis());
+        return;
+    }
+    screenPower.noteInteraction(millis());
+
     if (lifeFSM.stage() == LifeStage::Dead) return;
     if (currentScene == Scene::OtaProgress) return;
 
@@ -220,6 +255,14 @@ static void onShortClick(const Event&) {
 //               Stats, abre StatsView en lugar de publicar evento.
 //   StatsView → no-op (long press solo tiene semantica en IdleMain).
 static void onLongPress(const Event&) {
+    // Pantalla apagada: el primer toque (aunque sea largo) SOLO despierta —
+    // mismo criterio que onShortClick, ver comentario ahí.
+    if (!screenPower.isScreenOn()) {
+        screenPower.noteInteraction(millis());
+        return;
+    }
+    screenPower.noteInteraction(millis());
+
     if (lifeFSM.stage() == LifeStage::Dead) return;
     if (currentScene == Scene::OtaProgress) return;
 
@@ -315,9 +358,18 @@ static void onOtaError(const Event& e) {
 // Handlers de acciones WebUI (hito 6)
 // Publicados por WebUI al EventBus; ejecutados síncronamente antes de que
 // WebUI envíe la respuesta HTTP. Aplican la acción y persisten.
+//
+// noteInteraction() al inicio de cada una: llegan desde WebUI (POST
+// /api/v1/*) — un comando explícito del dashboard cuenta como interacción
+// igual que el botón. NO se toca hardware aquí (solo lastInteractionMs_,
+// volatile — ver ScreenPowerLogic.h); el wake real lo aplica loop() en la
+// siguiente vuelta. A diferencia del botón, la acción SIEMPRE se ejecuta con
+// normalidad aunque la pantalla estuviera apagada — un comando HTTP
+// explícito no debe perderse.
 // =============================================================================
 
 static void onActionFeed(const Event& e) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyFeed(static_cast<uint8_t>(e.payload));
     renderer.triggerEatAnimation();
     bus.publish({EventType::StatsChanged, 0});
@@ -326,6 +378,7 @@ static void onActionFeed(const Event& e) {
 }
 
 static void onActionPlay(const Event& e) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyPlay(static_cast<uint8_t>(e.payload));
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
@@ -333,6 +386,7 @@ static void onActionPlay(const Event& e) {
 }
 
 static void onActionClean(const Event&) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyClean();
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
@@ -340,6 +394,7 @@ static void onActionClean(const Event&) {
 }
 
 static void onActionMedicate(const Event&) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyMedicate();
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
@@ -347,6 +402,7 @@ static void onActionMedicate(const Event&) {
 }
 
 static void onActionDiscipline(const Event& e) {
+    screenPower.noteInteraction(millis());
     statsEngine.applyDiscipline(static_cast<uint8_t>(e.payload));
     bus.publish({EventType::StatsChanged, 0});
     bus.publish({EventType::PersistRequested, 0});
@@ -354,6 +410,7 @@ static void onActionDiscipline(const Event& e) {
 }
 
 static void onActionLights(const Event& e) {
+    screenPower.noteInteraction(millis());
     bool on = (e.payload != 0);
     statsEngine.applyLights(on);
     bus.publish({EventType::StatsChanged, 0});
@@ -526,6 +583,9 @@ void setup() {
     lastRenderMs    = now;
     lastFpsReportMs = now;
     lastSaveMs      = now;    // evita un save espurio en el primer tick de 5 min
+    // Pantalla arranca encendida (OLED ya inicializado arriba) — sella el
+    // reloj de inactividad en el boot para no contar el arranque como idle.
+    screenPower.noteInteraction(now);
 
     LOG_INFO("Setup done (stage=%u ageMin=%u)",
              static_cast<unsigned>(lifeFSM.stage()), lifeFSM.ageMinutes());
@@ -548,6 +608,17 @@ void loop() {
     input.loop();
 
     uint32_t now = millis();
+
+    // Apagado de pantalla por inactividad (SCREEN_TIMEOUT_MS).
+    // inhibitSleep: no apagar mientras hay una actualización OTA visible en
+    // pantalla. ScreenPowerLogic decide; sleepScreen()/wakeScreen() aplican
+    // el efecto físico — SIEMPRE desde aquí, nunca desde un handler de evento.
+    bool inhibitSleep = (currentScene == Scene::OtaProgress);
+    switch (screenPower.update(now, inhibitSleep)) {
+        case ScreenPowerLogic::Action::Sleep: sleepScreen(); break;
+        case ScreenPowerLogic::Action::Wake:  wakeScreen();  break;
+        default: break;
+    }
 
     // Decay a 1 Hz (STATS_TICK_MS = 1000 ms normal, 16 ms en TURBO_MODE).
     //
@@ -586,7 +657,9 @@ void loop() {
     }
 
     // Render a 5 FPS (RENDER_FRAME_MS = 200 ms).
-    if (now - lastRenderMs >= RENDER_FRAME_MS) {
+    // screenPower.isScreenOn(): con la pantalla apagada, saltar el render por
+    // completo — el juego (decay/energía/LifeFSM, arriba) sigue corriendo.
+    if (screenPower.isScreenOn() && now - lastRenderMs >= RENDER_FRAME_MS) {
         renderer.render();
         framesRendered++;
         lastRenderMs = now;
