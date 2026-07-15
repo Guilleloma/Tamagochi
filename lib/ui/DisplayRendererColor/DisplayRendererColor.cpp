@@ -1252,34 +1252,81 @@ void DisplayRendererColor::drawStatBar_(int16_t x, int16_t y,
 
 // =============================================================================
 // drawLightsOffSleep_ — pantalla oscura mientras duerme con las luces
-// apagadas (descanso correcto, fiel al 97): fondo negro con solo "zZZ"
-// flotante — sin HUD, sin iconos, sin sprite. NO toca TFT_BL: el backlight
-// físico sigue encendido, lo que se apaga es el CONTENIDO (la habitación).
+// apagadas (descanso correcto, fiel al 97): fondo negro con un rastro de 3
+// "z" flotantes ascendiendo en diagonal (arriba-derecha) desde la zona
+// donde estaría la cabeza del personaje — animación clásica de "Zzz" en
+// bucle continuo, sin iconos de estado ni sprite. El HUD inferior SÍ se
+// mantiene (drawHudBottom_) para que el usuario pueda ver y alcanzar la
+// acción "LUCES ON" y reencenderlas — si no, quedaría sin forma de
+// despertar la pantalla. NO toca TFT_BL: el backlight físico sigue
+// encendido, lo que se apaga es el CONTENIDO (la habitación).
+//
+// Cada glifo i (0,1,2) recorre su propio ciclo de kZPeriod frames, escalonado
+// kZStagger frames respecto al anterior (kZPeriod/kZCount) para que siempre
+// haya un rastro "z Z Z" visible. Dentro de su ciclo (local_i = 0..kZPeriod-1,
+// equivalente a una fase 0..1 normalizada):
+//   - Asciende: yOff va de 0 a -kRiseAmplitude px (linear, por tramo entero).
+//   - Deriva a la derecha: xOff va de 0 a +kDriftAmplitude px.
+//   - Crece: setTextSize 1 -> 2 -> 3 por tercios del periodo ('z' minúscula
+//     al nacer, 'Z' mayúscula al crecer — el efecto "z Z Z" del rastro).
+//   - Se desvanece: color por quintos del periodo, de brillante a oscuro
+//     (COL_WHITE -> COL_CYAN -> COL_GRAY -> COL_DARKGRAY); el último quinto
+//     no se dibuja (ya "desapareció") dejando un hueco limpio antes de
+//     reaparecer en local_i=0 — bucle sin saltos visibles.
 // =============================================================================
 
 void DisplayRendererColor::drawLightsOffSleep_() {
     canvas_.fillScreen(COL_BLACK);
 
-    // Bob vertical triangular (±kBobAmplitude px) impulsado por animFrame_ —
-    // mismo reloj de animación que el resto del renderer (ver render()).
-    // Color tenue (gris) para leerse sobre negro sin deslumbrar.
-    static constexpr uint32_t kBobPeriod    = 30;  // frames por ciclo completo
-    static constexpr int16_t  kBobAmplitude = 6;   // px
+    static constexpr uint8_t  kZCount         = 3;
+    static constexpr uint32_t kZPeriod        = 30;               // frames/ciclo (~3.75s a 8fps)
+    static constexpr uint32_t kZStagger       = kZPeriod / kZCount;  // 10 frames entre glifos
+    static constexpr int16_t  kRiseAmplitude  = 70;  // px que asciende en todo el ciclo
+    static constexpr int16_t  kDriftAmplitude = 30;  // px que deriva a la derecha
+    static constexpr int16_t  kOriginX        = kScreenW / 2 - 10;  // ~zona de la "cabeza"
+    static constexpr int16_t  kOriginY        = 110;
 
-    uint32_t phase = animFrame_ % kBobPeriod;
-    int16_t  tri   = (phase < kBobPeriod / 2)
-                    ? static_cast<int16_t>(phase)
-                    : static_cast<int16_t>(kBobPeriod - phase);
-    int16_t  bobY  = static_cast<int16_t>((tri * (2 * kBobAmplitude)) / (kBobPeriod / 2))
-                    - kBobAmplitude;
+    for (uint8_t i = 0; i < kZCount; i++) {
+        uint32_t local = (animFrame_ + static_cast<uint32_t>(i) * kZStagger) % kZPeriod;
 
-    canvas_.setTextColor(COL_GRAY);
-    canvas_.setTextSize(3);
-    const int16_t textW = 3 * 18;   // "zZZ" = 3 chars × 18px (size 3: 6px base × 3)
-    const int16_t cx    = (kScreenW - textW) / 2;
-    const int16_t cy    = kScreenH / 2 - 12 + bobY;   // -12 ≈ mitad de la altura del glifo
-    canvas_.setCursor(cx, cy);
-    canvas_.print("zZZ");
+        // Último quinto del ciclo: ya se desvaneció del todo — no dibujar.
+        if (local >= (kZPeriod * 4) / 5) continue;
+
+        // Tamaño + glifo por tercios del periodo.
+        uint8_t     size;
+        const char* glyph;
+        if (local < kZPeriod / 3) {
+            size = 1; glyph = "z";
+        } else if (local < (kZPeriod * 2) / 3) {
+            size = 2; glyph = "Z";
+        } else {
+            size = 3; glyph = "Z";
+        }
+
+        // Color (desvanecido) por quintos del periodo.
+        uint16_t color;
+        if      (local < kZPeriod / 5)        color = COL_WHITE;
+        else if (local < (kZPeriod * 2) / 5)  color = COL_CYAN;
+        else if (local < (kZPeriod * 3) / 5)  color = COL_GRAY;
+        else                                   color = COL_DARKGRAY;
+
+        int16_t yOff = -static_cast<int16_t>((local * kRiseAmplitude) / kZPeriod);
+        int16_t xOff =  static_cast<int16_t>((local * kDriftAmplitude) / kZPeriod);
+
+        canvas_.setTextColor(color);
+        canvas_.setTextSize(size);
+        canvas_.setCursor(kOriginX + xOff, kOriginY + yOff);
+        canvas_.print(glyph);
+    }
+
+    // HUD inferior visible/operable — permite ver y seleccionar "LUCES ON"
+    // para reencender sin quedar atrapado en la pantalla a oscuras.
+    drawHudBottom_();
+
+    // WiFi + batería (esquinas superiores) — info de SISTEMA, se mantiene
+    // visible igual que el HUD inferior. Sus propios guards ya ocultan la
+    // batería si no es válida, parpadean el WiFi en Connecting, etc.
+    drawHudTop_();
 
     canvas_.flush();
 }

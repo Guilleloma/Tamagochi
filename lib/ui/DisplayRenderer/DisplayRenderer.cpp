@@ -453,27 +453,58 @@ void DisplayRenderer::drawIdleMain_() {
 
 // -----------------------------------------------------------------------------
 // drawLightsOffSleep_ — pantalla oscura mientras duerme con las luces
-// apagadas (descanso correcto, fiel al 97): solo "zZZ" flotante — sin HUD,
-// sin iconos, sin sprite. NO toca ningún pin de backlight (el OLED SSD1306
-// no lo tiene; en el color sí existe TFT_BL y tampoco se toca, ver
+// apagadas (descanso correcto, fiel al 97): rastro de 3 "z" de tamaño
+// creciente ascendiendo en diagonal (arriba-derecha) desde la zona donde
+// estaría la cabeza del personaje — sin iconos de estado ni sprite. El
+// panel es 1-bit (SSD1306, sin escala de grises): en vez del fundido de
+// color del renderer color, cada "z" (posición y fuente fijas) aparece y
+// desaparece por VISIBILIDAD escalonada dentro de su ventana del ciclo —
+// la pequeña nace, luego la mediana, luego la grande, con hueco breve antes
+// de reiniciar — mismo efecto de "rastro ascendente" adaptado a 1-bit.
+// El HUD inferior (drawActionHud_) SÍ se mantiene para que el usuario pueda
+// ver y alcanzar la acción "LUZ ON" y reencenderlas — si no, quedaría sin
+// forma de despertar la pantalla. NO toca ningún pin de backlight (el OLED
+// SSD1306 no lo tiene; en el color sí existe TFT_BL y tampoco se toca, ver
 // DisplayRendererColor::drawLightsOffSleep_).
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawLightsOffSleep_() {
     u8g2_->clearBuffer();
 
-    // Bob vertical triangular (±kBobAmplitude px), mismo reloj que animFrame_
-    // (avanza cada 400 ms, ver render()).
-    static constexpr uint8_t kBobPeriod    = 30;
-    static constexpr int8_t  kBobAmplitude = 4;
-    uint8_t phase = animFrame_ % kBobPeriod;
-    int8_t  tri   = (phase < kBobPeriod / 2)
-                   ? static_cast<int8_t>(phase)
-                   : static_cast<int8_t>(kBobPeriod - phase);
-    int8_t  bobY  = static_cast<int8_t>((tri * (2 * kBobAmplitude)) / (kBobPeriod / 2))
-                   - kBobAmplitude;
+    struct ZSlot {
+        const uint8_t* font;
+        const char*    glyph;
+        uint8_t        x;
+        uint8_t        y;   // baseline
+    };
+    // Posiciones fijas: pequeña cerca de la "cabeza", mediana y grande
+    // subiendo en diagonal hacia arriba-derecha (mismo sentido que el color).
+    static const ZSlot kSlots[3] = {
+        { u8g2_font_6x10_tf,  "z", 24, 58 },
+        { u8g2_font_7x14B_tf, "Z", 32, 44 },
+        { u8g2_font_10x20_tf, "Z", 38, 26 },
+    };
+    static constexpr uint8_t kSlotCount   = 3;
+    static constexpr uint8_t kPeriod      = 24;                    // frames/ciclo
+    static constexpr uint8_t kStagger     = kPeriod / kSlotCount;  // 8 frames entre slots
+    static constexpr uint8_t kVisibleSpan = 14;                    // frames visible por slot
 
-    u8g2_->setFont(u8g2_font_9x15B_tf);
-    u8g2_->drawStr(18, 68 + bobY, "zZZ");
+    for (uint8_t i = 0; i < kSlotCount; i++) {
+        uint8_t local = static_cast<uint8_t>((animFrame_ + i * kStagger) % kPeriod);
+        if (local >= kVisibleSpan) continue;   // fuera de ventana -> invisible este frame
+
+        u8g2_->setFont(kSlots[i].font);
+        u8g2_->drawStr(kSlots[i].x, kSlots[i].y, kSlots[i].glyph);
+    }
+
+    // HUD inferior visible/operable — permite ver y seleccionar "LUZ ON"
+    // para reencender sin quedar atrapado en la pantalla a oscuras.
+    // drawActionHud_() no llama a sendBuffer() por su cuenta (mismo patrón
+    // que drawIdleMain_).
+    drawActionHud_();
+
+    // WiFi (esquina superior derecha) — info de SISTEMA, se mantiene visible
+    // igual que el HUD inferior (el ESP8266 no tiene icono de batería).
+    drawWifiIcon_();
 
     u8g2_->sendBuffer();
 }
