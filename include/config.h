@@ -73,6 +73,20 @@
 // 400 ms da una animación suave visible sin ser frenética.
 #define ANIM_FRAME_MS    400
 
+// =============================================================================
+// Ralentización global de animación de sprites
+// =============================================================================
+// Feedback de usuario: los sprites se perciben "demasiado rápido" a los fps
+// declarados en el manifest (8 fps personaje, 2 fps egg) y en ANIM_FRAME_MS
+// (mono). En vez de tocar fps por sprite/manifest (muchos puntos, difícil de
+// afinar), este factor multiplica la CADENCIA de avance de animFrame_/
+// animTickCount_ en ambos renderers (color ESP32-S3 y mono ESP8266) — un
+// único sitio para ajustar la sensación global, iterativo por diseño.
+// 1 = velocidad original del manifest/ANIM_FRAME_MS. 2 = mitad de velocidad
+// (valor inicial elegido tras el reporte de usuario). Sube/baja este entero
+// para volver a tunear sin tocar lógica de renderer.
+#define SPRITE_ANIM_SLOWDOWN 2
+
 // Log de FPS medido cada 5 segundos por monitor serie.
 #define FPS_REPORT_MS    5000
 

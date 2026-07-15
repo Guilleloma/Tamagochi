@@ -13,6 +13,17 @@ static void drawXBMx4(U8G2* u8g2, int x, int y, int w, int h, const uint8_t* bit
 static uint8_t actionAnimFrameCount(ActionKind action);
 static const uint8_t* actionAnimFrame(ActionKind action, uint8_t frameIdx);
 
+// kAnimTicksPerFrame — nº de render() (cada uno RENDER_FRAME_MS) que deben
+// pasar antes de avanzar animFrame_. Se deriva de ANIM_FRAME_MS (config.h,
+// cadencia "nativa" del sprite) multiplicado por SPRITE_ANIM_SLOWDOWN
+// (config.h, ralentización global — mismo factor que usa el renderer color
+// del ESP32-S3, para mantener paridad de sensación entre plataformas).
+// Con los valores actuales: (400 * 2) / 200 = 4 renders → 800 ms/frame.
+static constexpr uint32_t kAnimTicksPerFrame =
+    (ANIM_FRAME_MS * SPRITE_ANIM_SLOWDOWN) / RENDER_FRAME_MS;
+static_assert(kAnimTicksPerFrame >= 1,
+              "SPRITE_ANIM_SLOWDOWN/ANIM_FRAME_MS demasiado bajos para RENDER_FRAME_MS");
+
 // =============================================================================
 // Sprites WiFi — bitmaps XBM 8×6 (6 bytes en formato LSB-first por fila).
 //
@@ -254,7 +265,7 @@ void DisplayRenderer::render() {
     // el huevo rompiéndose unos segundos antes de revelar el bebé.
     if (hatchAnimRemainingMs_ > 0) {
         animTickCount_++;
-        if (animTickCount_ >= 2) {
+        if (animTickCount_ >= kAnimTicksPerFrame) {
             animTickCount_ = 0;
             animFrame_ = (animFrame_ + 1) % 2;
         }
@@ -279,9 +290,10 @@ void DisplayRenderer::render() {
         // Tick visible: cae al render normal (drawIdleMain_) tras este bloque.
     }
 
-    // Avanza frame de animación cada 2 ticks (400 ms).
+    // Avanza frame de animación cada kAnimTicksPerFrame ticks (800 ms con
+    // SPRITE_ANIM_SLOWDOWN=2 — ver definición de la constante más arriba).
     animTickCount_++;
-    if (animTickCount_ >= 2) {
+    if (animTickCount_ >= kAnimTicksPerFrame) {
         animTickCount_ = 0;
         animFrame_++;
         // animFrame_ se mantiene sin módulo fijo aquí; drawIdleMain_ lo indexa
@@ -558,7 +570,9 @@ void DisplayRenderer::drawOverlays_() {
 //   Disabled     → no se pinta nada.
 //   Connected    → kSpriteWifiOn fijo.
 //   Disconnected → kSpriteWifiOff fijo.
-//   Connecting   → kSpriteWifiOff con blink ~400 ms (animFrame_ par = visible).
+//   Connecting   → kSpriteWifiOff con blink (animFrame_ par = visible).
+//                  Periodo = 2 × kAnimTicksPerFrame × RENDER_FRAME_MS ms;
+//                  escala con SPRITE_ANIM_SLOWDOWN (config.h).
 // -----------------------------------------------------------------------------
 void DisplayRenderer::drawWifiIcon_() {
     if (wifiState_ == WifiState::Disabled) return;
