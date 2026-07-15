@@ -107,8 +107,8 @@ static const char* loadResultName(LoadResult lr) {
     return "Unknown";
 }
 
-// Aplica un PersistedState v2 recién cargado al StatsEngine vivo.
-// Lee todos los campos v2: discipline, weight, poopCount, flags, attentionScore.
+// Aplica un PersistedState v3 recién cargado al StatsEngine vivo.
+// Lee todos los campos v2/v3: discipline, weight, poopCount, flags, attentionScore, energy.
 static void applyToStatsEngine(const PersistedState& s, StatsEngine& engine) {
     Stats stats;
     stats.hunger         = s.hunger;
@@ -119,12 +119,14 @@ static void applyToStatsEngine(const PersistedState& s, StatsEngine& engine) {
     stats.poopCount      = s.poopCount;
     stats.isSick         = (s.flags & 0x01) != 0;
     stats.isSleeping     = (s.flags & 0x02) != 0;
+    stats.lightsOn       = (s.flags & 0x04) != 0;
     stats.attentionScore = s.attentionScore;
+    stats.energy         = s.energy;
     engine.setStats(stats);
 }
 
 // Copia el estado vivo de StatsEngine + LifeFSM a un PersistedState listo para serializar.
-// Incluye todos los campos v2: lifeStage, deathSustainMs, attentionScore, adultType.
+// Incluye todos los campos v2/v3: lifeStage, deathSustainMs, attentionScore, adultType, energy.
 static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const LifeFSM& fsm) {
     Persistence::fillDefaults(s);           // magic, version, ceros — base limpia
     const Stats& st = engine.stats();
@@ -136,8 +138,9 @@ static void fillFromEngine(PersistedState& s, const StatsEngine& engine, const L
     s.discipline         = st.discipline;
     s.weight             = st.weight;
     s.poopCount          = st.poopCount;
-    s.flags              = (st.isSick ? 0x01 : 0) | (st.isSleeping ? 0x02 : 0);
+    s.flags              = (st.isSick ? 0x01 : 0) | (st.isSleeping ? 0x02 : 0) | (st.lightsOn ? 0x04 : 0);
     s.attentionScore     = st.attentionScore;
+    s.energy             = st.energy;
     s.deathSustainMs     = fsm.deathSustainMs();
     s.lastDeathCauseCode = fsm.lastDeathCause();
     s.adultType          = static_cast<uint8_t>(fsm.adultType());

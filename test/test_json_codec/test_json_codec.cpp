@@ -31,6 +31,8 @@ static Stats makeDefaultStats() {
     s.isSick        = false;
     s.isSleeping    = false;
     s.attentionScore = 420;
+    s.energy        = 73;
+    s.lightsOn      = true;
     return s;
 }
 
@@ -96,15 +98,22 @@ void test_serialize_state_camel_case_fields() {
     TEST_ASSERT_FALSE(data["deathCount"].isNull());
     TEST_ASSERT_FALSE(data["isSick"].isNull());
     TEST_ASSERT_FALSE(data["isSleeping"].isNull());
+    TEST_ASSERT_FALSE(data["energy"].isNull());
+    TEST_ASSERT_FALSE(data["lightsOn"].isNull());
     TEST_ASSERT_FALSE(data["lifeStage"].isNull());
     TEST_ASSERT_FALSE(data["batteryPercent"].isNull());
     TEST_ASSERT_FALSE(data["batteryCharging"].isNull());
     TEST_ASSERT_FALSE(data["batteryValid"].isNull());
 
+    // energy/lightsOn con los valores esperados de makeDefaultStats()
+    TEST_ASSERT_EQUAL_UINT8(73, data["energy"].as<uint8_t>());
+    TEST_ASSERT_TRUE(data["lightsOn"].as<bool>());
+
     // Asegurarse que NO hay snake_case
     TEST_ASSERT_TRUE(data["age_minutes"].isNull());
     TEST_ASSERT_TRUE(data["poop_count"].isNull());
     TEST_ASSERT_TRUE(data["battery_percent"].isNull());
+    TEST_ASSERT_TRUE(data["lights_on"].isNull());
 }
 
 // =============================================================================
@@ -139,6 +148,8 @@ void test_serialize_state_below_buffer_limit() {
     s.isSick         = true;
     s.isSleeping     = true;
     s.attentionScore = 1000;
+    s.energy         = 100;
+    s.lightsOn       = true;
 
     size_t written = JsonCodec::serializeState(
         s, LifeStage::Old, 99999u, 9999u, true, 0xFFFFFFFFu, makeValidBattery(), g_buf, sizeof(g_buf));

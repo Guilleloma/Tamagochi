@@ -32,6 +32,10 @@ namespace JsonCodec {
 // Formato: { "data": {...}, "meta": { "apiVersion": "v1", "timestamp": <uptimeMs> } }
 // Campos de batería siempre presentes en data: batteryPercent, batteryCharging,
 // batteryValid (batteryPercent/batteryCharging valen 0/false si !battery.valid).
+// data.energy (0-100) y data.lightsOn (bool) — sueño automático/luces (ver
+// StatsEngine): energy gobierna isSleeping en tick(), lightsOn es el único
+// control manual (POST /api/v1/lights). isSleeping sigue presente pero es
+// solo-lectura: ya no es controlable por el cliente.
 size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                       uint16_t deathCount, bool turbo, uint32_t uptimeMs,
                       const BatterySnapshot& battery,
