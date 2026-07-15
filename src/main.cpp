@@ -167,9 +167,15 @@ static void sleepScreen() {
 // wakeScreen — reactiva el panel OLED y fuerza un render inmediato para no
 // dejar ver el frame viejo (hasta RENDER_FRAME_MS de retraso si esperásemos
 // al scheduler normal).
+// lastRenderMs = millis() tras ese render forzado — mismo patrón que el
+// primer frame en setup() (render() seguido de lastRenderMs = now). Sin
+// esto, lastRenderMs queda obsoleto (~SCREEN_TIMEOUT_MS) y el bloque de
+// render programado del loop (más abajo) repite el MISMO frame por I2C en
+// la misma vuelta, justo después de este render forzado.
 static void wakeScreen() {
     u8g2.setPowerSave(0);
     renderer.render();
+    lastRenderMs = millis();
     LOG_INFO("[screen] on");
 }
 
@@ -329,8 +335,20 @@ static void onWifiStateChanged(const Event& e) {
 }
 
 // OtaStarted: cambiar a pantalla de progreso OTA.
+//
+// noteInteraction() aquí es imprescindible, no cosmético: inhibitSleep=true
+// (ver loop()) SOLO impide apagar una pantalla que ya está encendida — NO
+// enciende una que ya estaba dormida. Sin este noteInteraction(), un OTA
+// lanzado por red tras >SCREEN_TIMEOUT_MS de inactividad dejaría la barra de
+// progreso invisible (update() seguiría devolviendo None indefinidamente y
+// el render seguiría saltado). onOtaStarted corre en loopTask (invocado
+// síncronamente por ArduinoOTA.onStart() dentro de ota.loop(), al principio
+// de este mismo loop() — ver OTAManager::onStart_), así que el
+// screenPower.update() de esta misma vuelta ya ve currentScene==OtaProgress
+// e idle≈0 y hace el Wake ANTES del bloque de render de esta vuelta.
 static void onOtaStarted(const Event&) {
     LOG_INFO("[ota] update started — switching to OtaProgress scene");
+    screenPower.noteInteraction(millis());
     renderer.setScene(Scene::OtaProgress);
     currentScene = Scene::OtaProgress;
     renderer.setOtaProgress(0);
