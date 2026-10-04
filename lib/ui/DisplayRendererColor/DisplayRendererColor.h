@@ -36,20 +36,8 @@
 #include "WifiState.h"      // WifiState enum — header propio sin deps de plataforma.
                             // WifiManager.h incluye este mismo header en esp12e.
 #include "SpriteStore.h"    // ColorSpriteFrames
-
-// =============================================================================
-// MoodColor — estado emocional visible. Misma semántica que en el renderer mono.
-// =============================================================================
-enum class MoodColor : uint8_t {
-    Idle  = 0,
-    Happy = 1,
-    Sad   = 2,
-    Eat   = 3,
-    Sleep = 4   // overlay de dormido — precede a todos los moods
-};
-
-// Número de moods posibles (tamaño del eje mood en StageSprites).
-static constexpr uint8_t kMoodCount = 5;
+#include "MoodLogic.h"      // MoodColor, kMoodCount y cadena de fallback de moods
+                            // (lógica pura, testeada en env:native)
 
 // =============================================================================
 // SceneColor — escena activa en el display color.
@@ -73,8 +61,9 @@ struct SpriteMapping {
 // =============================================================================
 // StageSprites — buffers PSRAM de todas las animaciones de una etapa de vida.
 //
-// Indexados por MoodColor: frames[Idle]=0, Happy=1, Sad=2, Eat=3, Sleep=4.
-// Los moods sin animación propia dejan count=0; framesForMood_() cae a idle.
+// Indexados por MoodColor: frames[Idle]=0, Happy=1, Sad=2, Eat=3, Sleep=4,
+// Jump=5. Los moods sin animación propia dejan count=0; framesForMood_() cae
+// a idle.
 // =============================================================================
 struct StageSprites {
     ColorSpriteFrames frames[kMoodCount];  // one per MoodColor value
