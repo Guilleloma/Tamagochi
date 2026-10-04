@@ -40,7 +40,10 @@
             "happy/0.bin",
             "happy/1.bin",
             "happy/2.bin",
-            "happy/3.bin"
+            "happy/3.bin",
+            "happy/4.bin",
+            "happy/5.bin",
+            "happy/6.bin"
           ]
         },
         "sad": {
@@ -49,7 +52,9 @@
             "sad/0.bin",
             "sad/1.bin",
             "sad/2.bin",
-            "sad/3.bin"
+            "sad/3.bin",
+            "sad/4.bin",
+            "sad/5.bin"
           ]
         },
         "eat": {
@@ -59,7 +64,8 @@
             "eat/1.bin",
             "eat/2.bin",
             "eat/3.bin",
-            "eat/4.bin"
+            "eat/4.bin",
+            "eat/5.bin"
           ]
         },
         "sleep": {
@@ -68,7 +74,9 @@
             "sleep/0.bin",
             "sleep/1.bin",
             "sleep/2.bin",
-            "sleep/3.bin"
+            "sleep/3.bin",
+            "sleep/4.bin",
+            "sleep/5.bin"
           ]
         },
         "jump": {
