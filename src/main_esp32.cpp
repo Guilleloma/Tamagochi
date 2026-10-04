@@ -22,6 +22,9 @@
 //   - WebUI REST API /api/v1/* → activa al conectar WiFi
 //   - mDNS tamagotchi.local → activa al conectar WiFi (sin MDNS.update())
 //   - Offline con WIFI_SSID vacío → icono WiFi Disabled, juego normal
+//   - Stats en 2 páginas (click corto avanza): STATS 1/2 → RED 2/2 (estado
+//     WiFi, SSID, IP, <host>.local, RSSI) → IdleMain. La IP también sale por
+//     serie al conectar ("[wifi] Conectado a ...", WifiManager).
 //
 // COMPILAR:  pio run -e esp32s3
 // FLASHEAR:  pio run -e esp32s3 -t upload
@@ -143,6 +146,7 @@ static uint32_t lastSaveMs      = 0;
 static uint32_t lastFpsReportMs = 0;
 static uint32_t framesRendered  = 0;
 static uint32_t lastNetSupervisorMs = 0;
+static uint32_t lastNetInfoRefreshMs = 0;   // página de red (NetworkView), ver loop()
 
 // =============================================================================
 // Helpers de persistencia
@@ -301,9 +305,20 @@ static void dismissMessage_() {
     LOG_INFO("Message: descartado por boton -> scene=%u", static_cast<unsigned>(currentScene));
 }
 
+// refreshNetworkInfo_ — vuelca la instantánea de red de WifiManager (capa
+// infra, la única que lee WiFi.*) al renderer, que la formatea con
+// NetInfoLogic para la página de red de Stats. Barato (unos µs, sin I/O de
+// red): se llama en cada WifiStateChanged, al entrar en NetworkView y cada
+// NET_INFO_REFRESH_MS mientras está visible (ver loop()). Solo loopTask.
+static void refreshNetworkInfo_() {
+    if (renderer) renderer->setWifiInfo(wifi.info());
+    lastNetInfoRefreshMs = millis();
+}
+
 // Botón corto:
 //   IdleMain     → refresca preconditions y avanza cursor del HUD.
-//   StatsView    → cierra StatsView y vuelve a IdleMain.
+//   StatsView    → pasa a la página 2/2 de Stats (NetworkView, red).
+//   NetworkView  → cierra Stats y vuelve a IdleMain.
 //   MessageView  → descarta el mensaje del padre y restaura la escena previa.
 //   DeadScreen / otros → ignorar.
 static void onShortClick(const Event&) {
@@ -326,9 +341,17 @@ static void onShortClick(const Event&) {
             renderer->moveCursor();
             break;
         case SceneColor::StatsView:
+            // Refresco inmediato: al entrar se ve el estado de red actual,
+            // no el de hace NET_INFO_REFRESH_MS.
+            refreshNetworkInfo_();
+            currentScene = SceneColor::NetworkView;
+            renderer->setScene(currentScene);
+            LOG_INFO("Scene -> NetworkView (from StatsView)");
+            break;
+        case SceneColor::NetworkView:
             currentScene = SceneColor::IdleMain;
             renderer->setScene(currentScene);
-            LOG_INFO("Scene -> IdleMain (from StatsView)");
+            LOG_INFO("Scene -> IdleMain (from NetworkView)");
             break;
         case SceneColor::MessageView:
             dismissMessage_();
@@ -341,7 +364,7 @@ static void onShortClick(const Event&) {
 // Botón largo:
 //   MessageView → descarta el mensaje del padre (mismo criterio que el click corto).
 //   IdleMain    → ejecuta la acción activa del HUD. Si es Stats, abre StatsView.
-//   StatsView   → no-op (long press solo tiene semántica en IdleMain).
+//   StatsView / NetworkView → no-op (long press solo tiene semántica en IdleMain).
 static void onLongPress(const Event&) {
     // Pantalla apagada: el primer toque (aunque sea largo) SOLO despierta —
     // mismo criterio que onShortClick, ver comentario ahí.
@@ -396,8 +419,9 @@ static void onWifiStateChanged(const Event& e) {
     WifiState ws = static_cast<WifiState>(e.payload & 0xFF);
     LOG_INFO("[wifi] state -> %u", static_cast<unsigned>(ws));
 
-    // Siempre sincronizar el icono WiFi en el renderer.
+    // Siempre sincronizar el icono WiFi y la página de red del renderer.
     if (renderer) renderer->setWifiState(ws);
+    refreshNetworkInfo_();
 
     if (ws == WifiState::Connected) {
         // Activar OTA — requiere WiFi con IP asignada. ArduinoOTA.begin() en
@@ -894,6 +918,11 @@ void setup() {
     // begin() devuelve en < 5 ms. Si WIFI_SSID está vacío en secrets.h, marca
     // Disabled y no hace nada más. El juego sigue funcionando offline.
     wifi.begin();
+    // begin() deja Connecting (o Disabled con SSID vacío) SIN publicar
+    // WifiStateChanged — sincronizar a mano icono y página de red para que no
+    // muestren "Disabled" hasta la primera transición (Connected o timeout).
+    renderer->setWifiState(wifi.state());
+    refreshNetworkInfo_();
 
     // ── Medidor de batería — independiente de WiFi, funciona offline ─────────
     battery.begin();
@@ -923,6 +952,7 @@ void setup() {
     lastSaveMs      = now;   // evita un save espurio en el primer tick de autosave
     lastFpsReportMs = now;
     lastNetSupervisorMs = now;
+    lastNetInfoRefreshMs = now;
     // Pantalla arranca encendida (backlight ya en HIGH, ver arriba) — sella
     // el reloj de inactividad en el boot para no contar el tiempo de arranque
     // (splash, LittleFS, sprites...) como idle.
@@ -971,6 +1001,7 @@ void loop() {
         const bool canShow = (lifeFSM.stage() != LifeStage::Dead)
                            && (currentScene == SceneColor::IdleMain
                                || currentScene == SceneColor::StatsView
+                               || currentScene == SceneColor::NetworkView
                                || currentScene == SceneColor::MessageView);
 
         if (canShow) {
@@ -1012,6 +1043,15 @@ void loop() {
     }
 
     uint32_t now = millis();
+
+    // ── Página de red visible: refrescar RSSI/IP cada NET_INFO_REFRESH_MS ────
+    // Los cambios de estado ya llegan al instante por onWifiStateChanged; esto
+    // solo mueve las barras de señal. Antes del wake de pantalla para que el
+    // primer frame tras despertar no muestre datos viejos.
+    if (currentScene == SceneColor::NetworkView
+            && now - lastNetInfoRefreshMs >= NET_INFO_REFRESH_MS) {
+        refreshNetworkInfo_();
+    }
 
     // ── Apagado de pantalla por inactividad (SCREEN_TIMEOUT_MS) ──────────────
     // inhibitSleep: no apagar mientras hay una actualización OTA visible en

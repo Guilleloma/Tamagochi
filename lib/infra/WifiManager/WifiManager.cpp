@@ -211,6 +211,41 @@ int8_t WifiManager::rssi() const {
 }
 
 // -----------------------------------------------------------------------------
+// info — instantánea para la UI. Único punto que traduce WiFi.* a WifiInfo
+// (el renderer nunca toca WiFi.*). SSID/hostname son los literales de
+// secrets.h; WIFI_PASSWORD no se lee aquí (rules/security.md).
+// -----------------------------------------------------------------------------
+WifiInfo WifiManager::info() const {
+    WifiInfo out;
+    out.state          = state_;
+    out.ssidConfigured = (WIFI_SSID[0] != '\0');
+    out.ssid           = WIFI_SSID;
+    out.hostname       = OTA_HOSTNAME;
+
+    if (state_ == WifiState::Connected) {
+        const IPAddress ip = WiFi.localIP();
+        for (uint8_t i = 0; i < 4; ++i) out.ip[i] = ip[i];
+        out.rssiDbm = rssi();
+    }
+    return out;
+}
+
+// -----------------------------------------------------------------------------
+// logConnected_ — una línea por serie en cada transición A Connected, con lo
+// necesario para flashear por OTA sin depender de mDNS (p.ej.
+// `upload_port = <IP>` si <host>.local no resuelve). Se imprime SSID, IP y
+// hostname — nunca contraseñas (rules/security.md).
+// -----------------------------------------------------------------------------
+void WifiManager::logConnected_() const {
+    const IPAddress ip = WiFi.localIP();
+    LOG_INFO("[wifi] Conectado a '%s' IP=%u.%u.%u.%u host=%s.local",
+             WIFI_SSID,
+             static_cast<unsigned>(ip[0]), static_cast<unsigned>(ip[1]),
+             static_cast<unsigned>(ip[2]), static_cast<unsigned>(ip[3]),
+             OTA_HOSTNAME);
+}
+
+// -----------------------------------------------------------------------------
 // publishState_ — actualiza state_ y publica el evento WifiStateChanged.
 // El payload lleva el nuevo estado en los 8 bits bajos (mismo patrón que
 // LifeStateChanged en Fase 2).
@@ -227,6 +262,9 @@ void WifiManager::publishState_(WifiState newState) {
     if (newState == WifiState::Connected) {
         hasEverConnected_ = true;
         lastConnectedMs_  = millis();
+        // Mismo punto único de transición: exactamente una línea por conexión
+        // (boot o reconexión), venga del evento GOT_IP o del polling.
+        logConnected_();
     }
 
     // Sellar/limpiar el sello de "tiempo caído" en el MISMO punto único de

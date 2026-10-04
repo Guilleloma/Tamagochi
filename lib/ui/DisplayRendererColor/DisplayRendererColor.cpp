@@ -384,6 +384,22 @@ void DisplayRendererColor::setAgeMinutes(uint32_t mins)       { ageMinutes_ = mi
 void DisplayRendererColor::setDeathCount(uint16_t count)      { deathCount_ = count; }
 void DisplayRendererColor::setWifiState(WifiState state)      { wifiState_ = state; }
 
+// setWifiInfo: todo el formateo de la página de red ocurre aquí, una vez por
+// actualización (NetInfoLogic, puro y testeado) — drawNetworkView_() solo
+// imprime los buffers. Con SSID no configurado se pinta el placeholder "-".
+void DisplayRendererColor::setWifiInfo(const WifiInfo& info) {
+    netStatus_ = NetInfoLogic::statusFor(info.state, info.ssidConfigured);
+
+    NetInfoLogic::formatSsid(info.ssidConfigured ? info.ssid : "",
+                             kNetValueChars, netSsidText_, sizeof(netSsidText_));
+    NetInfoLogic::formatHost(info.hostname,
+                             kNetValueChars, netHostText_, sizeof(netHostText_));
+    NetInfoLogic::formatIp(info.ip, netIpText_, sizeof(netIpText_));
+    netIpAssigned_ = NetInfoLogic::isIpAssigned(info.ip);
+    NetInfoLogic::formatRssi(info.rssiDbm, netRssiText_, sizeof(netRssiText_));
+    netRssiBars_ = NetInfoLogic::rssiToBars(info.rssiDbm);
+}
+
 // setBattery: el renderer no lee EventBus/dominio (patrón setters existente) —
 // BatteryMonitor decodifica su evento en main_esp32.cpp y llama este setter.
 void DisplayRendererColor::setBattery(uint8_t percent, bool charging, bool valid) {
@@ -664,6 +680,7 @@ void DisplayRendererColor::render() {
         case SceneColor::OtaProgress: drawOtaProgress_(); break;
         case SceneColor::DeadScreen:  drawDeadScreen_();  break;
         case SceneColor::MessageView: drawMessageView_(); break;
+        case SceneColor::NetworkView: drawNetworkView_(); break;
     }
 }
 
@@ -841,6 +858,8 @@ void DisplayRendererColor::drawBatteryIcon_() {
     if (!batteryValid_)                    return;
     if (scene_ == SceneColor::OtaProgress) return;
     if (scene_ == SceneColor::StatsView)   return;
+    // NetworkView comparte la cabecera de StatsView (etapa+edad sup-izq).
+    if (scene_ == SceneColor::NetworkView) return;
     if (scene_ == SceneColor::DeadScreen)  return;
 
     // Parpadeo si batería crítica y no está cargando (patrón WiFi Connecting).
@@ -1413,20 +1432,14 @@ void DisplayRendererColor::drawIdleMain_() {
 }
 
 // =============================================================================
-// drawStatsView_ — vista densa con las stats.
+// drawStatsHeader_ — cabecera común a las 2 páginas de Stats.
 //
 // D1: etapa de vida y edad se muestran aquí (se movieron desde drawHudTop_).
-// Layout portrait 240×296 (safe-area):
 //   Etapa (size 2) en kCornerSafe,kCornerSafe  +  edad (size 1) bajo la etapa
 //   WiFi (drawHudTop_) en esquina sup-der
-//   Título "STATS" a kSafeTextX, bajo la card top
-//   Barras de stats a kSafeTextX con ancho ajustado al safe-area
-//   Flags booleanos, edad y deathCount también a kSafeTextX
 // =============================================================================
 
-void DisplayRendererColor::drawStatsView_() {
-    canvas_.fillScreen(COL_BG);
-
+void DisplayRendererColor::drawStatsHeader_() {
     // ── Etapa de vida + edad en esquina superior izquierda ────────────────────
     // D1: movidas desde drawHudTop_ (que ahora solo contiene el WiFi).
     // kCornerSafe en x e y garantiza que ningún píxel quede dentro de la
@@ -1453,15 +1466,55 @@ void DisplayRendererColor::drawStatsView_() {
 
     // WiFi en esquina sup-der (sigue en drawHudTop_)
     drawHudTop_();
+}
+
+// =============================================================================
+// drawStatsTitle_ — título de página de Stats + indicador "page/total".
+//
+// Título amarillo size 2 a kSafeTextX; indicador gris size 1 alineado a la
+// derecha del ancho seguro y centrado en la altura del título (16 px); línea
+// separadora 2 px bajo el título. El indicador anuncia que hay otra página
+// (click corto avanza: Stats 1/2 → Red 2/2 → pantalla principal).
+// =============================================================================
+
+void DisplayRendererColor::drawStatsTitle_(const char* title, uint8_t page, int16_t y) {
+    canvas_.setTextColor(COL_YELLOW);
+    canvas_.setTextSize(2);
+    canvas_.setCursor(kSafeTextX, y);
+    canvas_.print(title);
+
+    char pageBuf[8];
+    snprintf(pageBuf, sizeof(pageBuf), "%u/%u",
+             static_cast<unsigned>(page), static_cast<unsigned>(kStatsPageCount));
+    const int16_t pageW = static_cast<int16_t>(strlen(pageBuf)) * NetInfoLogic::kFontCharW;
+    canvas_.setTextColor(COL_GRAY);
+    canvas_.setTextSize(1);
+    canvas_.setCursor(kScreenW - kSafeTextX - pageW, y + 4);
+    canvas_.print(pageBuf);
+
+    // Línea separadora dentro de la safe-area horizontal
+    canvas_.drawFastHLine(kEdgeInset, y + 18, kScreenW - 2 * kEdgeInset, COL_GRAY);
+}
+
+// =============================================================================
+// drawStatsView_ — Stats página 1/2: vista densa con las stats.
+//
+// Layout portrait 240×296 (safe-area):
+//   Cabecera (drawStatsHeader_): etapa + edad sup-izq, WiFi sup-der
+//   Título "STATS" + "1/2" a kSafeTextX, bajo la card top
+//   Barras de stats a kSafeTextX con ancho ajustado al safe-area
+//   Flags booleanos, edad y deathCount también a kSafeTextX
+// Ocupa hasta y≈286 con batería válida: la red va en la página 2/2
+// (drawNetworkView_) en lugar de apretarla aquí.
+// =============================================================================
+
+void DisplayRendererColor::drawStatsView_() {
+    canvas_.fillScreen(COL_BG);
+    drawStatsHeader_();
 
     // Título — respeta la safe-area en X y arranca bajo la card superior
     const int16_t contentStartY = kEdgeInset + kHudTopH + 8;
-    canvas_.setTextColor(COL_YELLOW);
-    canvas_.setTextSize(2);
-    canvas_.setCursor(kSafeTextX, contentStartY);
-    canvas_.print("STATS");
-    // Línea separadora dentro de la safe-area horizontal
-    canvas_.drawFastHLine(kEdgeInset, contentStartY + 18, kScreenW - 2 * kEdgeInset, COL_GRAY);
+    drawStatsTitle_("STATS", 1, contentStartY);
 
     // Barras de stats — ancho ajustado para caber en safe-area.
     // barW ocupa desde (kSafeTextX + 30) hasta (kScreenW - kEdgeInset - 30):
@@ -1545,6 +1598,121 @@ void DisplayRendererColor::drawStatsView_() {
     }
 
     canvas_.flush();
+}
+
+// =============================================================================
+// drawNetworkView_ — Stats página 2/2: estado de red para flashear por OTA
+// sin depender de mDNS (la IP se lee de un vistazo).
+//
+// Layout (y = borde superior; todo a kSafeTextX, por encima de y=268 donde
+// empieza la curva de las esquinas inferiores):
+//    28  BABY                          ((wifi))   ← drawStatsHeader_
+//    46  1h5m
+//    68  RED                                2/2   ← drawStatsTitle_
+//    86  ─────────────────────────────────────
+//    96  ● Conectado                              ← LED + estado (size 2)
+//   122  SSID            / 132 valor (size 2, truncado con "...")
+//   156  IP              / 166 valor (size 2, cian si hay IP)
+//   190  HOST (mDNS)     / 200 <host>.local
+//   224  RSSI            / 234 "-62 dBm"  ▂▄▆█
+//
+// Solo imprime buffers ya formateados por setWifiInfo() — sin WiFi.* ni
+// formateo aquí, así el coste del frame no depende del estado de la red.
+// =============================================================================
+
+void DisplayRendererColor::drawNetworkView_() {
+    canvas_.fillScreen(COL_BG);
+    drawStatsHeader_();
+
+    const int16_t contentStartY = kEdgeInset + kHudTopH + 8;
+    drawStatsTitle_("RED", 2, contentStartY);
+
+    // ── Estado: "LED" de color + texto ───────────────────────────────────────
+    uint16_t statusColor;
+    switch (netStatus_) {
+        case NetInfoLogic::NetStatus::Connected:  statusColor = COL_GREEN; break;
+        case NetInfoLogic::NetStatus::Connecting: statusColor = COL_AMBER; break;
+        case NetInfoLogic::NetStatus::Offline:    statusColor = COL_RED;   break;
+        default:                                  statusColor = COL_GRAY;  break;
+    }
+    const bool isConnected = (netStatus_ == NetInfoLogic::NetStatus::Connected);
+
+    static constexpr int16_t kLedR   = 5;
+    static constexpr int16_t kLedGap = 6;
+    int16_t y = contentStartY + 28;
+    canvas_.fillCircle(kSafeTextX + kLedR, y + 8, kLedR, statusColor);
+
+    // "WiFi no configurada" (19 chars) no cabe a size 2 junto al LED → size 1,
+    // centrado en la misma fila de 16 px.
+    const int16_t statusX     = kSafeTextX + 2 * kLedR + kLedGap;
+    const char*   statusLabel = NetInfoLogic::statusLabel(netStatus_);
+    const bool    isLarge     = strlen(statusLabel) <=
+        NetInfoLogic::maxCharsForWidth(kScreenW - kSafeTextX - statusX, kNetValueTextSize);
+    canvas_.setTextColor(statusColor);
+    canvas_.setTextSize(isLarge ? kNetValueTextSize : 1);
+    canvas_.setCursor(statusX, isLarge ? y : y + 4);
+    canvas_.print(statusLabel);
+
+    // ── Filas etiqueta + valor ───────────────────────────────────────────────
+    static constexpr int16_t kRowH = 34;  // 8 etiqueta + 2 + 16 valor + 8 aire
+    y += 26;
+    const bool hasSsid = (netStatus_ != NetInfoLogic::NetStatus::NotConfigured);
+    drawNetRow_("SSID", netSsidText_, hasSsid ? COL_WHITE : COL_GRAY, y);
+    y += kRowH;
+    drawNetRow_("IP", netIpText_, netIpAssigned_ ? COL_CYAN : COL_GRAY, y);
+    y += kRowH;
+    // El hostname es el configurado aunque no haya red: gris si no resolvería.
+    drawNetRow_("HOST (mDNS)", netHostText_, isConnected ? COL_WHITE : COL_GRAY, y);
+    y += kRowH;
+    drawNetRow_("RSSI", netRssiText_, isConnected ? COL_WHITE : COL_GRAY, y);
+
+    // Barras a la derecha del texto de RSSI, con la base alineada al valor.
+    const int16_t valueY   = y + 10;
+    const int16_t charW    = NetInfoLogic::kFontCharW * kNetValueTextSize;
+    const int16_t barsX    = kSafeTextX + static_cast<int16_t>(strlen(netRssiText_)) * charW + 10;
+    drawRssiBars_(barsX, valueY + 15, netRssiBars_);
+
+    canvas_.flush();
+}
+
+// drawNetRow_ — etiqueta gris (size 1) en y, valor (size 2) en y+10.
+void DisplayRendererColor::drawNetRow_(const char* label, const char* value,
+                                       uint16_t valueColor, int16_t y) {
+    canvas_.setTextColor(COL_GRAY);
+    canvas_.setTextSize(1);
+    canvas_.setCursor(kSafeTextX, y);
+    canvas_.print(label);
+
+    canvas_.setTextColor(valueColor);
+    canvas_.setTextSize(kNetValueTextSize);
+    canvas_.setCursor(kSafeTextX, y + 10);
+    canvas_.print(value);
+}
+
+// drawRssiBars_ — 4 barras crecientes (4/8/12/16 px) con la base en yBottom.
+// Las `bars` primeras van rellenas (verde ≥3, ámbar 2, rojo 1); el resto,
+// solo contorno gris — así "sin señal" se ve como 4 barras vacías.
+void DisplayRendererColor::drawRssiBars_(int16_t x, int16_t yBottom, uint8_t bars) {
+    static constexpr uint8_t kBarCount = 4;
+    static constexpr int16_t kBarW     = 6;
+    static constexpr int16_t kBarGap   = 3;
+    static constexpr int16_t kBarStepH = 4;
+
+    uint16_t fillColor;
+    if      (bars >= 3) fillColor = COL_GREEN;
+    else if (bars == 2) fillColor = COL_AMBER;
+    else                fillColor = COL_RED;
+
+    for (uint8_t i = 0; i < kBarCount; ++i) {
+        const int16_t h  = kBarStepH * (i + 1);
+        const int16_t bx = x + i * (kBarW + kBarGap);
+        const int16_t by = yBottom - h + 1;
+        if (i < bars) {
+            canvas_.fillRect(bx, by, kBarW, h, fillColor);
+        } else {
+            canvas_.drawRect(bx, by, kBarW, h, COL_DARKGRAY);
+        }
+    }
 }
 
 // =============================================================================

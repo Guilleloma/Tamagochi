@@ -7,7 +7,7 @@ Este repositorio contiene **dos variantes de firmware** para el mismo Tamagotchi
 | **ESP8266 mono** (original) | ideaspark ESP8266 0.96" OLED V3.2 | SSD1306 128×64 mono | `src/main.cpp` |
 | **ESP32-S3 color** (Furbygotchi) | Waveshare ESP32-S3 Zero | JD9853 240×296 IPS TFT | `src/main_esp32.cpp` |
 
-El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 232 tests `native` aplican a las dos.
+El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 267 tests `native` aplican a las dos.
 
 ---
 
@@ -83,7 +83,7 @@ La acción **"Luces"** (fiel al Tamagotchi original del 97) reemplaza al viejo b
 | **domain/ui** | Mecánica de juego: energía + sueño automático + luces on/off (fiel 97) — ver sección abajo | ✅ |
 | **build** | TURBO_MODE ×60 (env `esp12e_turbo`) para QA | ✅ |
 | **build** | OTA upload via WiFi (env `esp12e_ota`) | ✅ |
-| **build** | Tests host-native — **232 tests pasando** | ✅ |
+| **build** | Tests host-native — **267 tests pasando** | ✅ |
 | **build** | Script integración HTTP — **26 tests pasando** | ✅ |
 | **diferido** | Sprites EGG/KID/ADULT/OLD/DEAD reales (mono) | ⏸️ usando BABY como placeholder |
 | **diferido** | Gestión de energía de HARDWARE (auto-dim de panel, modem sleep WiFi) | ⏸️ Fase 5 — distinto de la mecánica de juego `energy`, ya ✅ |
@@ -113,7 +113,7 @@ OTA_PASSWORD="tu_password" pio run -e esp12e_ota -t upload
 # Monitor serie (115200 baud)
 pio device monitor
 
-# Tests host-native (no necesita la placa) — 232/232
+# Tests host-native (no necesita la placa) — 267/267
 pio test -e native
 ```
 
@@ -157,7 +157,7 @@ Tamagotchi/
 │   │   ├── LifeFSM/           ← 6 etapas + transiciones automáticas
 │   │   └── Persistence/       ← LittleFS rotativo + CRC32 + IStorage + migrate
 │   ├── infra/
-│   │   ├── WifiManager/       ← STA no bloqueante + reconexión con backoff
+│   │   ├── WifiManager/       ← STA no bloqueante + reconexión con backoff + WifiInfo para la UI
 │   │   ├── OTAManager/        ← ArduinoOTA con password
 │   │   └── WebUI/             ← AsyncWebServer + JsonCodec + RateLimiter + AuthChecker
 │   └── ui/
@@ -166,6 +166,7 @@ Tamagotchi/
 │       ├── DisplayRendererColor/ ← Arduino_GFX color (ESP32-S3) + MessageView
 │       ├── MarqueeLogic/      ← scroll de texto horizontal (lógica pura)
 │       ├── MoodLogic/         ← acción → animación del personaje + fallback jump→happy→idle (pura)
+│       ├── NetInfoLogic/      ← estado/SSID/IP/RSSI de la página RED de Stats (pura)
 │       └── BootSplash/        ← pantalla de arranque
 ├── data/                      ← LittleFS: index.html + app.css + app.js (frontend)
 ├── scripts/
@@ -173,7 +174,7 @@ Tamagotchi/
 ├── src/
 │   ├── main.cpp               ← orquestación ESP8266: singletons + suscripciones + loop
 │   └── main_esp32.cpp         ← orquestación ESP32-S3 (incluye consumo del MessageBox)
-├── test/                      ← 232 tests host-native (16 suites)
+├── test/                      ← 267 tests host-native (17 suites)
 │   ├── test_smoke/            ← canario del env native (1)
 │   ├── test_stats_engine/     ← 42 tests (incluye energía/auto-sueño/luces)
 │   ├── test_persistence/      ← 25 tests (incluye migrate v1→v2→v3)
@@ -186,6 +187,7 @@ Tamagotchi/
 │   ├── test_boot_splash/      ← 5 tests
 │   ├── test_marquee_logic/    ← 13 tests (scroll)
 │   ├── test_mood_logic/       ← 23 tests (acción→mood, fallback, duración del salto)
+│   ├── test_net_info_logic/   ← 35 tests (estado WiFi, SSID truncado, IP, RSSI→barras)
 │   ├── test_message_box/      ← 13 tests (sanitizado UTF-8→ASCII)
 │   ├── test_bootloop_guard/   ← 9 tests (anti-boot-loop, decisión pura)
 │   ├── test_screen_power_logic/ ← 6 tests (apagado de pantalla por inactividad)
@@ -262,7 +264,7 @@ Cubre 26 escenarios: auth (401), happy path por endpoint (200 + `actionApplied`)
 
 ### Tests automáticos
 ```bash
-pio test -e native   # 232/232 deben pasar
+pio test -e native   # 267/267 deben pasar
 ```
 
 ### Pruebas funcionales en hardware
@@ -311,7 +313,7 @@ Comprueba:
 
 ## Variante ESP32-S3 color (Furbygotchi)
 
-Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 232 tests `native` validan ambas variantes.
+Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 267 tests `native` validan ambas variantes.
 
 ### Hardware ESP32-S3
 
@@ -428,6 +430,50 @@ cp include/secrets.h.example include/secrets.h
 - Dashboard disponible en `http://tamagotchi.local` (HTTP Basic Auth). Incluye panel **Sistema** colapsable (`<details>`, polling propio cada 10 s) con IP, hostname, MAC, firmware, uptime, RAM libre, RSSI y el diagnóstico de batería.
 - OTA: `pio run -e esp32s3_ota -t upload` (requiere OTA_PASSWORD y placa en red).
 
+#### Pantalla de Stats: página RED (IP para flashear por OTA)
+
+Stats tiene **2 páginas** en el TFT. La 1/2 ya ocupa todo el alto (barras, flags, edad, RIPs y batería), así que la red va en una **segunda página** en vez de apretarla y meterla en las esquinas curvas del cristal.
+
+- **Navegación (1 botón):** pulsación larga sobre `STATS` en el menú → **STATS 1/2** → click corto → **RED 2/2** → click corto → pantalla principal. El indicador `1/2` / `2/2` va junto al título.
+- **Página RED:**
+
+  ```
+  BABY                    ((·))
+  1h5m
+  RED                       2/2
+  ───────────────────────────
+  ● Conectado
+  SSID
+  MiRedWiFi
+  IP
+  192.168.1.42
+  HOST (mDNS)
+  tamagotchi.local
+  RSSI
+  -62 dBm  ▂▄▆█
+  ```
+
+  | Campo | Detalle |
+  |---|---|
+  | Estado | `Conectado` (verde) / `Conectando...` (ámbar) / `Sin conexion` (rojo) / `WiFi no configurada` (gris, `WIFI_SSID` vacío) |
+  | SSID | Truncado con `...` a 17 caracteres; los bytes no ASCII se pintan como `?` |
+  | IP | Grande y en cian; `-` si no hay IP (0.0.0.0) |
+  | HOST (mDNS) | `<OTA_HOSTNAME>.local`; en gris si no hay conexión |
+  | RSSI | dBm + 4 barras (≥ -55 → 4, ≥ -67 → 3, ≥ -78 → 2, ≥ -89 → 1) |
+
+- **Refresco:** conexión/caída al instante (`WifiStateChanged`); al entrar en la página se relee todo, y mientras está visible cada 2 s (`NET_INFO_REFRESH_MS`) para que se muevan las barras.
+- **Capas:** `WifiManager::info()` (infra, el único que lee `WiFi.*`) → `WifiInfo` (`lib/core/WifiState.h`) → `DisplayRendererColor::setWifiInfo()` → formateo puro en `lib/ui/NetInfoLogic/` (35 tests host). Nunca se muestran ni se loguean contraseñas.
+- **Serie:** en cada conexión (boot o reconexión) sale una línea con lo necesario para flashear:
+  ```
+  [INFO ] [wifi] Conectado a 'MiRedWiFi' IP=192.168.1.42 host=tamagotchi.local
+  ```
+
+> **Si `tamagotchi.local` no resuelve**, flashea por IP (la de la página RED o la del log) sin tocar `platformio.ini`:
+> ```bash
+> OTA_PASSWORD="..." pio run -e esp32s3_ota -t upload --upload-port 192.168.1.42
+> ```
+> `.local` depende solo de mDNS (multicast UDP 5353): no cruza subredes, VLAN ni redes de invitados, y hay routers que filtran el multicast entre clientes WiFi. La placa ESP8266 usa el mismo `OTA_HOSTNAME` por defecto: si las dos están encendidas en la misma red, compiten por el mismo nombre.
+
 > **Fixes de red (13 jul):**
 > - `WiFi.setSleep(false)` — el modem sleep descartaba los paquetes UDP de invitación de OTA, dejando la placa "invisible" para `espota`. Con el sleep desactivado el OTA vuelve a ser fiable.
 > - Eliminado `setPort(8266)` en el ESP32-S3 — ese es el puerto del ESP8266; el ESP32 usa su puerto OTA por defecto (3232). Con el `setPort` erróneo el OTA escuchaba en el puerto equivocado.
@@ -442,6 +488,12 @@ cp include/secrets.h.example include/secrets.h
 - **Fase 5** — gestión de energía (auto-dim/off del OLED/TFT, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
 
 ### Changelog reciente (13 jul - 4 oct 2026)
+
+**4 oct (noche) — Red en pantalla para flashear sin mDNS:**
+- Stats pasa a 2 páginas: **RED 2/2** con estado WiFi, SSID, IP, `<host>.local` y RSSI (dBm + barras). Lógica pura en `NetInfoLogic` — 35 tests host nuevos.
+- Línea `[wifi] Conectado a '<ssid>' IP=<ip> host=<host>.local` por serie en cada conexión (antes la IP no se imprimía en ningún sitio).
+- El icono WiFi parpadea en ámbar desde el arranque mientras conecta (antes seguía oculto hasta la primera transición).
+- Tests host-native: **232 → 267**.
 
 **4 oct — Salto del baby al jugar + tabla de particiones propia:**
 - **Play → `jump`** en el furby-baby (8 frames, 2 s, empieza en el suelo); fallback Jump → Happy → Idle en las etapas sin salto. Lógica pura en `MoodLogic` — 23 tests host nuevos.
