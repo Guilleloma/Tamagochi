@@ -78,6 +78,13 @@ public:
     // RSSI en dBm. Devuelve 0 si no está conectado.
     int8_t rssi() const;
 
+    // Instantánea para la UI (página de red de Stats): estado, si hay SSID
+    // configurado, SSID, hostname mDNS, IP y RSSI. IP/RSSI se leen en vivo del
+    // driver solo si state() == Connected (coste: unos µs, sin bloqueo de
+    // red); si no, quedan a 0. Nunca incluye contraseñas (ver WifiInfo en
+    // WifiState.h). Llamar desde loopTask.
+    WifiInfo info() const;
+
     // true si alguna vez se llegó a Connected desde el boot (aunque ahora
     // esté caído). Usado por el watchdog de conectividad (commit 3) para
     // decidir si vale la pena reiniciar: sin conexión previa, el router
@@ -147,6 +154,10 @@ private:
     static constexpr uint32_t kWifiRetryBackoffMs   = 60000;
 
     void publishState_(WifiState newState);
+
+    // Línea "[wifi] Conectado a '<ssid>' IP=<ip> host=<host>.local" por serie.
+    // Llamado desde publishState_() en cada transición A Connected.
+    void logConnected_() const;
 
     // Consume eventGotIpPending_/eventDisconnectedPending_ y dispara la
     // transición de estado correspondiente si aplica. Llamado desde loop(),
