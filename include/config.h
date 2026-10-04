@@ -174,6 +174,12 @@
 // Idempotente y barato — begin()/isRunning()/isReady() son simples getters.
 #define NET_SUPERVISOR_INTERVAL_MS   5000UL
 
+// Refresco de la página de red de Stats (NetworkView) mientras está visible:
+// relee WifiManager::info() (RSSI/IP en vivo, unos µs) para que las barras
+// de señal se muevan. Los cambios de estado (conexión/caída) no esperan a
+// esto: llegan al instante por WifiStateChanged. Wall-clock, no escala con turbo.
+#define NET_INFO_REFRESH_MS          2000UL
+
 // Timeout del Task Watchdog Timer sobre la loopTask (segundos). Generoso:
 // canvas->flush() por SPI (~138 KB framebuffer) + accesos LittleFS pueden
 // tardar bastante en el peor caso; no queremos falsos positivos.
