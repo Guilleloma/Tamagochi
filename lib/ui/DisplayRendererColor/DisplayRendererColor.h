@@ -24,6 +24,12 @@
  *   Personaje       y=(8+52)..(296-8-60) : sprite 48×48 × 3 = 144×144, centrado
  *   HUD bottom card x=8, y=228, w=224, h=60, r=10 : icono(24px) + label(size 2) + dots
  *
+ * Stats en 2 páginas (la 1/2 ya ocupaba hasta y≈286, sin hueco para la red):
+ *   StatsView   (1/2) barras + flags + edad + RIPs + batería
+ *   NetworkView (2/2) estado WiFi, SSID, IP, hostname mDNS y RSSI — datos de
+ *                     WifiInfo (WifiManager::info()) formateados con
+ *                     NetInfoLogic en setWifiInfo(); render() solo imprime.
+ *
  * Constructor: DisplayRendererColor(Arduino_GFX& canvas, EventBus& bus, SpriteStore& sprites)
  * render()    : compone frame completo y llama canvas.flush().
  */
@@ -39,6 +45,8 @@
 #include "SpriteStore.h"    // ColorSpriteFrames
 #include "MoodLogic.h"      // MoodColor, kMoodCount y cadena de fallback de moods
                             // (lógica pura, testeada en env:native)
+#include "NetInfoLogic.h"   // NetStatus + formateo de SSID/IP/RSSI de la página
+                            // de red (lógica pura, testeada en env:native)
 
 // =============================================================================
 // SceneColor — escena activa en el display color.
@@ -48,7 +56,9 @@ enum class SceneColor : uint8_t {
     StatsView,
     OtaProgress,
     DeadScreen,
-    MessageView   // mensaje de texto del padre (marquee) — ver showMessage()
+    MessageView,  // mensaje de texto del padre (marquee) — ver showMessage()
+    NetworkView   // Stats página 2/2: estado WiFi, SSID, IP, mDNS, RSSI. Añadida
+                  // al final para no renumerar las escenas que se loguean.
 };
 
 // =============================================================================
@@ -95,6 +105,13 @@ public:
     void setAgeMinutes(uint32_t mins);
     void setDeathCount(uint16_t count);
     void setWifiState(WifiState state);
+
+    // Página de red (NetworkView). Formatea y copia los textos AQUÍ (coste de
+    // µs, sin I/O): render() solo los imprime. main_esp32.cpp la llama al
+    // cambiar el estado WiFi, al entrar en la página y periódicamente
+    // mientras está visible (RSSI). Nunca recibe contraseñas (ver WifiInfo).
+    void setWifiInfo(const WifiInfo& info);
+
     void setBattery(uint8_t percent, bool charging, bool valid);
 
     // ── Triggers de animación one-shot ───────────────────────────────────────
@@ -286,6 +303,28 @@ private:
     // Sangrado de texto dentro de la card: kEdgeInset + margen interior de 8 px.
     static constexpr int16_t kSafeTextX = kEdgeInset + 8;
 
+    // ── Página de red (NetworkView) ──────────────────────────────────────────
+    // Valores (SSID / IP / host / RSSI) a textSize 2 en el ancho seguro
+    // (kScreenW - 2*kSafeTextX = 208 px → 17 chars). SSID y hostname se
+    // truncan con "..." a ese ancho (NetInfoLogic::fitText).
+    static constexpr uint8_t kNetValueTextSize = 2;
+    static constexpr size_t  kNetValueChars =
+        NetInfoLogic::maxCharsForWidth(kScreenW - 2 * kSafeTextX, kNetValueTextSize);
+    // Nº de páginas de Stats (StatsView=1, NetworkView=2) — indicador "n/2".
+    static constexpr uint8_t kStatsPageCount = 2;
+
+    // Textos de la página de red, ya formateados por setWifiInfo() (ver
+    // NetInfoLogic). Declarados aquí (y no con el resto del estado visible)
+    // porque su tamaño depende de kNetValueChars. Arrancan como "sin dato"
+    // hasta el primer setWifiInfo().
+    NetInfoLogic::NetStatus netStatus_ = NetInfoLogic::NetStatus::NotConfigured;
+    char    netSsidText_[kNetValueChars + 1]     = "-";
+    char    netHostText_[kNetValueChars + 1]     = "-";
+    char    netIpText_[NetInfoLogic::kIpTextSize]     = "-";
+    char    netRssiText_[NetInfoLogic::kRssiTextSize] = "-";
+    bool    netIpAssigned_ = false;
+    uint8_t netRssiBars_   = 0;
+
     // Altura de la card del HUD superior (etapa + edad).
     // Aumentada a 52 px para acomodar la fila de texto desplazada hacia kCornerSafe
     // (BABY en y=28, edad en y=46 → texto termina en ~54; HUD top delimita zoneTop
@@ -344,6 +383,7 @@ private:
 
     void drawIdleMain_();
     void drawStatsView_();
+    void drawNetworkView_();       // Stats 2/2 — red (ver setWifiInfo())
     void drawOtaProgress_();
     void drawDeadScreen_();
     void drawMessageView_();       // mensaje del padre — HUD + personaje + marquee
@@ -367,6 +407,17 @@ private:
                                   const uint16_t* pixels,
                                   uint8_t scale,
                                   uint16_t keyColor);
+
+    // Cabecera común a las 2 páginas de Stats: etapa + edad (sup-izq) y HUD
+    // superior (WiFi sup-der).
+    void drawStatsHeader_();
+    // Título amarillo de la página + indicador "page/kStatsPageCount" a la
+    // derecha + línea separadora. y = borde superior del título.
+    void drawStatsTitle_(const char* title, uint8_t page, int16_t y);
+    // Fila de la página de red: etiqueta gris (size 1) y valor (size 2) debajo.
+    void drawNetRow_(const char* label, const char* value, uint16_t valueColor, int16_t y);
+    // 4 barras de cobertura (0-4 rellenas) con la base en yBottom.
+    void drawRssiBars_(int16_t x, int16_t yBottom, uint8_t bars);
 
     // Dibuja una barra horizontal coloreada por umbral (Stats view).
     void drawStatBar_(int16_t x, int16_t y, int16_t barW, int16_t barH,
