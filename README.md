@@ -7,7 +7,7 @@ Este repositorio contiene **dos variantes de firmware** para el mismo Tamagotchi
 | **ESP8266 mono** (original) | ideaspark ESP8266 0.96" OLED V3.2 | SSD1306 128×64 mono | `src/main.cpp` |
 | **ESP32-S3 color** (Furbygotchi) | Waveshare ESP32-S3 Zero | JD9853 240×296 IPS TFT | `src/main_esp32.cpp` |
 
-El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 267 tests `native` aplican a las dos.
+El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 292 tests `native` aplican a las dos.
 
 ---
 
@@ -83,7 +83,7 @@ La acción **"Luces"** (fiel al Tamagotchi original del 97) reemplaza al viejo b
 | **domain/ui** | Mecánica de juego: energía + sueño automático + luces on/off (fiel 97) — ver sección abajo | ✅ |
 | **build** | TURBO_MODE ×60 (env `esp12e_turbo`) para QA | ✅ |
 | **build** | OTA upload via WiFi (env `esp12e_ota`) | ✅ |
-| **build** | Tests host-native — **267 tests pasando** | ✅ |
+| **build** | Tests host-native — **292 tests pasando** | ✅ |
 | **build** | Script integración HTTP — **26 tests pasando** | ✅ |
 | **diferido** | Sprites EGG/KID/ADULT/OLD/DEAD reales (mono) | ⏸️ usando BABY como placeholder |
 | **diferido** | Gestión de energía de HARDWARE (auto-dim de panel, modem sleep WiFi) | ⏸️ Fase 5 — distinto de la mecánica de juego `energy`, ya ✅ |
@@ -113,7 +113,7 @@ OTA_PASSWORD="tu_password" pio run -e esp12e_ota -t upload
 # Monitor serie (115200 baud)
 pio device monitor
 
-# Tests host-native (no necesita la placa) — 267/267
+# Tests host-native (no necesita la placa) — 292/292
 pio test -e native
 ```
 
@@ -174,7 +174,7 @@ Tamagotchi/
 ├── src/
 │   ├── main.cpp               ← orquestación ESP8266: singletons + suscripciones + loop
 │   └── main_esp32.cpp         ← orquestación ESP32-S3 (incluye consumo del MessageBox)
-├── test/                      ← 267 tests host-native (17 suites)
+├── test/                      ← 292 tests host-native (17 suites)
 │   ├── test_smoke/            ← canario del env native (1)
 │   ├── test_stats_engine/     ← 42 tests (incluye energía/auto-sueño/luces)
 │   ├── test_persistence/      ← 25 tests (incluye migrate v1→v2→v3)
@@ -211,7 +211,7 @@ Una vez la placa esté en la WiFi y `data/*` esté subido al filesystem:
 | URL | Descripción |
 |---|---|
 | `http://tamagotchi.local/` | Frontend mobile-first (HTML/CSS/JS desde LittleFS) |
-| `GET /api/v1/state` | Snapshot del Tamagotchi (`lifeStage`, stats, flags, `energy`, `lightsOn`) |
+| `GET /api/v1/state` | Snapshot del Tamagotchi (`lifeStage`, stats, flags, `energy`, `lightsOn`, `growthCap`) |
 | `GET /api/v1/info` | Telemetría + identidad de red + diagnóstico de batería (ver abajo) |
 | `POST /api/v1/{feed,play,discipline}` | Body `{"amount": 1..100}` |
 | `POST /api/v1/{clean,medicate}` | Sin body |
@@ -264,7 +264,7 @@ Cubre 26 escenarios: auth (401), happy path por endpoint (200 + `actionApplied`)
 
 ### Tests automáticos
 ```bash
-pio test -e native   # 267/267 deben pasar
+pio test -e native   # 292/292 deben pasar
 ```
 
 ### Pruebas funcionales en hardware
@@ -313,7 +313,7 @@ Comprueba:
 
 ## Variante ESP32-S3 color (Furbygotchi)
 
-Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 267 tests `native` validan ambas variantes.
+Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 292 tests `native` validan ambas variantes.
 
 ### Hardware ESP32-S3
 
@@ -378,6 +378,21 @@ Un padre puede enviar texto al Tamagotchi desde el dashboard (panel **Mensaje**)
 - **`MessageBox`** (`lib/core/`): canal **SPSC** sin mutex (productor = handler HTTP en task `async_tcp`; consumidor = `loopTask`), con par release/acquire. Sanitiza UTF-8→ASCII imprimible (transliteración de acentos, descarte de emoji/controles). Límites: **192 bytes** crudos → **≤ 96 chars** sanitizados. Política **last-wins**.
 - **`MarqueeLogic`** (`lib/ui/`): lógica pura de scroll horizontal (posición, vueltas, timeout), testeable en host — 13 tests.
 - **`MessageView`** (`DisplayRendererColor`): escena que renderiza el marquee. `loop()` la activa cuando llega un mensaje y la mascota está viva; al terminar (timeout, vueltas agotadas o descarte por botón) restaura la escena previa (`sceneBeforeMessage_`).
+
+### Pausa de crecimiento (tope en Baby)
+
+**Ahora mismo el firmware ESP32-S3 tiene el crecimiento pausado en Baby.** De momento solo el bebé tiene las animaciones nuevas (Kling), así que la mascota no evoluciona hasta que el resto de etapas tengan las suyas.
+
+- **Qué hace:** el huevo eclosiona con normalidad, pero el bebé **no pasa a Kid**: ni por atención (60 min y `attentionScore >= 300`) ni por la transición forzada de los 90 min. La edad se congela en **59 min** (justo antes de `kBabyToKidMin`), así que tampoco hay muerte por vejez. La muerte por salud y el renacer como huevo funcionan igual.
+- **Pets que ya habían crecido:** al arrancar, un pet guardado como Kid, Adult u Old **vuelve a Baby** con edad `kEggHatchMin` (5 min) y **conserva sus stats** (hambre, ánimo, salud, peso, atención…). El estado degradado se guarda en flash nada más arrancar. Un pet muerto (Dead) no se toca. Por serie se ve:
+  ```
+  [INFO ] [life] growth cap activo: Baby
+  [WARN ] [life] growth cap: etapa guardada Adult (age=300) supera el tope Baby -> degradada a Baby (age=5), stats conservados
+  ```
+- **API:** `GET /api/v1/state` (y las respuestas de las acciones) incluyen `"growthCap": "Baby"`, o `null` si no hay tope.
+- **Dónde se configura:** `-D GROWTH_CAP_STAGE=1` en `build_flags` de `[env:esp32s3]` en `platformio.ini` (lo heredan `esp32s3_turbo` y `esp32s3_ota`). El valor es el de `LifeStage` (`0`=Egg `1`=Baby `2`=Kid `3`=Adult `4`=Old). La lógica está en `LifeFSM::setGrowthCap()` / `restoreLifeState()`. `esp12e` no lo lleva.
+
+**Cómo quitarla:** borra la línea `-D GROWTH_CAP_STAGE=1` de `platformio.ini` y vuelve a flashear (`pio run -e esp32s3 -t upload`, o por OTA). La mascota sigue desde Baby con 59 min de edad y evoluciona con las reglas de siempre: pasa a Kid en cuanto cumple 60 min si `attentionScore >= 300`, o a los 90 min como mucho. No se salta ninguna etapa. Las etapas que se perdieron con la degradación no se recuperan.
 
 ### Compilar y flashear — ESP32-S3
 
@@ -488,6 +503,12 @@ Stats tiene **2 páginas** en el TFT. La 1/2 ya ocupa todo el alto (barras, flag
 - **Fase 5** — gestión de energía (auto-dim/off del OLED/TFT, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
 
 ### Changelog reciente (13 jul - 4 oct 2026)
+
+**4 oct — Pausa de crecimiento en Baby:**
+- `LifeFSM` con tope de crecimiento configurable (`setGrowthCap`): el bebé no pasa a Kid y la edad se congela en 59 min. Al cargar, un pet guardado por encima del tope vuelve a Baby (edad 5 min) conservando sus stats, y se persiste en el acto.
+- Activado en `[env:esp32s3]` con `-D GROWTH_CAP_STAGE=1` hasta que el resto de etapas tengan las animaciones de Kling. Para quitarlo, ver [Pausa de crecimiento](#pausa-de-crecimiento-tope-en-baby).
+- `GET /api/v1/state` añade `growthCap` (`"Baby"` o `null`).
+- Tests host-native: **267 → 292**.
 
 **4 oct (noche) — Red en pantalla para flashear sin mDNS:**
 - Stats pasa a 2 páginas: **RED 2/2** con estado WiFi, SSID, IP, `<host>.local` y RSSI (dBm + barras). Lógica pura en `NetInfoLogic` — 35 tests host nuevos.
