@@ -39,11 +39,12 @@ static uint16_t saturatingAddU16(uint16_t a, uint32_t b, uint32_t cap) {
 // -----------------------------------------------------------------------------
 // Constructor
 // -----------------------------------------------------------------------------
-LifeFSM::LifeFSM(EventBus& bus) : bus_(&bus) {}
+LifeFSM::LifeFSM(EventBus& bus)
+    : bus_(&bus), timeScale_(static_cast<uint32_t>(LIFE_FSM_TIME_SCALE)) {}
 
 // -----------------------------------------------------------------------------
-// Setters para carga desde Persistence al boot.
-// No publican eventos — la primera transición real ocurre en el loop.
+// Setters crudos. No publican eventos — la primera transición real ocurre en
+// el loop. No aplican el tope: el boot usa restoreLifeState().
 // -----------------------------------------------------------------------------
 void LifeFSM::setStage(LifeStage stage) {
     stage_ = stage;
@@ -55,6 +56,72 @@ void LifeFSM::setAgeMinutes(uint32_t minutes) {
 
 void LifeFSM::setDeathSustainMs(uint16_t ms) {
     deathSustainMs_ = ms;
+}
+
+void LifeFSM::setTimeScale(uint32_t scale) {
+    timeScale_ = (scale == 0) ? 1u : scale;
+}
+
+// -----------------------------------------------------------------------------
+// Tope de crecimiento
+// -----------------------------------------------------------------------------
+void LifeFSM::setGrowthCap(LifeStage cap) {
+    // LifeStage es un enum sin scope sobre uint8_t: un valor corrupto (p.ej.
+    // un -D mal escrito) no debe dejar un tope imposible de razonar.
+    growthCap_ = (cap > kNoGrowthCap) ? kNoGrowthCap : cap;
+}
+
+uint32_t LifeFSM::stageEntryAgeMin(LifeStage stage) {
+    switch (stage) {
+        case LifeStage::Egg:   return 0;
+        case LifeStage::Baby:  return kEggHatchMin;
+        case LifeStage::Kid:   return kBabyToKidMin;
+        case LifeStage::Adult: return kKidToAdultMin;
+        case LifeStage::Old:   return kAdultToOldMin;
+        case LifeStage::Dead:  return kOldToDeadMin;
+    }
+    return 0;
+}
+
+// La salida por edad de una etapa es la entrada a la siguiente; el máximo bajo
+// el tope queda un minuto por debajo. Para Baby se usa kBabyToKidMin (salida
+// más temprana, con attentionScore >= 300) y no el forzado de los 90 min:
+// así ninguna de las dos transiciones Baby → Kid puede dispararse.
+uint32_t LifeFSM::maxAgeUnderGrowthCap_() const {
+    LifeStage next = static_cast<LifeStage>(static_cast<uint8_t>(growthCap_) + 1u);
+    return stageEntryAgeMin(next) - 1u;
+}
+
+void LifeFSM::clampAgeToGrowthCap_() {
+    if (!hasGrowthCap()) return;
+    const uint32_t maxAge = maxAgeUnderGrowthCap_();
+    if (ageMinutes_ >= maxAge) {
+        ageMinutes_ = maxAge;
+        ageAccMs_   = 0;   // sin fracción pendiente: al quitar el tope arranca limpio
+    }
+}
+
+bool LifeFSM::restoreLifeState(LifeStage stage, uint32_t ageMinutes) {
+    stage_      = stage;
+    ageMinutes_ = ageMinutes;
+    ageAccMs_   = 0;
+
+    if (!hasGrowthCap() || stage_ == LifeStage::Dead) {
+        // Sin tope, o muerto: se respeta tal cual (un Dead con tope no se
+        // resucita ni se cambia; renacerá como Egg por el camino normal).
+        return false;
+    }
+
+    bool degraded = false;
+    if (stage_ > growthCap_) {
+        stage_      = growthCap_;
+        ageMinutes_ = stageEntryAgeMin(growthCap_);
+        // AdultType solo tiene sentido en Adult; se recalcula en Kid → Adult.
+        if (growthCap_ < LifeStage::Adult) adultType_ = AdultNormal;
+        degraded = true;
+    }
+    clampAgeToGrowthCap_();
+    return degraded;
 }
 
 // -----------------------------------------------------------------------------
@@ -82,13 +149,16 @@ void LifeFSM::tick(uint32_t dtMs, const Stats& stats, uint16_t attentionScore) {
     }
 
     // --- Avance de edad ---
-    // LIFE_FSM_TIME_SCALE amplifica dtMs para TURBO_MODE (factor 60 por defecto).
-    // En producción LIFE_FSM_TIME_SCALE=1, la operación es sin coste extra.
-    ageAccMs_ += dtMs * static_cast<uint32_t>(LIFE_FSM_TIME_SCALE);
+    // timeScale_ (LIFE_FSM_TIME_SCALE por defecto) amplifica dtMs para
+    // TURBO_MODE (factor 60 por defecto). En producción vale 1.
+    ageAccMs_ += dtMs * timeScale_;
     if (ageAccMs_ >= 60000u) {
         ageMinutes_ += ageAccMs_ / 60000u;
         ageAccMs_   %= 60000u;
     }
+    // Con tope de crecimiento la edad se congela justo antes del umbral de
+    // salida de la etapa tope (aunque un tick turbo avance muchos minutos).
+    clampAgeToGrowthCap_();
 
     // --- Death sustain timer (no aplica en Egg: los huevos no tienen health drop) ---
     if (stage_ != LifeStage::Egg) {
@@ -121,9 +191,16 @@ void LifeFSM::tick(uint32_t dtMs, const Stats& stats, uint16_t attentionScore) {
 //
 // Old → Dead:
 //   - Causa 3 = oldAge.
+//
+// Tope de crecimiento: en la etapa tope (o por encima, si se forzó con
+// setStage) no se evalúa ninguna transición por edad. El clamp de edad ya lo
+// impide; esta guarda lo hace explícito y cubre edades cargadas con setters
+// crudos. Sin tope, growthCap_ == Dead y stage_ nunca es Dead aquí.
 // -----------------------------------------------------------------------------
 void LifeFSM::evaluateTransitions_(const Stats& stats, uint16_t attentionScore) {
     (void)stats;   // stats no se usa directamente aquí, pero se mantiene en firma para extensibilidad
+
+    if (stage_ >= growthCap_) return;
 
     switch (stage_) {
         case LifeStage::Egg:

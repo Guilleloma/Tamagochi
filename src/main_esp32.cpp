@@ -11,6 +11,8 @@
 //
 // Comportamiento:
 //   - Boot       → carga PersistedState v2 → aplica a StatsEngine/LifeFSM
+//   - Pausa de crecimiento (GROWTH_CAP_STAGE, config.h) → tope de etapa en
+//     LifeFSM; un pet guardado por encima se degrada al cargar y se persiste
 //   - Schedulers → decay, envejecimiento, render, autosave (no-bloqueante)
 //   - Botón      → short click=moveCursor, long press=acción HUD
 //   - Acciones   → Feed/Play/Clean/Medicate/Discipline/Lights
@@ -50,6 +52,7 @@
 #include "StatsEngine.h"
 #include "LifeFSM.h"
 #include "Persistence.h"
+#include "JsonCodec.h"       // lifeStageToString() — nombres de etapa para los logs
 #include "LittleFsStorage.h"
 #include "InputHandler.h"
 #include "DisplayRendererColor.h"
@@ -74,6 +77,14 @@
 #else
   static_assert(FIRMWARE_VERSION == 0x0300,
                 "Prod build esp32s3 debe usar FIRMWARE_VERSION 0x0300");
+#endif
+
+// Pausa de crecimiento (config.h): el tope debe ser una etapa alcanzable por
+// edad (Egg..Old). Dead no tiene sentido como tope (equivale a no tenerlo).
+#if GROWTH_CAP_ENABLED
+  static_assert(static_cast<int>(GROWTH_CAP_STAGE) >= static_cast<int>(LifeStage::Egg) &&
+                static_cast<int>(GROWTH_CAP_STAGE) <  static_cast<int>(LifeStage::Dead),
+                "GROWTH_CAP_STAGE debe ser 0=Egg..4=Old (LifeStage, ver Persistence.h)");
 #endif
 
 // =============================================================================
@@ -805,6 +816,14 @@ void setup() {
     // StatsEngine.sRand01_ continuará usando defaultRand01_ (rand()/RAND_MAX),
     // que ahora tiene semilla aleatoria. No hace falta setRandomSource() adicional.
 
+    // ── Pausa de crecimiento — ANTES de cargar Persistence ───────────────────
+    // restoreLifeState() (más abajo) degrada al tope un pet guardado en una
+    // etapa superior, así que el tope tiene que estar puesto antes de la carga.
+#if GROWTH_CAP_ENABLED
+    lifeFSM.setGrowthCap(static_cast<LifeStage>(GROWTH_CAP_STAGE));
+    LOG_INFO("[life] growth cap activo: %s", JsonCodec::lifeStageToString(lifeFSM.growthCap()));
+#endif
+
     // ── Cargar estado persistido ───────────────────────────────────────────────
     PersistedState loaded;
     LoadResult lr = persistence.load(loaded);
@@ -820,10 +839,22 @@ void setup() {
     }
 
     // Aplicar estado cargado a StatsEngine y LifeFSM.
+    // restoreLifeState() carga etapa + edad aplicando el tope de crecimiento:
+    // si la etapa guardada lo supera (y no es Dead) la degrada al tope con la
+    // edad de entrada a esa etapa. Los stats (applyToStatsEngine) no cambian.
     applyToStatsEngine(loaded, statsEngine);
-    lifeFSM.setStage(static_cast<LifeStage>(loaded.lifeStage));
-    lifeFSM.setAgeMinutes(loaded.ageMinutes);
+    const LifeStage savedStage = static_cast<LifeStage>(loaded.lifeStage);
+    const bool degradedByGrowthCap = lifeFSM.restoreLifeState(savedStage, loaded.ageMinutes);
     lifeFSM.setDeathSustainMs(loaded.deathSustainMs);
+    if (degradedByGrowthCap) {
+        LOG_WARN("[life] growth cap: etapa guardada %s (age=%u) supera el tope %s "
+                 "-> degradada a %s (age=%u), stats conservados",
+                 JsonCodec::lifeStageToString(savedStage),
+                 static_cast<unsigned>(loaded.ageMinutes),
+                 JsonCodec::lifeStageToString(lifeFSM.growthCap()),
+                 JsonCodec::lifeStageToString(lifeFSM.stage()),
+                 static_cast<unsigned>(lifeFSM.ageMinutes()));
+    }
 
     // Inicializar previousStage_ con el estado cargado para detectar correctamente
     // la resurrección Dead→Egg en el primer tick tras el boot.
@@ -840,7 +871,9 @@ void setup() {
         renderer->setAdultType(loaded.adultType);
     }
     renderer->setLastDeathCause(loaded.lastDeathCauseCode);
-    renderer->setAgeMinutes(loaded.ageMinutes);
+    // Edad de LifeFSM, no la de flash: con la pausa de crecimiento puede haber
+    // sido degradada o clampada en restoreLifeState().
+    renderer->setAgeMinutes(lifeFSM.ageMinutes());
     renderer->setDeathCount(loaded.deathCount);
     // WiFi Fase 5: estado inicial Disabled hasta que WifiManager::begin() conecte.
     // Si WIFI_SSID está vacío en secrets.h, WifiManager permanece Disabled y
@@ -913,6 +946,17 @@ void setup() {
     bus.subscribe(EventType::ActionMedicateRequested,  onActionMedicate);
     bus.subscribe(EventType::ActionDisciplineRequested, onActionDiscipline);
     bus.subscribe(EventType::ActionLightsRequested,    onActionLights);
+
+    // Pausa de crecimiento: si la carga degradó la etapa, persistir ya (save
+    // síncrono vía onPersistRequested, recién suscrito) en vez de esperar al
+    // autosave de 5 min. Un fallo lo loguea onPersistRequested; aun así la
+    // degradación es idempotente: el siguiente boot volvería a aplicarla.
+    if (degradedByGrowthCap) {
+        LOG_INFO("[life] growth cap: guardando el estado degradado (stage=%s age=%u)",
+                 JsonCodec::lifeStageToString(lifeFSM.stage()),
+                 static_cast<unsigned>(lifeFSM.ageMinutes()));
+        bus.publish({EventType::PersistRequested, 0});
+    }
 
     // ── WiFi no bloqueante — Fase 5 ───────────────────────────────────────────
     // begin() devuelve en < 5 ms. Si WIFI_SSID está vacío en secrets.h, marca

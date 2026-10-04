@@ -36,9 +36,12 @@ namespace JsonCodec {
 // StatsEngine): energy gobierna isSleeping en tick(), lightsOn es el único
 // control manual (POST /api/v1/lights). isSleeping sigue presente pero es
 // solo-lectura: ya no es controlable por el cliente.
+// data.growthCap: etapa tope de la pausa de crecimiento, con el mismo formato
+// que lifeStage ("Baby"...), o null si no hay tope. Siempre presente.
+// growthCap == nullptr → null (el caller pasa lifeStageToString(cap) o nullptr).
 size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                       uint16_t deathCount, bool turbo, uint32_t uptimeMs,
-                      const BatterySnapshot& battery,
+                      const BatterySnapshot& battery, const char* growthCap,
                       char* out, size_t outSize);
 
 // Serializa info de telemetría del dispositivo.
@@ -92,10 +95,11 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
 // Serializa respuesta de acción: state completo + actionApplied.
 // actionValue se usa para "amount" (feed/play/discipline) o ignorado (-1) para clean/medicate.
 // Para lights, actionValue: 1=true, 0=false.
+// growthCap: mismo contrato que en serializeState (nullptr → null).
 size_t serializeActionResponse(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                                uint16_t deathCount, bool turbo, uint32_t uptimeMs,
                                const char* actionType, int32_t actionValue,
-                               const BatterySnapshot& battery,
+                               const BatterySnapshot& battery, const char* growthCap,
                                char* out, size_t outSize);
 
 // Serializa formato de error estándar (cumple api-conventions.md).

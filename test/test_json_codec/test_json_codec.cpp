@@ -64,7 +64,7 @@ void tearDown() {}
 void test_serialize_state_produces_valid_json() {
     Stats s = makeDefaultStats();
     size_t written = JsonCodec::serializeState(
-        s, LifeStage::Baby, 142, 0, false, 1741234567u, makeValidBattery(), g_buf, sizeof(g_buf));
+        s, LifeStage::Baby, 142, 0, false, 1741234567u, makeValidBattery(), nullptr, g_buf, sizeof(g_buf));
 
     TEST_ASSERT_GREATER_THAN(0u, written);
 
@@ -85,7 +85,7 @@ void test_serialize_state_produces_valid_json() {
 // =============================================================================
 void test_serialize_state_camel_case_fields() {
     Stats s = makeDefaultStats();
-    JsonCodec::serializeState(s, LifeStage::Baby, 142, 0, false, 0u, makeValidBattery(), g_buf, sizeof(g_buf));
+    JsonCodec::serializeState(s, LifeStage::Baby, 142, 0, false, 0u, makeValidBattery(), nullptr, g_buf, sizeof(g_buf));
 
     JsonDocument doc;
     deserializeJson(doc, g_buf);
@@ -122,7 +122,7 @@ void test_serialize_state_camel_case_fields() {
 // =============================================================================
 void test_serialize_state_lifestage_as_string() {
     Stats s = makeDefaultStats();
-    JsonCodec::serializeState(s, LifeStage::Baby, 142, 0, false, 0u, makeValidBattery(), g_buf, sizeof(g_buf));
+    JsonCodec::serializeState(s, LifeStage::Baby, 142, 0, false, 0u, makeValidBattery(), nullptr, g_buf, sizeof(g_buf));
 
     JsonDocument doc;
     deserializeJson(doc, g_buf);
@@ -152,7 +152,7 @@ void test_serialize_state_below_buffer_limit() {
     s.lightsOn       = true;
 
     size_t written = JsonCodec::serializeState(
-        s, LifeStage::Old, 99999u, 9999u, true, 0xFFFFFFFFu, makeValidBattery(), g_buf, sizeof(g_buf));
+        s, LifeStage::Old, 99999u, 9999u, true, 0xFFFFFFFFu, makeValidBattery(), "Adult", g_buf, sizeof(g_buf));
 
     // 0 indica truncado (serializeJson devuelve 0 si el buffer es insuficiente)
     TEST_ASSERT_GREATER_THAN(0u, written);
@@ -362,7 +362,7 @@ void test_serialize_info_reset_telemetry_fields_present() {
 void test_serialize_state_battery_fields_unknown() {
     Stats s = makeDefaultStats();
     size_t written = JsonCodec::serializeState(
-        s, LifeStage::Baby, 142, 0, false, 0u, makeUnknownBattery(), g_buf, sizeof(g_buf));
+        s, LifeStage::Baby, 142, 0, false, 0u, makeUnknownBattery(), nullptr, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -386,7 +386,7 @@ void test_serialize_action_response_battery_fields_valid() {
     Stats s = makeDefaultStats();
     size_t written = JsonCodec::serializeActionResponse(
         s, LifeStage::Baby, 142, 0, false, 0u,
-        "feed", 20, makeValidBattery(), g_buf, sizeof(g_buf));
+        "feed", 20, makeValidBattery(), nullptr, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -415,7 +415,7 @@ void test_serialize_action_response_battery_fields_unknown() {
     Stats s = makeDefaultStats();
     size_t written = JsonCodec::serializeActionResponse(
         s, LifeStage::Baby, 142, 0, false, 0u,
-        "clean", -1, makeUnknownBattery(), g_buf, sizeof(g_buf));
+        "clean", -1, makeUnknownBattery(), nullptr, g_buf, sizeof(g_buf));
     TEST_ASSERT_GREATER_THAN(0u, written);
 
     JsonDocument doc;
@@ -430,6 +430,61 @@ void test_serialize_action_response_battery_fields_unknown() {
     // clean/medicate: actionValue<0 -> "amount" no se incluye en la respuesta.
     TEST_ASSERT_EQUAL_STRING("clean", doc["actionApplied"]["type"].as<const char*>());
     TEST_ASSERT_TRUE(doc["actionApplied"]["amount"].isNull());
+}
+
+// =============================================================================
+// 5g. serialize_state_growth_cap_null_without_cap
+// Sin pausa de crecimiento, growthCap está PRESENTE y vale null (campo
+// siempre presente — los clientes no tienen que distinguir ausente/null).
+// isNull() de ArduinoJson no distingue ausente de null → se mira el texto.
+// =============================================================================
+void test_serialize_state_growth_cap_should_be_null_without_cap() {
+    Stats s = makeDefaultStats();
+    size_t written = JsonCodec::serializeState(
+        s, LifeStage::Adult, 300, 0, false, 0u, makeValidBattery(), nullptr, g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+    TEST_ASSERT_NOT_NULL(strstr(g_buf, "\"growthCap\":null"));
+}
+
+// =============================================================================
+// 5h. serialize_state_growth_cap_as_stage_string
+// Con tope Baby, growthCap usa el mismo formato que lifeStage ("Baby").
+// =============================================================================
+void test_serialize_state_growth_cap_should_use_life_stage_format() {
+    Stats s = makeDefaultStats();
+    size_t written = JsonCodec::serializeState(
+        s, LifeStage::Baby, 5, 0, false, 0u, makeValidBattery(),
+        JsonCodec::lifeStageToString(LifeStage::Baby), g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    deserializeJson(doc, g_buf, written);
+    TEST_ASSERT_TRUE(doc["data"]["growthCap"].is<const char*>());
+    TEST_ASSERT_EQUAL_STRING("Baby", doc["data"]["growthCap"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(doc["data"]["lifeStage"].as<const char*>(),
+                             doc["data"]["growthCap"].as<const char*>());
+}
+
+// =============================================================================
+// 5i. serialize_action_response_growth_cap
+// Las respuestas de acción replican el state completo, incluido growthCap.
+// =============================================================================
+void test_serialize_action_response_should_include_growth_cap() {
+    Stats s = makeDefaultStats();
+    size_t written = JsonCodec::serializeActionResponse(
+        s, LifeStage::Baby, 5, 0, false, 0u,
+        "feed", 20, makeValidBattery(), "Baby", g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+
+    JsonDocument doc;
+    deserializeJson(doc, g_buf, written);
+    TEST_ASSERT_EQUAL_STRING("Baby", doc["data"]["growthCap"].as<const char*>());
+
+    written = JsonCodec::serializeActionResponse(
+        s, LifeStage::Baby, 5, 0, false, 0u,
+        "feed", 20, makeValidBattery(), nullptr, g_buf, sizeof(g_buf));
+    TEST_ASSERT_GREATER_THAN(0u, written);
+    TEST_ASSERT_NOT_NULL(strstr(g_buf, "\"growthCap\":null"));
 }
 
 // =============================================================================
@@ -575,6 +630,9 @@ int main() {
     RUN_TEST(test_serialize_state_battery_fields_unknown);
     RUN_TEST(test_serialize_action_response_battery_fields_valid);
     RUN_TEST(test_serialize_action_response_battery_fields_unknown);
+    RUN_TEST(test_serialize_state_growth_cap_should_be_null_without_cap);
+    RUN_TEST(test_serialize_state_growth_cap_should_use_life_stage_format);
+    RUN_TEST(test_serialize_action_response_should_include_growth_cap);
     RUN_TEST(test_parse_feed_payload_valid);
     RUN_TEST(test_parse_feed_payload_missing_amount);
     RUN_TEST(test_parse_feed_payload_amount_out_of_range);

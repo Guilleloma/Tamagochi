@@ -40,14 +40,26 @@ const char* lifeStageToString(LifeStage stage) {
 // Serialización de estado
 // =============================================================================
 
+// growthCap siempre presente: string con la etapa tope o null (sin tope).
+// El null se escribe explícito en vez de asignar el puntero nulo, para que el
+// contrato no dependa de cómo trate ArduinoJson un const char* nulo.
+static void writeGrowthCap(JsonObject data, const char* growthCap) {
+    if (growthCap != nullptr) {
+        data["growthCap"] = growthCap;
+    } else {
+        data["growthCap"] = nullptr;
+    }
+}
+
 size_t serializeState(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                       uint16_t deathCount, bool turbo, uint32_t uptimeMs,
-                      const BatterySnapshot& battery,
+                      const BatterySnapshot& battery, const char* growthCap,
                       char* out, size_t outSize) {
     JsonDocument doc;
 
     JsonObject data = doc["data"].to<JsonObject>();
     data["lifeStage"]      = lifeStageToString(stage);
+    writeGrowthCap(data, growthCap);
     data["ageMinutes"]     = ageMinutes;
     data["hunger"]         = stats.hunger;
     data["happiness"]      = stats.happiness;
@@ -129,12 +141,13 @@ size_t serializeInfo(uint16_t firmwareVersion, uint32_t uptimeMs,
 size_t serializeActionResponse(const Stats& stats, LifeStage stage, uint32_t ageMinutes,
                                uint16_t deathCount, bool turbo, uint32_t uptimeMs,
                                const char* actionType, int32_t actionValue,
-                               const BatterySnapshot& battery,
+                               const BatterySnapshot& battery, const char* growthCap,
                                char* out, size_t outSize) {
     JsonDocument doc;
 
     JsonObject data = doc["data"].to<JsonObject>();
     data["lifeStage"]      = lifeStageToString(stage);
+    writeGrowthCap(data, growthCap);
     data["ageMinutes"]     = ageMinutes;
     data["hunger"]         = stats.hunger;
     data["happiness"]      = stats.happiness;
