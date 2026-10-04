@@ -5,6 +5,8 @@
 // Endpoints (hito 5):
 //   GET  /api/v1/state        → estado completo del Tamagochi (stats + stage + age)
 //                                + batteryPercent/batteryCharging/batteryValid
+//                                + growthCap (etapa tope de la pausa de
+//                                  crecimiento, p.ej. "Baby", o null)
 //   GET  /api/v1/info         → telemetría del dispositivo (firmware, heap, RSSI)
 //                                + battery* (igual que /state) + batteryMillivolts
 //                                + resetReason/bootCount/minFreeHeap (hito 9 —
@@ -170,6 +172,11 @@ private:
     // es nullptr (ESP8266, o ESP32 con BATTERY_SENSE_ENABLED=0). Centraliza el
     // null-check en un solo sitio en vez de repetirlo en cada handler.
     BatterySnapshot batterySnapshot_() const;
+
+    // Nombre de la etapa tope de la pausa de crecimiento (mismo formato que
+    // lifeStage, p.ej. "Baby") o nullptr si LifeFSM no tiene tope → el JSON
+    // de /state y de las acciones lo serializa como "growthCap": null.
+    const char* growthCapName_() const;
 
     // Diagnóstico de batería sin gatear — 0 si battery_ es nullptr. Usados
     // solo en handleGetInfo_ (ver JsonCodec::serializeInfo). Mismo criterio de

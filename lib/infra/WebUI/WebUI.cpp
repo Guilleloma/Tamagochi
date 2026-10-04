@@ -219,6 +219,7 @@ void WebUI::handleGetState_(AsyncWebServerRequest* req) {
         turbo,
         millis(),
         batterySnapshot_(),
+        growthCapName_(),
         buf,
         sizeof(buf)
     );
@@ -551,6 +552,7 @@ void WebUI::sendActionResponse_(AsyncWebServerRequest* req,
         actionType,
         actionValue,
         batterySnapshot_(),
+        growthCapName_(),
         buf,
         sizeof(buf)
     );
@@ -641,6 +643,15 @@ void WebUI::sendJsonError_(AsyncWebServerRequest* req, int code,
 // -----------------------------------------------------------------------------
 BatterySnapshot WebUI::batterySnapshot_() const {
     return battery_ ? battery_->snapshot() : BatterySnapshot{};
+}
+
+// -----------------------------------------------------------------------------
+// growthCapName_ — etapa tope de la pausa de crecimiento para /state y las
+// respuestas de acción. lifeStageToString devuelve literales estáticos, así
+// que el puntero sigue vivo durante serializeJson().
+// -----------------------------------------------------------------------------
+const char* WebUI::growthCapName_() const {
+    return fsm_.hasGrowthCap() ? JsonCodec::lifeStageToString(fsm_.growthCap()) : nullptr;
 }
 
 // -----------------------------------------------------------------------------
