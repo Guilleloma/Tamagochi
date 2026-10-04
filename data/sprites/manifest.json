@@ -70,6 +70,19 @@
             "sleep/2.bin",
             "sleep/3.bin"
           ]
+        },
+        "jump": {
+          "fps": 8,
+          "frames": [
+            "jump/0.bin",
+            "jump/1.bin",
+            "jump/2.bin",
+            "jump/3.bin",
+            "jump/4.bin",
+            "jump/5.bin",
+            "jump/6.bin",
+            "jump/7.bin"
+          ]
         }
       }
     },

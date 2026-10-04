@@ -249,8 +249,9 @@ static void wakeScreen() {
 
 // Publica el EventType de la acción HUD seleccionada y dispara la animación one-shot
 // correspondiente en el renderer. triggerActionAnimation() resuelve el mapeo
-// acción→MoodColor internamente (Feed→Eat, Play/Medicate→Happy, Discipline→Sad,
-// Clean→Idle) con fallback a idle si la etapa no tiene esa animación.
+// acción→MoodColor internamente vía MoodLogic (Feed→Eat, Play→Jump,
+// Medicate→Happy, Discipline→Sad, Clean→Idle) con la cadena de fallback
+// Jump→Happy→Idle si la etapa no tiene esa animación (solo el baby salta).
 static void executeSelectedAction_() {
     ActionKind action = renderer->currentSelectedAction();
     switch (action) {
