@@ -144,6 +144,28 @@
   #define LIFE_FSM_TIME_SCALE   1
 #endif
 
+// === Pausa de crecimiento (growth cap) ===
+// GROWTH_CAP_STAGE: etapa máxima a la que la mascota puede llegar por edad,
+// como valor de LifeStage (Persistence.h): 0=Egg 1=Baby 2=Kid 3=Adult 4=Old.
+// Por qué: de momento solo el bebé tiene las animaciones nuevas (Kling), así
+// que el crecimiento se pausa en Baby hasta que el resto de etapas tengan las
+// suyas. Con tope (ver LifeFSM::setGrowthCap / restoreLifeState):
+//   - no evoluciona más allá del tope y la edad se congela justo antes del
+//     umbral de salida (al quitar el tope no se salta etapas);
+//   - un pet guardado en una etapa superior se degrada al tope al arrancar,
+//     conservando sus stats, y el estado degradado se persiste en el acto;
+//   - muerte por salud y resurrección como Egg no cambian.
+// Se define en platformio.ini ([env:esp32s3], lo heredan _turbo y _ota):
+// quitar esa línea = vuelve a evolucionar. Sin definir = sin tope.
+// Solo lo aplica main_esp32.cpp (ESP32-S3); el firmware ESP8266 no lo usa.
+// El rango se valida con static_assert en main_esp32.cpp (allí LifeStage es
+// visible; un #if aquí no podría comprobar un -D con nombre de enum).
+#ifndef GROWTH_CAP_STAGE
+  #define GROWTH_CAP_ENABLED 0
+#else
+  #define GROWTH_CAP_ENABLED 1
+#endif
+
 // === Persistence (Hito 7) ===
 #define PERSIST_AUTOSAVE_MS    (5UL * 60UL * 1000UL)   // 5 min wall-clock
 // Política: NO se escala con TURBO_MODE — evita escribir flash en tests
