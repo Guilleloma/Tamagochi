@@ -7,7 +7,7 @@ Este repositorio contiene **dos variantes de firmware** para el mismo Tamagotchi
 | **ESP8266 mono** (original) | ideaspark ESP8266 0.96" OLED V3.2 | SSD1306 128×64 mono | `src/main.cpp` |
 | **ESP32-S3 color** (Furbygotchi) | Waveshare ESP32-S3 Zero | JD9853 240×296 IPS TFT | `src/main_esp32.cpp` |
 
-El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 203 tests `native` aplican a las dos.
+El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 232 tests `native` aplican a las dos.
 
 ---
 
@@ -83,7 +83,7 @@ La acción **"Luces"** (fiel al Tamagotchi original del 97) reemplaza al viejo b
 | **domain/ui** | Mecánica de juego: energía + sueño automático + luces on/off (fiel 97) — ver sección abajo | ✅ |
 | **build** | TURBO_MODE ×60 (env `esp12e_turbo`) para QA | ✅ |
 | **build** | OTA upload via WiFi (env `esp12e_ota`) | ✅ |
-| **build** | Tests host-native — **203 tests pasando** | ✅ |
+| **build** | Tests host-native — **232 tests pasando** | ✅ |
 | **build** | Script integración HTTP — **26 tests pasando** | ✅ |
 | **diferido** | Sprites EGG/KID/ADULT/OLD/DEAD reales (mono) | ⏸️ usando BABY como placeholder |
 | **diferido** | Gestión de energía de HARDWARE (auto-dim de panel, modem sleep WiFi) | ⏸️ Fase 5 — distinto de la mecánica de juego `energy`, ya ✅ |
@@ -113,7 +113,7 @@ OTA_PASSWORD="tu_password" pio run -e esp12e_ota -t upload
 # Monitor serie (115200 baud)
 pio device monitor
 
-# Tests host-native (no necesita la placa) — 203/203
+# Tests host-native (no necesita la placa) — 232/232
 pio test -e native
 ```
 
@@ -141,6 +141,8 @@ cp include/secrets.h.example include/secrets.h
 ```
 Tamagotchi/
 ├── platformio.ini
+├── partitions/
+│   └── esp32s3_4mb_ota_fs.csv ← tabla 4 MB del ESP32-S3 (OTA 2×1,125 MB + LittleFS 1,625 MB)
 ├── include/
 │   ├── config.h               ← pines, timings, TURBO_FACTOR
 │   └── sprites_generated.h    ← assets como arrays PROGMEM (auto-generado)
@@ -163,6 +165,7 @@ Tamagotchi/
 │       ├── DisplayRenderer/   ← U8g2 mono + scenes + tabla sprites por etapa + overlays
 │       ├── DisplayRendererColor/ ← Arduino_GFX color (ESP32-S3) + MessageView
 │       ├── MarqueeLogic/      ← scroll de texto horizontal (lógica pura)
+│       ├── MoodLogic/         ← acción → animación del personaje + fallback jump→happy→idle (pura)
 │       └── BootSplash/        ← pantalla de arranque
 ├── data/                      ← LittleFS: index.html + app.css + app.js (frontend)
 ├── scripts/
@@ -170,7 +173,7 @@ Tamagotchi/
 ├── src/
 │   ├── main.cpp               ← orquestación ESP8266: singletons + suscripciones + loop
 │   └── main_esp32.cpp         ← orquestación ESP32-S3 (incluye consumo del MessageBox)
-├── test/                      ← 203 tests host-native (14 suites)
+├── test/                      ← 232 tests host-native (16 suites)
 │   ├── test_smoke/            ← canario del env native (1)
 │   ├── test_stats_engine/     ← 42 tests (incluye energía/auto-sueño/luces)
 │   ├── test_persistence/      ← 25 tests (incluye migrate v1→v2→v3)
@@ -182,8 +185,10 @@ Tamagotchi/
 │   ├── test_battery_gauge/    ← 25 tests (filtrado + gate)
 │   ├── test_boot_splash/      ← 5 tests
 │   ├── test_marquee_logic/    ← 13 tests (scroll)
+│   ├── test_mood_logic/       ← 23 tests (acción→mood, fallback, duración del salto)
 │   ├── test_message_box/      ← 13 tests (sanitizado UTF-8→ASCII)
 │   ├── test_bootloop_guard/   ← 9 tests (anti-boot-loop, decisión pura)
+│   ├── test_screen_power_logic/ ← 6 tests (apagado de pantalla por inactividad)
 │   └── test_connectivity_watchdog_logic/ ← 9 tests (tiempo real sin WiFi)
 ├── assets/sprites/            ← PNGs fuente (1-bit, 32×32 y 16×16)
 ├── tools/
@@ -257,7 +262,7 @@ Cubre 26 escenarios: auth (401), happy path por endpoint (200 + `actionApplied`)
 
 ### Tests automáticos
 ```bash
-pio test -e native   # 203/203 deben pasar
+pio test -e native   # 232/232 deben pasar
 ```
 
 ### Pruebas funcionales en hardware
@@ -306,7 +311,7 @@ Comprueba:
 
 ## Variante ESP32-S3 color (Furbygotchi)
 
-Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 203 tests `native` validan ambas variantes.
+Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vida: **huevo → bebé → niño → adulto → viejo → fantasma**. El dominio de negocio (StatsEngine / LifeFSM / Persistence) es exactamente el mismo que la versión ESP8266; los 232 tests `native` validan ambas variantes.
 
 ### Hardware ESP32-S3
 
@@ -348,7 +353,21 @@ Los sprites se generan con el proyecto **Pixel Sprites** (repo separado), se exp
 | Color key | Magenta `0xF81F` (63519) — píxeles con alpha < 128 → transparente en firmware |
 | Longitud carpetas | Máximo 31 caracteres (límite LittleFS) → usar nombres cortos |
 | Etapas | `egg` / `baby` / `kid` / `adult` / `old` / `ghost` |
-| Animaciones | `idle` / `happy` / `sad` / `eat` / `sleep` (egg y ghost solo `idle`) |
+| Animaciones | `idle` / `happy` / `sad` / `eat` / `sleep` (egg y ghost solo `idle`) + `jump` (solo baby) |
+
+#### Animación `jump` — Play en el baby
+
+Al ejecutar **Play** desde el menú del botón, el furby-baby da un **salto** (`baby/jump`, 8 frames 48×48 a 8 fps). Con `SPRITE_ANIM_SLOWDOWN=2` cada frame dura 250 ms, así que el salto completo dura **2 s**; la pelota (overlay de Play) se mantiene y dura lo mismo que el salto.
+
+- La lógica de qué animación se ve vive en `lib/ui/MoodLogic/MoodLogic.h` (pura, 23 tests host): `Play → Jump`, con cadena de fallback **Jump → Happy → Idle** si la etapa no tiene `jump` (kid/adult/old se ven `happy`; egg/ghost `idle`).
+- Duración del one-shot = `max(1200 ms, frames × 1000/fps × slowdown)`: happy/sad siguen en 1,2 s, eat 1,25 s, jump 2 s. El frame se calcula por tiempo desde que se pulsa, así que el salto **siempre empieza en el suelo** y el aterrizaje no se corta.
+- `jump` es **opcional** al cargar: si el LittleFS es antiguo (sin `uploadfs`), se loguea un `WARN` y Play se ve como `happy` sin dejar al resto de etapas sin sprite.
+- Solo el botón físico dispara animaciones: `POST /api/v1/play` desde el dashboard aplica la acción pero no anima.
+- Para reexportar los sprites del baby desde Pixel Sprites hay que pasar `--folder baby` y **las 6 animaciones** (el upsert del manifest reemplaza la entrada entera):
+  ```bash
+  node tools/export-esp32.mjs --id 797ec06d-c81f-4f02-882a-df63976879b6 --folder baby \
+    --animations idle,happy,sad,eat,sleep,jump --merge-into ~/Tamagochi/data/sprites/manifest.json
+  ```
 
 ### Mensajes del padre (marquee)
 
@@ -377,6 +396,25 @@ pio run -e esp32s3_ota -t upload
 pio test -e native
 ```
 
+#### Tabla de particiones propia (4 MB)
+
+El ESP32-S3 usa `partitions/esp32s3_4mb_ota_fs.csv` (la heredan `esp32s3_turbo` y `esp32s3_ota`) en lugar de `default.csv`, porque los sprites ya no cabían: con el `jump` del baby, `buildfs` fallaba con `lfs_write error(-28): File system is full`.
+
+| Partición | `default.csv` | Propia |
+|---|---|---|
+| `app0` / `app1` (OTA) | 2 × 1,25 MB | 2 × 1,125 MB (firmware actual ≈ 0,95 MB, 80 %) |
+| `spiffs` (LittleFS) | 1,375 MB @ `0x290000` | **1,625 MB** @ `0x250000` |
+| `nvs` / `otadata` / `coredump` | sin cambios | sin cambios |
+
+> **El primer flasheo con esta tabla tiene que ir por USB**, firmware y filesystem:
+> ```bash
+> pio run -e esp32s3 -t upload     # escribe también la tabla de particiones
+> pio run -e esp32s3 -t uploadfs   # LittleFS con sprites + dashboard
+> ```
+> La tabla de particiones **no viaja por OTA** (`esp32s3_ota` solo reescribe el slot de app) y el LittleFS cambia de dirección, así que un OTA sobre una placa con la tabla antigua no la migra.
+>
+> **`uploadfs` borra el estado del pet**: la partida se guarda en el mismo LittleFS, y la imagen nueva lo reemplaza entero → la mascota vuelve a **Egg** (eclosiona a los 5 min de edad, ver `LifeFSM::kEggHatchMin`; con `esp32s3_turbo` ×60, a los ~5 s).
+
 ### WiFi / OTA / WebUI — ESP32-S3
 
 Igual que en la variante ESP8266: crear `include/secrets.h` desde la plantilla antes del primer build.
@@ -403,7 +441,12 @@ cp include/secrets.h.example include/secrets.h
 - **Fase 4 (ESP32-S3)** — Furbygotchi color: JD9853 + sprites RGB565 + LittleFS assets + evolución visual por etapa.
 - **Fase 5** — gestión de energía (auto-dim/off del OLED/TFT, modem sleep WiFi) para llegar a 6+ h con LiPo 500 mAh.
 
-### Changelog reciente (13-15 jul 2026)
+### Changelog reciente (13 jul - 4 oct 2026)
+
+**4 oct — Salto del baby al jugar + tabla de particiones propia:**
+- **Play → `jump`** en el furby-baby (8 frames, 2 s, empieza en el suelo); fallback Jump → Happy → Idle en las etapas sin salto. Lógica pura en `MoodLogic` — 23 tests host nuevos.
+- **Tabla de particiones 4 MB** con LittleFS de 1,625 MB (antes 1,375 MB, sin sitio para el salto). Primer flasheo por USB; `uploadfs` reinicia la mascota a Egg.
+- Tests host-native: **209 → 232**.
 
 **15 jul — Energía, sueño automático y luces on/off (fiel Tamagotchi 97):**
 - Nueva stat **`energy`** (0-100) en `StatsEngine`: drena despierta, se duerme sola al llegar a ≤20 y despierta sola al llegar a ≥80 (histéresis 20↔80) — `isSleeping` deja de ser un toggle manual, pasa a ser 100% automático.
