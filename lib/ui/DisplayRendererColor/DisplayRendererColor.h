@@ -2,9 +2,10 @@
  * DisplayRendererColor.h — renderer a color para ESP32-S3 + TFT JD9853 240×296.
  *
  * FASE 6: sprites reales por etapa de vida (egg/baby/kid/adult/old/ghost).
- * Todas las etapas se precargan en PSRAM al boot (~478 KB).
- * framesForMood_() resuelve (lifeStage_, mood) a la animación correcta,
- * con fallback a idle de la etapa si el mood no tiene animación propia.
+ * Todas las etapas se precargan en PSRAM al boot (~486 KB).
+ * framesForMood_() resuelve (lifeStage_, mood) a la animación correcta con la
+ * cadena de fallback de MoodLogic (Jump→Happy→Idle; el resto → Idle) si la
+ * etapa no tiene animación propia para ese mood.
  *
  * FASE 4 (menú): drawHudBottom_() pinta icono 24×24 + label de la acción
  * seleccionada, centrados como bloque horizontal en la card inferior.
@@ -62,8 +63,8 @@ struct SpriteMapping {
 // StageSprites — buffers PSRAM de todas las animaciones de una etapa de vida.
 //
 // Indexados por MoodColor: frames[Idle]=0, Happy=1, Sad=2, Eat=3, Sleep=4,
-// Jump=5. Los moods sin animación propia dejan count=0; framesForMood_() cae
-// a idle.
+// Jump=5. Los moods sin animación propia dejan count=0; framesForMood_()
+// aplica la cadena de fallback de MoodLogic::resolveMood().
 // =============================================================================
 struct StageSprites {
     ColorSpriteFrames frames[kMoodCount];  // one per MoodColor value
@@ -97,15 +98,17 @@ public:
     void setBattery(uint8_t percent, bool charging, bool valid);
 
     // ── Triggers de animación one-shot ───────────────────────────────────────
-    // triggerActionAnimation: reproduce la animación asociada a la acción
-    // durante ~1000 ms y luego vuelve al mood calculado por computeMood_().
-    // Mapeo acción → MoodColor (con fallback a idle si la etapa no tiene ese mood):
+    // triggerActionAnimation: reproduce UNA vez la animación asociada a la
+    // acción, desde su frame 0, durante max(kActionAnimDurationMs, ciclo
+    // completo) — 1200 ms para happy/sad, 1250 ms eat, 2000 ms el salto — y
+    // luego vuelve al mood calculado por computeMood_().
+    // Mapeo acción → MoodColor (MoodLogic::moodForAction + resolveMood):
     //   Feed       → Eat   (come)
-    //   Play       → Happy (alegre)
+    //   Play       → Jump  (salta; sin "jump" en la etapa → Happy → Idle)
     //   Medicate   → Happy
     //   Clean      → Idle  (limpieza neutra; borra overlay caca visualmente)
     //   Discipline → Sad   (consecuencia negativa)
-    //   Sleep/Stats→ sin one-shot (Sleep lo gestiona isSleeping)
+    //   Lights/Stats → sin one-shot (el sueño lo gestiona isSleeping)
     void triggerActionAnimation(ActionKind action);
 
     void triggerHatchAnimation();   // reservado (Fase 3)
@@ -175,8 +178,11 @@ private:
 
     // Timer unificado de acción one-shot (Feed/Play/Clean/Medicate/Discipline).
     // Mientras actionAnimRemainingMs_ > 0, drawSprite_() usa actionAnimMood_ en lugar
-    // del mood calculado por computeMood_().
+    // del mood calculado por computeMood_(), y elige el frame por el tiempo
+    // transcurrido (actionAnimTotalMs_ - actionAnimRemainingMs_).
+    // actionAnimTotalMs_: duración con la que se disparó el one-shot actual.
     uint32_t  actionAnimRemainingMs_ = 0;
+    uint32_t  actionAnimTotalMs_     = 0;
     MoodColor actionAnimMood_        = MoodColor::Idle;
 
     uint32_t hatchAnimRemainingMs_  = 0;
@@ -199,7 +205,7 @@ private:
 
     // ── Cache de animaciones por etapa — precargadas en PSRAM al boot ───────
     // spritesByStage_[stage] contiene los ColorSpriteFrames de todos los moods
-    // de esa etapa. Precargamos las 6 etapas al boot (~478 KB en PSRAM).
+    // de esa etapa. Precargamos las 6 etapas al boot (~486 KB en PSRAM).
     // El acceso en render() es O(1) sin lecturas LittleFS.
     StageSprites spritesByStage_[6];   // índice = LifeStage enum value (0-5)
     bool spritesLoaded_ = false;
@@ -214,8 +220,9 @@ private:
 
     // ── Canal de overlay one-shot (escoba/jeringa/pelota) ───────────────────
     // Segundo canal de animación independiente del mood del personaje.
-    // Se pinta ENCIMA del personaje durante kActionAnimDurationMs y luego
-    // se apaga solo. Feed NO usa overlay (solo cambia mood a Eat).
+    // Se pinta ENCIMA del personaje durante la misma duración que el one-shot
+    // del personaje (ver triggerActionAnimation) y luego se apaga solo.
+    // Feed NO usa overlay (solo cambia mood a Eat).
     //
     // overlayAnimFrames_: puntero a los ColorSpriteFrames del overlay activo
     //   (apunta a uno de los 3 sprites precarados abajo). nullptr = sin overlay.
@@ -288,9 +295,10 @@ private:
     // Altura de la card del HUD inferior (label de acción + cursor dots).
     static constexpr int16_t kHudBottomH = 60;
 
-    // Duración mínima de animación one-shot de acción (ms).
-    // ~1000 ms da tiempo a ver el ciclo de animación completo (~8 fps × 5 frames = 625 ms
-    // para eat; el resto son 4 frames, ~500 ms). Usamos 1200 ms con margen.
+    // Duración MÍNIMA de animación one-shot de acción (ms). La duración real es
+    // MoodLogic::actionAnimDurationMs(): max(este mínimo, ciclo completo de la
+    // animación a fps×SPRITE_ANIM_SLOWDOWN). Con slowdown 2 (250 ms/frame):
+    // happy/sad 4 frames = 1000 ms → 1200; eat 5 frames → 1250; jump 8 → 2000.
     static constexpr uint32_t kActionAnimDurationMs = 1200;
 
     // ── Mensaje del padre (marquee) ──────────────────────────────────────────
@@ -319,10 +327,20 @@ private:
     bool      loadSprites_();
     bool      loadMenuIcons_();
 
-    // Devuelve el puntero al ColorSpriteFrames correcto para (stage, mood).
-    // Fallback a idle de la etapa si el mood no tiene frames cargados.
+    // Devuelve el puntero al ColorSpriteFrames correcto para (stage, mood),
+    // aplicando la cadena de fallback de MoodLogic (Jump→Happy→Idle, resto→Idle).
     // Devuelve nullptr si los sprites no están cargados.
     const ColorSpriteFrames* framesForMood_(LifeStage stage, MoodColor mood) const;
+
+    // Buffers de la etapa (LifeStage fuera de rango → Baby).
+    const StageSprites& stageSprites_(LifeStage stage) const;
+
+    // Mood efectivo en `stage` según los frames cargados (MoodLogic::resolveMood).
+    MoodColor resolveMoodForStage_(LifeStage stage, MoodColor mood) const;
+
+    // Overlay del canal 2 para la acción (ball/syringe/broom); nullptr si no tiene
+    // o si su sprite no se cargó.
+    const ColorSpriteFrames* overlayForAction_(ActionKind action) const;
 
     void drawIdleMain_();
     void drawStatsView_();

@@ -12,17 +12,19 @@
  * 2. kSpriteLoad[]: tabla estática con UUID, folder y animaciones a cargar
  *    por etapa. loadSprites_() itera sobre ella y popula spritesByStage_[].
  *
- * 3. Precarga de 6 etapas al boot:
- *      egg   × 1 anim (idle×6)      =  27 KB
- *      baby  × 5 anims              = 106 KB
- *      kid   × 5 anims              = 106 KB
- *      adult × 5 anims              = 106 KB
- *      old   × 5 anims              = 106 KB
+ * 3. Precarga de 6 etapas al boot (detalle por etapa en loadSprites_()):
+ *      egg   × 1 anim (idle×2)      =   9 KB
+ *      baby  × 6 anims (+ jump×8)   = 140 KB
+ *      kid   × 5 anims              = 104 KB
+ *      adult × 5 anims              = 104 KB
+ *      old   × 5 anims              = 104 KB
  *      ghost × 1 anim (idle×6)      =  27 KB
- *      Total                        ≈ 478 KB  (de ~1.9 MB PSRAM disponible)
+ *      Total                        ≈ 486 KB  (de ~1.9 MB PSRAM disponible)
  *
- * 4. framesForMood_(stage, mood): O(1), sin LittleFS. Fallback a idle de la
- *    etapa si el mood no tiene frames (e.g. egg/ghost solo tienen idle).
+ * 4. framesForMood_(stage, mood): O(1), sin LittleFS. Aplica la cadena de
+ *    fallback de MoodLogic::resolveMood() si la etapa no tiene frames para el
+ *    mood: Jump→Happy→Idle (solo el baby tiene "jump"), el resto → Idle
+ *    (e.g. egg/ghost solo tienen idle).
  *
  * 5. drawDeadScreen_(): usa spritesByStage_[Dead].frames[Idle] (ghost real).
  *
@@ -78,49 +80,51 @@ static constexpr const char* kIconSickId   = "6d0893e1-1910-4dc5-9dc5-9049c144cb
 // Fase 6: cada etapa tiene su propio sprite real (folder corto ≤31 chars).
 // El campo "id" es el UUID del manifest (búsqueda en SpriteStore).
 // El campo "anims" lista las animaciones a cargar en orden MoodColor:
-//   índice 0 = Idle, 1 = Happy, 2 = Sad, 3 = Eat, 4 = Sleep.
-// nullptr en un slot = sin animación propia → framesForMood_() cae a Idle.
+//   índice 0 = Idle, 1 = Happy, 2 = Sad, 3 = Eat, 4 = Sleep, 5 = Jump.
+// nullptr en un slot = sin animación propia → framesForMood_() aplica la
+// cadena de fallback de MoodLogic (Jump→Happy→Idle; el resto → Idle).
 //
-// Egg  y Ghost solo tienen "idle"; el resto tienen 5 animaciones completas.
+// Egg y Ghost solo tienen "idle"; Kid/Adult/Old tienen las 5 clásicas y el
+// Baby además "jump" (salto one-shot de Play, ver triggerActionAnimation).
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct StageLoadSpec {
     LifeStage   stage;
     const char* spriteId;
     // Animación por MoodColor index (nullptr = no cargar, usar idle como fallback)
-    const char* animForMood[kMoodCount];  // [Idle, Happy, Sad, Eat, Sleep]
+    const char* animForMood[kMoodCount];  // [Idle, Happy, Sad, Eat, Sleep, Jump]
 };
 
 static const StageLoadSpec kSpriteLoad[] = {
     {
         LifeStage::Egg,
         "b89aa51e-e6d1-4208-b282-48c9b1b1f991",
-        { "idle", nullptr, nullptr, nullptr, nullptr }
+        { "idle", nullptr, nullptr, nullptr, nullptr, nullptr }
     },
     {
         LifeStage::Baby,
         "797ec06d-c81f-4f02-882a-df63976879b6",
-        { "idle", "happy", "sad", "eat", "sleep" }
+        { "idle", "happy", "sad", "eat", "sleep", "jump" }
     },
     {
         LifeStage::Kid,
         "0be78b1f-d025-4c87-a246-d12303f79200",
-        { "idle", "happy", "sad", "eat", "sleep" }
+        { "idle", "happy", "sad", "eat", "sleep", nullptr }
     },
     {
         LifeStage::Adult,
         "3d94524d-e9f3-4e4f-a2ae-ae7ac2683a87",
-        { "idle", "happy", "sad", "eat", "sleep" }
+        { "idle", "happy", "sad", "eat", "sleep", nullptr }
     },
     {
         LifeStage::Old,
         "a115f4d7-e98e-4692-afd5-85264c646cd1",
-        { "idle", "happy", "sad", "eat", "sleep" }
+        { "idle", "happy", "sad", "eat", "sleep", nullptr }
     },
     {
         LifeStage::Dead,
         "f5f69423-d2ea-48bd-9845-23672bffa540",
-        { "idle", nullptr, nullptr, nullptr, nullptr }
+        { "idle", nullptr, nullptr, nullptr, nullptr, nullptr }
     },
 };
 
@@ -216,6 +220,7 @@ void DisplayRendererColor::begin() {
     lastAnimTickMs_         = millis();
     lastRenderCallMs_       = millis();
     actionAnimRemainingMs_  = 0;
+    actionAnimTotalMs_      = 0;
     actionAnimMood_         = MoodColor::Idle;
     hatchAnimRemainingMs_   = 0;
     evolveAnimRemainingMs_  = 0;
@@ -242,18 +247,23 @@ void DisplayRendererColor::begin() {
 // =============================================================================
 // loadSprites_ — precarga los sprites de las 6 etapas de vida en PSRAM.
 //
-// Etapa      Anims  Frames  Bytes
-// egg        1      6       27 648
-// baby       5      23     106 368
-// kid        5      23     106 368
-// adult      5      23     106 368
-// old        5      23     106 368
-// ghost      1      6       27 648
-// Total      22     104    480 768  ≈ 470 KB
+// Etapa      Anims  Frames  Bytes      (48×48 RGB565 = 4 608 B/frame)
+// egg        1      2         9 216
+// baby       6      31      142 848    (idle6 happy4 sad4 eat5 sleep4 jump8)
+// kid        5      23      105 984
+// adult      5      23      105 984
+// old        5      23      105 984
+// ghost      1      6        27 648
+// Total      23     108     497 664  ≈ 486 KB
 //
 // Con ~1.9 MB de PSRAM disponible, caben con margen amplio.
 // Los slots sin animación propia (nullptr) se dejan a count=0;
-// framesForMood_() cae a Idle de la misma etapa como fallback.
+// framesForMood_() aplica la cadena de fallback de MoodLogic::resolveMood().
+//
+// Jump es OPCIONAL: si no se puede cargar (LittleFS de una versión anterior,
+// flasheado sin `uploadfs`) se loguea WARN y NO se marca el fallo global:
+// spritesLoaded_=false dejaría al personaje sin sprite en TODAS las etapas,
+// y un salto ausente ya tiene fallback (Play se ve como happy).
 // =============================================================================
 
 bool DisplayRendererColor::loadSprites_() {
@@ -276,7 +286,10 @@ bool DisplayRendererColor::loadSprites_() {
             }
             bool ok = sprites_.loadAnimation(spec.spriteId, animName,
                                              dst.frames[mi]);
-            if (!ok) {
+            if (!ok && mi == static_cast<uint8_t>(MoodColor::Jump)) {
+                LOG_WARN("Sin anim opcional stage=%u anim=%s — Play cae a happy",
+                         stageIdx, animName);
+            } else if (!ok) {
                 LOG_ERROR("Fallo cargando stage=%u mood=%u anim=%s",
                           stageIdx, mi, animName);
                 allOk = false;
@@ -386,69 +399,78 @@ void DisplayRendererColor::setBattery(uint8_t percent, bool charging, bool valid
 // Mapeo acción → MoodColor para la animación one-shot del personaje (canal 1)
 // y → overlay sprite para el canal de overlay (canal 2).
 //
-// Canal 1 (mood del personaje):
+// Canal 1 (mood del personaje) — MoodLogic::moodForAction():
 //   Feed       → Eat   (masticar — único que no tiene overlay)
-//   Play       → Happy
+//   Play       → Jump  (salto; en etapas sin "jump" cae a Happy → Idle)
 //   Medicate   → Happy
 //   Discipline → Sad
 //   Clean      → Idle  (badge de caca ya desapareció por applyClean())
+//   Lights/Stats → sin one-shot
 //
-// Canal 2 (overlay encima del personaje):
+// Canal 2 (overlay encima del personaje) — overlayForAction_():
 //   Clean      → broom   (escoba)
 //   Medicate   → syringe (jeringa)
-//   Play       → ball    (pelota)
+//   Play       → ball    (pelota, se mantiene también durante el salto)
 //   Feed       → sin overlay (la animación de comer es suficiente)
 //
-// framesForMood_() aplicará fallback a Idle si la etapa no tiene ese mood
-// (e.g. Egg/Ghost no tienen happy/sad/eat — muestran idle igualmente).
+// El mood se resuelve YA contra la etapa actual (MoodLogic::resolveMood) para
+// conocer el nº de frames y fps reales de la animación que se va a ver: la
+// duración es max(kActionAnimDurationMs, ciclo completo) — el salto del baby
+// (8 frames × 250 ms = 2000 ms) no se corta, y happy/sad/eat de siempre siguen
+// durando ~1200 ms. El overlay usa la MISMA duración para no desaparecer a
+// mitad del salto. El frame del personaje se calcula por tiempo desde este
+// disparo (ver drawSprite_), así que el salto empieza siempre desde el suelo.
 void DisplayRendererColor::triggerActionAnimation(ActionKind action) {
-    MoodColor mood = MoodColor::Idle;
-    // Pointer al ColorSpriteFrames del overlay, nullptr si esta acción no tiene.
-    const ColorSpriteFrames* overlay = nullptr;
-
-    switch (action) {
-        case ActionKind::Feed:
-            // Solo cambia el mood a Eat; sin overlay para no tapar la animación de comer.
-            mood = MoodColor::Eat;
-            break;
-        case ActionKind::Play:
-            mood    = MoodColor::Happy;
-            overlay = (overlayBall_.count > 0) ? &overlayBall_ : nullptr;
-            break;
-        case ActionKind::Medicate:
-            mood    = MoodColor::Happy;
-            overlay = (overlaySyringe_.count > 0) ? &overlaySyringe_ : nullptr;
-            break;
-        case ActionKind::Discipline:
-            mood = MoodColor::Sad;
-            break;
-        case ActionKind::Clean:
-            // Idle: la animación neutral refleja la limpieza; el badge de caca
-            // desaparece porque poopCount ya fue reseteado por applyClean().
-            mood    = MoodColor::Idle;
-            overlay = (overlayBroom_.count > 0) ? &overlayBroom_ : nullptr;
-            break;
-        case ActionKind::Lights:
-        case ActionKind::Stats:
-            // Lights no dispara animación one-shot (permanente vía isSleeping); Stats no es una acción.
-            return;
+    MoodColor requested = MoodColor::Idle;
+    if (!MoodLogic::moodForAction(action, requested)) {
+        // Lights no dispara one-shot (permanente vía isSleeping); Stats no es una acción.
+        return;
     }
+
+    const ColorSpriteFrames* overlay = overlayForAction_(action);
+
+    const MoodColor mood = resolveMoodForStage_(lifeStage_, requested);
+    const ColorSpriteFrames* frames = framesForMood_(lifeStage_, mood);
+    const uint8_t frameCount = (frames != nullptr) ? frames->count : 0;
+    const uint8_t fps        = (frames != nullptr) ? frames->fps   : 0;
+    const uint32_t durationMs = MoodLogic::actionAnimDurationMs(
+        frameCount, fps, SPRITE_ANIM_SLOWDOWN, kActionAnimDurationMs);
 
     // Canal 1: mood del personaje
     actionAnimMood_        = mood;
-    actionAnimRemainingMs_ = kActionAnimDurationMs;
+    actionAnimTotalMs_     = durationMs;
+    actionAnimRemainingMs_ = durationMs;
 
     // Canal 2: overlay one-shot (puede ser nullptr si la acción no lo usa)
     overlayAnimFrames_      = overlay;
-    overlayAnimRemainingMs_ = (overlay != nullptr) ? kActionAnimDurationMs : 0u;
+    overlayAnimRemainingMs_ = (overlay != nullptr) ? durationMs : 0u;
     overlayAnimFrame_       = 0;
     overlayAnimLastTickMs_  = millis();
 
-    LOG_INFO("[anim] triggerActionAnimation action=%u mood=%u overlay=%s dur=%ums",
+    LOG_INFO("[anim] triggerActionAnimation action=%u mood=%u (pedido=%u) frames=%u overlay=%s dur=%ums",
              static_cast<unsigned>(action),
              static_cast<unsigned>(mood),
+             static_cast<unsigned>(requested),
+             static_cast<unsigned>(frameCount),
              overlay ? "yes" : "no",
-             static_cast<unsigned>(kActionAnimDurationMs));
+             static_cast<unsigned>(durationMs));
+}
+
+// overlayForAction_ — sprite del canal 2 para cada acción. nullptr si la
+// acción no tiene overlay o si su sprite no se pudo cargar (count == 0).
+const ColorSpriteFrames* DisplayRendererColor::overlayForAction_(ActionKind action) const {
+    const ColorSpriteFrames* overlay = nullptr;
+    switch (action) {
+        case ActionKind::Play:     overlay = &overlayBall_;    break;
+        case ActionKind::Medicate: overlay = &overlaySyringe_; break;
+        case ActionKind::Clean:    overlay = &overlayBroom_;   break;
+        case ActionKind::Feed:
+        case ActionKind::Discipline:
+        case ActionKind::Lights:
+        case ActionKind::Stats:
+            break;
+    }
+    return (overlay != nullptr && overlay->count > 0) ? overlay : nullptr;
 }
 
 void DisplayRendererColor::triggerHatchAnimation() {
@@ -661,32 +683,47 @@ MoodColor DisplayRendererColor::computeMood_() const {
 }
 
 // =============================================================================
+// stageSprites_ — buffers de la etapa; un LifeStage fuera de rango (estado
+// persistido corrupto) cae al Baby, igual que antes de MoodLogic.
+// =============================================================================
+
+const StageSprites& DisplayRendererColor::stageSprites_(LifeStage stage) const {
+    uint8_t stageIdx = static_cast<uint8_t>(stage);
+    if (stageIdx >= 6) stageIdx = static_cast<uint8_t>(LifeStage::Baby);
+    return spritesByStage_[stageIdx];
+}
+
+// =============================================================================
+// resolveMoodForStage_ — mood que realmente se puede pintar en `stage`:
+// MoodLogic::resolveMood() sobre los moods con frames cargados (count > 0).
+//   Jump → Happy → Idle   (solo el baby tiene "jump")
+//   Sleep/Sad/Eat/Happy → Idle (egg/ghost solo tienen idle)
+// =============================================================================
+
+MoodColor DisplayRendererColor::resolveMoodForStage_(LifeStage stage,
+                                                     MoodColor mood) const {
+    const StageSprites& ss = stageSprites_(stage);
+    bool hasFrames[kMoodCount];
+    for (uint8_t i = 0; i < kMoodCount; ++i) {
+        hasFrames[i] = ss.frames[i].count > 0;
+    }
+    return MoodLogic::resolveMood(mood, hasFrames);
+}
+
+// =============================================================================
 // framesForMood_ — devuelve el buffer de animación para (stage, mood).
 //
-// Prioridad:
-//   1. isSleeping → Sleep (índice 4); si count==0, cae a Idle de la etapa.
-//   2. mood recibido (Idle/Happy/Sad/Eat).
-//   3. Fallback: Idle de la misma etapa (siempre debe existir).
+// El mood pedido (isSleeping → Sleep vía computeMood_(), o el one-shot de una
+// acción) se resuelve con la cadena de fallback de MoodLogic contra los frames
+// de la etapa; Idle es el ancla final (siempre presente para las 6 etapas).
 // =============================================================================
 
 const ColorSpriteFrames* DisplayRendererColor::framesForMood_(LifeStage stage,
                                                                MoodColor mood) const {
     if (!spritesLoaded_) return nullptr;
 
-    uint8_t stageIdx = static_cast<uint8_t>(stage);
-    if (stageIdx >= 6) stageIdx = static_cast<uint8_t>(LifeStage::Baby);
-
-    const StageSprites& ss = spritesByStage_[stageIdx];
-    uint8_t moodIdx = static_cast<uint8_t>(mood);
-
-    // Try the requested mood animation; fall back to Idle of same stage.
-    if (moodIdx < kMoodCount) {
-        const ColorSpriteFrames* candidate = &ss.frames[moodIdx];
-        if (candidate->count > 0) return candidate;
-    }
-
-    // Fallback: idle de la etapa (siempre presente para las 6 etapas)
-    return &ss.frames[static_cast<uint8_t>(MoodColor::Idle)];
+    const MoodColor resolved = resolveMoodForStage_(stage, mood);
+    return &stageSprites_(stage).frames[static_cast<uint8_t>(resolved)];
 }
 
 // =============================================================================
@@ -1099,7 +1136,17 @@ void DisplayRendererColor::drawSprite_() {
     const int16_t spriteY = zoneTop + (zoneH - spriteH) / 2;
 
     if (frames != nullptr && frames->count > 0 && frames->w > 0) {
-        uint8_t frameIdx = static_cast<uint8_t>(animFrame_ % frames->count);
+        // One-shot de acción: frame por tiempo desde el disparo (empieza en el
+        // frame 0 y el último frame del salto se ve entero — ver
+        // MoodLogic::oneShotFrameIndex). Resto: contador global animFrame_.
+        uint8_t frameIdx;
+        if (actionAnimRemainingMs_ > 0) {
+            const uint32_t elapsedMs = actionAnimTotalMs_ - actionAnimRemainingMs_;
+            frameIdx = MoodLogic::oneShotFrameIndex(elapsedMs, frames->count,
+                                                    frames->fps, SPRITE_ANIM_SLOWDOWN);
+        } else {
+            frameIdx = static_cast<uint8_t>(animFrame_ % frames->count);
+        }
         const uint16_t* pixels = frames->frames[frameIdx];
         if (pixels != nullptr) {
             drawSpriteScaled_(&canvas_,
