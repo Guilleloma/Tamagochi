@@ -9,6 +9,9 @@ Este repositorio contiene **dos variantes de firmware** para el mismo Tamagotchi
 
 El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 292 tests `native` aplican a las dos.
 
+- **Guía de montaje del Furbygotchi (ESP32-S3):** <https://makerisland.es/projects/furbygotchi/montaje>
+- **Licencia:** MIT, ver [`LICENSE`](LICENSE).
+
 ---
 
 ## Variante ESP8266 mono
@@ -322,7 +325,7 @@ Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vid
 | MCU | Waveshare ESP32-S3 Zero (ESP32-S3FH4R2: 4 MB flash, 2 MB PSRAM) |
 | Display | TFT SPI JD9853 240×296 IPS color |
 | Librería display | Arduino_GFX v1.3.7 (fijada por compatibilidad con arduino-esp32 core 2.0.17 / IDF4) |
-| Botón | BOOT / GPIO0 (active-LOW — **no mantener pulsado en reset**: pin de strapping) |
+| Botón | Módulo táctil TTP223 en GPIO4 — VCC/GND/I/O, salida active-HIGH, sin pull-up interno (GPIO4 no es pin de strapping) |
 
 **Medidor de batería:** firmware (`lib/core/BatteryGauge/`, 25 tests host), icono TFT y API listos (`batteryValid`/`batteryPercent`/`batteryCharging` en `/api/v1/state`); la soldadura del divisor (GPIO1) y del sensado de carga (GPIO2) está **pendiente** — hasta entonces el icono permanece oculto. Para depurar la soldadura, el panel **Sistema → Batería (diagnóstico)** del dashboard muestra `batteryRawMillivolts` (ADC crudo, nunca gateado) y `batteryGateProgress` (racha 0-8 hacia la validez). Guía completa de soldadura en [`docs/hardware-battery.md`](docs/hardware-battery.md).
 
