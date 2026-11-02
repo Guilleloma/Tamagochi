@@ -416,6 +416,12 @@ pio run -e esp32s3_ota -t upload
 pio test -e native
 ```
 
+> **Puerto serie:** `platformio.ini` no fija ningún puerto USB, así que PlatformIO detecta la placa solo. Si hay varias placas conectadas o elige la que no es, indica el puerto al llamar (`pio device list` muestra los disponibles):
+> ```bash
+> pio run -e esp32s3 -t upload --upload-port /dev/cu.usbmodemXXXX   # macOS; en Linux /dev/ttyACM0, en Windows COM5
+> pio device monitor --port /dev/cu.usbmodemXXXX
+> ```
+>
 > **Plataforma fijada:** `esp32s3` usa `espressif32@6.10.0` (arduino-esp32 core 2.0.17). Arduino_GFX 1.3.7 no compila con el core 3.x, así que no subas la plataforma sin subir también la librería.
 
 #### Tabla de particiones propia (4 MB)
