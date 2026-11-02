@@ -7,7 +7,7 @@
 #
 # Uso:
 #   HOST=tamagotchi.local AUTH_USER=admin AUTH_PASS=tu_pass ./scripts/integration_test.sh
-#   HOST=192.168.x.x   AUTH_USER=admin AUTH_PASS=tu_pass ./scripts/integration_test.sh
+#   HOST=192.168.x.x      AUTH_USER=admin AUTH_PASS=tu_pass ./scripts/integration_test.sh
 #
 # Cuidado: NO usar la variable USER del entorno; es el username del SO en macOS.
 #
@@ -19,6 +19,10 @@ set -u  # tratar variables no definidas como error; NO -e (queremos seguir tras 
 HOST="${HOST:-tamagotchi.local}"
 AUTH_USER="${AUTH_USER:-admin}"
 AUTH_PASS="${AUTH_PASS:-}"
+if [[ -z "$AUTH_PASS" ]]; then
+    echo "Falta AUTH_PASS (la WEB_AUTH_PASSWORD de include/secrets.h)." >&2
+    exit 1
+fi
 BASE="http://${HOST}"
 AUTH="-u ${AUTH_USER}:${AUTH_PASS}"
 TIMEOUT="${TIMEOUT:-15}"

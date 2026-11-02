@@ -9,6 +9,9 @@ Este repositorio contiene **dos variantes de firmware** para el mismo Tamagotchi
 
 El dominio de negocio (StatsEngine / LifeFSM / Persistence) es **compartido por ambas variantes**. Los 292 tests `native` aplican a las dos.
 
+- **Guía de montaje del Furbygotchi (ESP32-S3):** <https://makerisland.es/projects/furbygotchi/montaje>
+- **Licencia:** MIT, ver [`LICENSE`](LICENSE).
+
 ---
 
 ## Variante ESP8266 mono
@@ -244,7 +247,7 @@ Además de `firmwareVersion`, `uptimeMs`, `freeHeap`, `wifiRssi`:
 
 **Rate limiting:** token bucket por IP, 10 tokens iniciales + 1 token/600 ms. 429 si se agota.
 
-**Errores:** formato estándar (`code` / `message` / `details`) según `docs/api-conventions.md`.
+**Errores:** formato estándar (`code` / `message` / `details`).
 
 ### Tests de integración HTTP
 
@@ -322,7 +325,7 @@ Tamagotchi a color con sprites pixel-art RGB565 que evolucionan por etapa de vid
 | MCU | Waveshare ESP32-S3 Zero (ESP32-S3FH4R2: 4 MB flash, 2 MB PSRAM) |
 | Display | TFT SPI JD9853 240×296 IPS color |
 | Librería display | Arduino_GFX v1.3.7 (fijada por compatibilidad con arduino-esp32 core 2.0.17 / IDF4) |
-| Botón | BOOT / GPIO0 (active-LOW — **no mantener pulsado en reset**: pin de strapping) |
+| Botón | Módulo táctil TTP223 en GPIO4 — VCC/GND/I/O, salida active-HIGH, sin pull-up interno (GPIO4 no es pin de strapping) |
 
 **Medidor de batería:** firmware (`lib/core/BatteryGauge/`, 25 tests host), icono TFT y API listos (`batteryValid`/`batteryPercent`/`batteryCharging` en `/api/v1/state`); la soldadura del divisor (GPIO1) y del sensado de carga (GPIO2) está **pendiente** — hasta entonces el icono permanece oculto. Para depurar la soldadura, el panel **Sistema → Batería (diagnóstico)** del dashboard muestra `batteryRawMillivolts` (ADC crudo, nunca gateado) y `batteryGateProgress` (racha 0-8 hacia la validez). Guía completa de soldadura en [`docs/hardware-battery.md`](docs/hardware-battery.md).
 
@@ -368,7 +371,7 @@ Al ejecutar **Play** desde el menú del botón, el furby-baby da un **salto** (`
 - Para reexportar los sprites del baby desde Pixel Sprites hay que pasar `--folder baby` y **las 6 animaciones** (el upsert del manifest reemplaza la entrada entera):
   ```bash
   node tools/export-esp32.mjs --id 797ec06d-c81f-4f02-882a-df63976879b6 --folder baby \
-    --animations idle,happy,sad,eat,sleep,jump --merge-into ~/Tamagochi/data/sprites/manifest.json
+    --animations idle,happy,sad,eat,sleep,jump --merge-into <ruta-a-este-repo>/data/sprites/manifest.json
   ```
 
 ### Mensajes del padre (marquee)
@@ -412,6 +415,14 @@ pio run -e esp32s3_ota -t upload
 # Tests host-native (aplican a ambas variantes)
 pio test -e native
 ```
+
+> **Puerto serie:** `platformio.ini` no fija ningún puerto USB, así que PlatformIO detecta la placa solo. Si hay varias placas conectadas o elige la que no es, indica el puerto al llamar (`pio device list` muestra los disponibles):
+> ```bash
+> pio run -e esp32s3 -t upload --upload-port /dev/cu.usbmodemXXXX   # macOS; en Linux /dev/ttyACM0, en Windows COM5
+> pio device monitor --port /dev/cu.usbmodemXXXX
+> ```
+>
+> **Plataforma fijada:** `esp32s3` usa `espressif32@6.10.0` (arduino-esp32 core 2.0.17). Arduino_GFX 1.3.7 no compila con el core 3.x, así que no subas la plataforma sin subir también la librería.
 
 #### Tabla de particiones propia (4 MB)
 
@@ -562,4 +573,4 @@ Stats tiene **2 páginas** en el TFT. La 1/2 ya ocupa todo el alto (barras, flag
 - **`/api/v1/reset`** — endpoint para forzar resurrección (huevo nuevo) desde la web. Planeado pero no implementado en Fase 3.
 - **`actionApplied` de `lights`** (antes `sleep`) — sigue reportando `amount: 1`/`0` en lugar de `value: true/false` (cosmético).
 
-Planes completos en `docs/fase-1-plan.md`, `docs/fase-2-plan.md` y `docs/fase-3-plan.md`. Plan maestro en `docs/plan.md`.
+Planes completos en `docs/fase-1-plan.md`, `docs/fase-2-plan.md` y `docs/fase-3-plan.md`.
