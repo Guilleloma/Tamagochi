@@ -247,7 +247,7 @@ Además de `firmwareVersion`, `uptimeMs`, `freeHeap`, `wifiRssi`:
 
 **Rate limiting:** token bucket por IP, 10 tokens iniciales + 1 token/600 ms. 429 si se agota.
 
-**Errores:** formato estándar (`code` / `message` / `details`) según `docs/api-conventions.md`.
+**Errores:** formato estándar (`code` / `message` / `details`).
 
 ### Tests de integración HTTP
 
@@ -371,7 +371,7 @@ Al ejecutar **Play** desde el menú del botón, el furby-baby da un **salto** (`
 - Para reexportar los sprites del baby desde Pixel Sprites hay que pasar `--folder baby` y **las 6 animaciones** (el upsert del manifest reemplaza la entrada entera):
   ```bash
   node tools/export-esp32.mjs --id 797ec06d-c81f-4f02-882a-df63976879b6 --folder baby \
-    --animations idle,happy,sad,eat,sleep,jump --merge-into ~/Tamagochi/data/sprites/manifest.json
+    --animations idle,happy,sad,eat,sleep,jump --merge-into <ruta-a-este-repo>/data/sprites/manifest.json
   ```
 
 ### Mensajes del padre (marquee)
@@ -573,4 +573,4 @@ Stats tiene **2 páginas** en el TFT. La 1/2 ya ocupa todo el alto (barras, flag
 - **`/api/v1/reset`** — endpoint para forzar resurrección (huevo nuevo) desde la web. Planeado pero no implementado en Fase 3.
 - **`actionApplied` de `lights`** (antes `sleep`) — sigue reportando `amount: 1`/`0` en lugar de `value: true/false` (cosmético).
 
-Planes completos en `docs/fase-1-plan.md`, `docs/fase-2-plan.md` y `docs/fase-3-plan.md`. Plan maestro en `docs/plan.md`.
+Planes completos en `docs/fase-1-plan.md`, `docs/fase-2-plan.md` y `docs/fase-3-plan.md`.
