@@ -416,6 +416,8 @@ pio run -e esp32s3_ota -t upload
 pio test -e native
 ```
 
+> **Plataforma fijada:** `esp32s3` usa `espressif32@6.10.0` (arduino-esp32 core 2.0.17). Arduino_GFX 1.3.7 no compila con el core 3.x, así que no subas la plataforma sin subir también la librería.
+
 #### Tabla de particiones propia (4 MB)
 
 El ESP32-S3 usa `partitions/esp32s3_4mb_ota_fs.csv` (la heredan `esp32s3_turbo` y `esp32s3_ota`) en lugar de `default.csv`, porque los sprites ya no cabían: con el `jump` del baby, `buildfs` fallaba con `lfs_write error(-28): File system is full`.
