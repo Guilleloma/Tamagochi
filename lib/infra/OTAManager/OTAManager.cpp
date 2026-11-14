@@ -24,6 +24,7 @@
 // ESP32-S3: ver comentario largo en onProgress_() más abajo.
 #if defined(ARDUINO_ARCH_ESP32)
 #include <esp_task_wdt.h>
+#include "WifiCredentials.h"   // hostname mDNS configurable desde el portal AP
 #endif
 
 // Definición del puntero singleton — nullptr hasta que se construya el objeto.
@@ -50,7 +51,16 @@ void OTAManager::begin() {
         return;
     }
 
-    ArduinoOTA.setHostname(OTA_HOSTNAME);
+    // Hostname efectivo: el configurado desde el portal AP (NVS) o, si no hay,
+    // OTA_HOSTNAME de secrets.h. En ESP8266 (sin NVS) siempre el de secrets.h.
+    char host[33];
+#if defined(ARDUINO_ARCH_ESP32)
+    WifiCredentials::effectiveHostname(host, sizeof(host), OTA_HOSTNAME);
+#else
+    strncpy(host, OTA_HOSTNAME, sizeof(host) - 1);
+    host[sizeof(host) - 1] = '\0';
+#endif
+    ArduinoOTA.setHostname(host);
     ArduinoOTA.setPassword(OTA_PASSWORD);  // hashea a MD5 internamente
     // NO fijar setPort() — bug de porting: este código viene de la Fase 2
     // ESP8266 con `setPort(8266)` hardcodeado. Al portar a ESP32-S3 (Fase 5)
@@ -69,7 +79,7 @@ void OTAManager::begin() {
     ArduinoOTA.begin();
     ready_ = true;
 
-    LOG_INFO("[ota] ready hostname=%s.local", OTA_HOSTNAME);
+    LOG_INFO("[ota] ready hostname=%s.local", host);
 }
 
 // -----------------------------------------------------------------------------

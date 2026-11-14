@@ -65,6 +65,9 @@
 #include "MessageBox.h"
 #include "BootLoopGuard.h"   // anti-boot-loop del watchdog de conectividad (hito 9)
 #include "ScreenPowerLogic.h" // apagado de pantalla por inactividad (ahorro de batería)
+#if defined(WIFI_PROVISIONING)
+  #include "WifiProvisioning.h"  // portal AP para configurar WiFi sin reflashear
+#endif
 
 // =============================================================================
 // Verificación de versión de firmware en compile-time.
@@ -120,6 +123,14 @@ static DisplayRendererColor*  renderer     = nullptr;
 // y el juego funciona completamente offline sin intentar conectar.
 static WifiManager wifi(bus);
 static OTAManager  ota(bus);
+#if defined(WIFI_PROVISIONING)
+// WifiProvisioning: portal cautivo en modo AP. Solo se arranca cuando no hay
+// credenciales (ni NVS ni secrets.h). Mientras está activo, los módulos STA de
+// red (OTA/WebUI) permanecen dormidos (nunca se llega a Connected). Ver
+// setup()/loop() y lib/infra/WifiProvisioning.
+static WifiProvisioning provisioning;
+static bool             provisioningMode = false;
+#endif
 // BatteryMonitor: ADC del divisor de batería (aún sin soldar, ver
 // docs/hardware-battery.md) — hasta entonces se autodetecta como Unknown.
 // No depende de WiFi; funciona igual online/offline.
@@ -462,12 +473,12 @@ static void onWifiStateChanged(const Event& e) {
         // antes de tocar mDNS, ver OTAManager.cpp).
         bool mdnsReady = ota.isReady();
         if (!mdnsReady) {
-            mdnsReady = MDNS.begin(OTA_HOSTNAME);
+            mdnsReady = MDNS.begin(wifi.hostname());
             if (!mdnsReady) LOG_WARN("[mdns] begin failed — continuando sin mDNS");
         }
         if (mdnsReady) {
             MDNS.addService("http", "tcp", 80);
-            LOG_INFO("[mdns] hostname=%s.local  http service registered", OTA_HOSTNAME);
+            LOG_INFO("[mdns] hostname=%s.local  http service registered", wifi.hostname());
         }
     } else {
         // Cualquier estado distinto de Connected: detener OTA y WebUI si estaban activos.
@@ -968,6 +979,18 @@ void setup() {
     renderer->setWifiState(wifi.state());
     refreshNetworkInfo_();
 
+#if defined(WIFI_PROVISIONING)
+    // Sin credenciales (ni NVS ni secrets.h) → levantar el portal de
+    // configuración AP en vez de quedarse offline en silencio. El usuario se
+    // conecta a la red "Furbigotty-setup" con el móvil, elige su WiFi y mete la
+    // contraseña; se guarda en NVS y el dispositivo se reinicia ya conectado.
+    if (!wifi.hasCredentials()) {
+        provisioning.begin("Furbigotty-setup");
+        provisioningMode = true;
+        LOG_INFO("[setup] modo portal AP activo — WebUI/OTA en pausa hasta configurar WiFi");
+    }
+#endif
+
     // ── Medidor de batería — independiente de WiFi, funciona offline ─────────
     battery.begin();
 
@@ -1014,6 +1037,16 @@ void setup() {
 // loop
 // =============================================================================
 void loop() {
+#if defined(WIFI_PROVISIONING)
+    // ── Modo portal AP: DNS cautivo + servidor de config; salta la red STA ───
+    // Mientras se configura el WiFi no hay conexión cliente, así que OTA/WebUI
+    // no tienen nada que hacer. provisioning.loop() también ejecuta el reinicio
+    // diferido tras guardar credenciales (vuelve en modo cliente normal).
+    if (provisioningMode) {
+        provisioning.loop();
+    } else
+#endif
+    {
     // ── Red: WiFi poll + OTA + WebUI ─────────────────────────────────────────
     // Guard internos en cada módulo: coste < 1 µs cuando no hay actividad.
     // Con WIFI_SSID vacío, wifi.loop() retorna inmediatamente (state==Disabled).
@@ -1023,6 +1056,7 @@ void loop() {
     // (reservado para extensiones futuras como WebSockets).
     if (webUI) webUI->loop();
     // En ESP32 NO llamar MDNS.update() — no existe / no es necesario.
+    }
 
     // ── Medidor de batería — guard interno kSampleIntervalMs=2000 ────────────
     battery.loop();
@@ -1173,8 +1207,16 @@ void loop() {
     // connectivityWatchdog_() comparte el mismo intervalo — última línea de
     // defensa si el re-begin no basta (ver su comentario).
     if (now - lastNetSupervisorMs >= NET_SUPERVISOR_INTERVAL_MS) {
-        netSupervisor_();
-        connectivityWatchdog_();
+#if defined(WIFI_PROVISIONING)
+        // En modo portal AP no hay conexión STA que supervisar ni watchdog que
+        // aplicar (reiniciaría el portal). Ambos son no-ops en ese estado, pero
+        // lo saltamos explícitamente para dejar la intención clara.
+        if (!provisioningMode)
+#endif
+        {
+            netSupervisor_();
+            connectivityWatchdog_();
+        }
         lastNetSupervisorMs = now;
     }
 
