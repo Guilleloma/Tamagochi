@@ -300,13 +300,17 @@ void WebUI::handleGetInfo_(AsyncWebServerRequest* req) {
     uint32_t    minFreeHeap    = 0;   // ESP8266 core no expone un equivalente
 #endif
 
+    // Hostname efectivo (configurable desde el portal AP) + ".local". Se toma de
+    // WifiManager::hostname() (NVS o OTA_HOSTNAME) en vez del literal de compile-time.
+    String hostLocal = String(wifi_.hostname()) + ".local";
+
     size_t len = JsonCodec::serializeInfo(
         FIRMWARE_VERSION,
         millis(),
         ESP.getFreeHeap(),
         WiFi.RSSI(),
         ipStr.c_str(),
-        OTA_HOSTNAME ".local",  // concatenación de literales en compile-time
+        hostLocal.c_str(),
         macStr.c_str(),
         batterySnapshot_(),
         batteryRawMillivolts_(),

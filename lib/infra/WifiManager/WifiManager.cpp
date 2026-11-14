@@ -22,6 +22,12 @@
 #include "WifiManager.h"
 #include "EventBus.h"
 #include "Logger.h"
+#include <string.h>
+// Credenciales persistentes en NVS (portal AP). Solo ESP32; en ESP8266 se usan
+// directamente los literales de secrets.h.
+#if defined(ARDUINO_ARCH_ESP32)
+  #include "WifiCredentials.h"
+#endif
 // Platform-conditional WiFi header: ESP32 uses <WiFi.h>, ESP8266 uses <ESP8266WiFi.h>.
 // Both expose the same WiFi API surface used here (WiFi.mode/begin/status/localIP/RSSI).
 #if defined(ARDUINO_ARCH_ESP32)
@@ -43,11 +49,31 @@ WifiManager::WifiManager(EventBus& bus)
 // Esto garantiza que el Tamagochi funcione offline sin intentar conectar.
 // -----------------------------------------------------------------------------
 void WifiManager::begin() {
-    if (strlen(WIFI_SSID) == 0) {
+    // Resolver credenciales efectivas: primero NVS (configuradas desde el portal
+    // AP), si no las de secrets.h. Así el portal puede fijar la red sin
+    // reflashear y secrets.h sigue sirviendo como valor por defecto de fábrica.
+    bool fromNvs = false;
+#if defined(ARDUINO_ARCH_ESP32)
+    fromNvs = WifiCredentials::load(ssid_, sizeof(ssid_), pass_, sizeof(pass_));
+    // Hostname mDNS: el guardado en el portal (NVS) o OTA_HOSTNAME por defecto.
+    WifiCredentials::effectiveHostname(host_, sizeof(host_), OTA_HOSTNAME);
+#else
+    strncpy(host_, OTA_HOSTNAME, sizeof(host_) - 1);
+    host_[sizeof(host_) - 1] = '\0';
+#endif
+    if (!fromNvs) {
+        strncpy(ssid_, WIFI_SSID, sizeof(ssid_) - 1);
+        ssid_[sizeof(ssid_) - 1] = '\0';
+        strncpy(pass_, WIFI_PASSWORD, sizeof(pass_) - 1);
+        pass_[sizeof(pass_) - 1] = '\0';
+    }
+
+    if (ssid_[0] == '\0') {
         state_ = WifiState::Disabled;
-        LOG_INFO("[wifi] SSID vacio en secrets.h — WiFi desactivado");
+        LOG_INFO("[wifi] sin credenciales (NVS ni secrets.h) — WiFi desactivado");
         return;
     }
+    LOG_INFO("[wifi] credenciales desde %s", fromNvs ? "NVS (portal)" : "secrets.h");
 
     // persistent(false): no escribe credenciales en la flash interna del ESP.
     // Evita desgaste innecesario de flash y evita que credenciales antiguas
@@ -67,7 +93,7 @@ void WifiManager::begin() {
     // OTAManager.cpp). setSleep(false) se mantiene porque sigue siendo una
     // mejora genuina de latencia/estabilidad de red, no como "fix" de OTA.
     WiFi.setSleep(false);
-    WiFi.hostname(OTA_HOSTNAME);
+    WiFi.hostname(host_);
 
 #if defined(ARDUINO_ARCH_ESP32)
     // Fuente de verdad rápida de conectividad (ver comentario de clase en el
@@ -86,14 +112,14 @@ void WifiManager::begin() {
     );
 #endif
 
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.begin(ssid_, pass_);
 
     state_              = WifiState::Connecting;
     connectStartedAtMs_ = millis();
     lastPollMs_         = millis();
 
     // Logueamos SSID (no sensible). Password nunca se loguea (rules/security.md).
-    LOG_INFO("[wifi] conectando a SSID=%s (hostname=%s)", WIFI_SSID, OTA_HOSTNAME);
+    LOG_INFO("[wifi] conectando a SSID=%s (hostname=%s)", ssid_, host_);
 }
 
 #if defined(ARDUINO_ARCH_ESP32)
@@ -190,8 +216,8 @@ void WifiManager::loop() {
     } else if (state_ == WifiState::Disconnected) {
         if (now - disconnectAtMs_ > kWifiRetryBackoffMs) {
             // Backoff expirado → reintentar conexión.
-            LOG_INFO("[wifi] reintentando conexion a SSID=%s", WIFI_SSID);
-            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+            LOG_INFO("[wifi] reintentando conexion a SSID=%s", ssid_);
+            WiFi.begin(ssid_, pass_);
             desired             = WifiState::Connecting;
             connectStartedAtMs_ = now;
         }
@@ -218,9 +244,9 @@ int8_t WifiManager::rssi() const {
 WifiInfo WifiManager::info() const {
     WifiInfo out;
     out.state          = state_;
-    out.ssidConfigured = (WIFI_SSID[0] != '\0');
-    out.ssid           = WIFI_SSID;
-    out.hostname       = OTA_HOSTNAME;
+    out.ssidConfigured = (ssid_[0] != '\0');
+    out.ssid           = ssid_;
+    out.hostname       = host_;
 
     if (state_ == WifiState::Connected) {
         const IPAddress ip = WiFi.localIP();
@@ -239,10 +265,10 @@ WifiInfo WifiManager::info() const {
 void WifiManager::logConnected_() const {
     const IPAddress ip = WiFi.localIP();
     LOG_INFO("[wifi] Conectado a '%s' IP=%u.%u.%u.%u host=%s.local",
-             WIFI_SSID,
+             ssid_,
              static_cast<unsigned>(ip[0]), static_cast<unsigned>(ip[1]),
              static_cast<unsigned>(ip[2]), static_cast<unsigned>(ip[3]),
-             OTA_HOSTNAME);
+             host_);
 }
 
 // -----------------------------------------------------------------------------
