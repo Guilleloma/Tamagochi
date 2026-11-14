@@ -1477,10 +1477,25 @@ void DisplayRendererColor::drawStatsHeader_() {
 // (click corto avanza: Stats 1/2 → Red 2/2 → pantalla principal).
 // =============================================================================
 
+int16_t DisplayRendererColor::safeInsetX_(int16_t y) const {
+    if (!kRound) return kSafeTextX;
+    // Geometría del círculo: a la altura y, la media cuerda es sqrt(R²-dy²);
+    // el inset izquierdo seguro es cx - media_cuerda (+ aire). Simétrico en X.
+    constexpr float R  = 118.0f;              // radio útil (120 - 2 px de aire)
+    const float cx = kScreenW * 0.5f;
+    const float cy = kScreenH * 0.5f;
+    const float dy = static_cast<float>(y) - cy;
+    const float d2 = R * R - dy * dy;
+    if (d2 <= 1.0f) return kScreenW / 2;      // fila prácticamente fuera del círculo
+    int16_t inset = static_cast<int16_t>(cx - sqrtf(d2)) + 4;  // +4 px de aire
+    return inset < kSafeTextX ? kSafeTextX : inset;
+}
+
 void DisplayRendererColor::drawStatsTitle_(const char* title, uint8_t page, int16_t y) {
+    const int16_t ins = safeInsetX_(y);
     canvas_.setTextColor(COL_YELLOW);
     canvas_.setTextSize(2);
-    canvas_.setCursor(kSafeTextX, y);
+    canvas_.setCursor(ins, y);
     canvas_.print(title);
 
     char pageBuf[8];
@@ -1489,11 +1504,13 @@ void DisplayRendererColor::drawStatsTitle_(const char* title, uint8_t page, int1
     const int16_t pageW = static_cast<int16_t>(strlen(pageBuf)) * NetInfoLogic::kFontCharW;
     canvas_.setTextColor(COL_GRAY);
     canvas_.setTextSize(1);
-    canvas_.setCursor(kScreenW - kSafeTextX - pageW, y + 4);
+    canvas_.setCursor(kScreenW - ins - pageW, y + 4);
     canvas_.print(pageBuf);
 
-    // Línea separadora dentro de la safe-area horizontal
-    canvas_.drawFastHLine(kEdgeInset, y + 18, kScreenW - 2 * kEdgeInset, COL_GRAY);
+    // Línea separadora siguiendo la curva del círculo a su altura
+    const int16_t sepY  = y + 18;
+    const int16_t sepIn = safeInsetX_(sepY);
+    canvas_.drawFastHLine(sepIn, sepY, kScreenW - 2 * sepIn, COL_GRAY);
 }
 
 // =============================================================================
@@ -1510,39 +1527,40 @@ void DisplayRendererColor::drawStatsTitle_(const char* title, uint8_t page, int1
 
 void DisplayRendererColor::drawStatsView_() {
     canvas_.fillScreen(COL_BG);
-    drawStatsHeader_();
+    // En pantalla redonda se omite la cabecera de esquina (etapa/edad/WiFi): su
+    // texto caería en las esquinas curvas y roba altura. El título centrado basta.
+    if (!kRound) drawStatsHeader_();
 
-    // Título — respeta la safe-area en X y arranca bajo la card superior
-    const int16_t contentStartY = kEdgeInset + kHudTopH + 8;
+    // Título — respeta la safe-area en X. En redondo arranca más arriba y
+    // compacto para que las 6 barras + textos quepan dentro del círculo.
+    const int16_t contentStartY = kRound ? 30 : (kEdgeInset + kHudTopH + 8);
     drawStatsTitle_("STATS", 1, contentStartY);
 
-    // Barras de stats — ancho ajustado para caber en safe-area.
-    // barW ocupa desde (kSafeTextX + 30) hasta (kScreenW - kEdgeInset - 30):
-    // con kSafeTextX=16 y kEdgeInset=8 → barra de ~156 px.
-    const int16_t barW = kScreenW - kSafeTextX - 30 - kEdgeInset - 30;
+    // Barras de stats — cada fila usa el inset del círculo a su altura, así que
+    // ancho y posición se adaptan a la curva (en 296 el inset es constante).
     const int16_t barH = 8;
-    const int16_t x0   = kSafeTextX;
-    int16_t       rowY = contentStartY + 34;
-    const int16_t rowH = 20;
+    int16_t       rowY = contentStartY + (kRound ? 24 : 34);
+    const int16_t rowH = kStatsRowH;
 
-    drawStatBar_(x0, rowY, barW, barH,
-                 100 - stats_.hunger, 100, "Hamb");  // invertida: lleno = bien
-    rowY += rowH;
-    drawStatBar_(x0, rowY, barW, barH, stats_.happiness,  100,  "Anim");
-    rowY += rowH;
-    drawStatBar_(x0, rowY, barW, barH, stats_.health,     100,  "Salu");
-    rowY += rowH;
-    drawStatBar_(x0, rowY, barW, barH, stats_.discipline, 100,  "Disc");
-    rowY += rowH;
-    drawStatBar_(x0, rowY, barW, barH, stats_.weight,     100,  "Peso");
-    rowY += rowH;
-    // attentionScore 0-1000 → mapear a 0-100 para la barra
-    drawStatBar_(x0, rowY, barW, barH,
-                 stats_.attentionScore / 10, 100, "Aten");
-    rowY += rowH + 8;
+    auto bar = [&](int v, int vmax, const char* lbl) {
+        const int16_t ins = safeInsetX_(rowY);
+        // drawStatBar_ ocupa: etiqueta(30) + barra(bw) + nº(21) desde x=ins.
+        int16_t bw = kScreenW - 2 * ins - 51;
+        if (bw < 40) bw = 40;
+        drawStatBar_(ins, rowY, bw, barH, v, vmax, lbl);
+        rowY += rowH;
+    };
+    bar(100 - stats_.hunger, 100, "Hamb");   // invertida: lleno = bien
+    bar(stats_.happiness,    100, "Anim");
+    bar(stats_.health,       100, "Salu");
+    bar(stats_.discipline,   100, "Disc");
+    bar(stats_.weight,       100, "Peso");
+    bar(stats_.attentionScore / 10, 100, "Aten");  // 0-1000 → 0-100
+    rowY += (kRound ? 4 : 8);
 
-    // Separador dentro de la safe-area
-    canvas_.drawFastHLine(kEdgeInset, rowY - 4, kScreenW - 2 * kEdgeInset, COL_GRAY);
+    // Separador siguiendo la curva del círculo a su altura
+    const int16_t sepIn = safeInsetX_(rowY - 4);
+    canvas_.drawFastHLine(sepIn, rowY - 4, kScreenW - 2 * sepIn, COL_GRAY);
 
     // Flags booleanos — a kSafeTextX para no tocar el borde físico
     canvas_.setTextColor(COL_WHITE);
@@ -1552,11 +1570,11 @@ void DisplayRendererColor::drawStatsView_() {
              stats_.isSick     ? 'Y' : 'N',
              stats_.isSleeping ? 'Y' : 'N',
              static_cast<unsigned>(stats_.poopCount));
-    canvas_.setCursor(kSafeTextX, rowY);
+    canvas_.setCursor(safeInsetX_(rowY), rowY);
     canvas_.print(flagBuf);
 
     // Edad
-    rowY += 16;
+    rowY += kStatsLineInc;
     char ageBuf[16];
     if (ageMinutes_ >= 60) {
         snprintf(ageBuf, sizeof(ageBuf), "Edad: %uh %um",
@@ -1566,15 +1584,15 @@ void DisplayRendererColor::drawStatsView_() {
         snprintf(ageBuf, sizeof(ageBuf), "Edad: %um",
                  static_cast<unsigned>(ageMinutes_));
     }
-    canvas_.setCursor(kSafeTextX, rowY);
+    canvas_.setCursor(safeInsetX_(rowY), rowY);
     canvas_.print(ageBuf);
 
     // DeathCount — clampado para no salir de la safe-area inferior
-    rowY += 16;
+    rowY += kStatsLineInc;
     if (rowY < kScreenH - kEdgeInset - 8) {
         char ripBuf[20];
         snprintf(ripBuf, sizeof(ripBuf), "RIPs: %u", static_cast<unsigned>(deathCount_));
-        canvas_.setCursor(kSafeTextX, rowY);
+        canvas_.setCursor(safeInsetX_(rowY), rowY);
         canvas_.print(ripBuf);
     }
 
@@ -1582,13 +1600,13 @@ void DisplayRendererColor::drawStatsView_() {
     // escena, ver drawBatteryIcon_). Mismo estilo tipográfico (size 1) que el
     // header de edad de arriba; " CHG" en amarillo si está cargando.
     if (batteryValid_) {
-        rowY += 16;
+        rowY += kStatsLineInc;
         if (rowY < kScreenH - kEdgeInset - 8) {
             char batBuf[12];
             snprintf(batBuf, sizeof(batBuf), "Bat: %u%%", static_cast<unsigned>(batteryPercent_));
             canvas_.setTextColor(COL_WHITE);
             canvas_.setTextSize(1);
-            canvas_.setCursor(kSafeTextX, rowY);
+            canvas_.setCursor(safeInsetX_(rowY), rowY);
             canvas_.print(batBuf);
             if (batteryCharging_) {
                 canvas_.setTextColor(COL_YELLOW);
@@ -1622,9 +1640,9 @@ void DisplayRendererColor::drawStatsView_() {
 
 void DisplayRendererColor::drawNetworkView_() {
     canvas_.fillScreen(COL_BG);
-    drawStatsHeader_();
+    if (!kRound) drawStatsHeader_();
 
-    const int16_t contentStartY = kEdgeInset + kHudTopH + 8;
+    const int16_t contentStartY = kRound ? 30 : (kEdgeInset + kHudTopH + 8);
     drawStatsTitle_("RED", 2, contentStartY);
 
     // ── Estado: "LED" de color + texto ───────────────────────────────────────
@@ -1639,12 +1657,13 @@ void DisplayRendererColor::drawNetworkView_() {
 
     static constexpr int16_t kLedR   = 5;
     static constexpr int16_t kLedGap = 6;
-    int16_t y = contentStartY + 28;
-    canvas_.fillCircle(kSafeTextX + kLedR, y + 8, kLedR, statusColor);
+    int16_t y = contentStartY + (kRound ? 22 : 28);
+    const int16_t ledIns = safeInsetX_(y + 8);
+    canvas_.fillCircle(ledIns + kLedR, y + 8, kLedR, statusColor);
 
     // "WiFi no configurada" (19 chars) no cabe a size 2 junto al LED → size 1,
     // centrado en la misma fila de 16 px.
-    const int16_t statusX     = kSafeTextX + 2 * kLedR + kLedGap;
+    const int16_t statusX     = ledIns + 2 * kLedR + kLedGap;
     const char*   statusLabel = NetInfoLogic::statusLabel(netStatus_);
     const bool    isLarge     = strlen(statusLabel) <=
         NetInfoLogic::maxCharsForWidth(kScreenW - kSafeTextX - statusX, kNetValueTextSize);
@@ -1654,8 +1673,8 @@ void DisplayRendererColor::drawNetworkView_() {
     canvas_.print(statusLabel);
 
     // ── Filas etiqueta + valor ───────────────────────────────────────────────
-    static constexpr int16_t kRowH = 34;  // 8 etiqueta + 2 + 16 valor + 8 aire
-    y += 26;
+    const int16_t kRowH = kRound ? 26 : 34;  // 8 etiqueta + 2 + 16 valor + aire
+    y += (kRound ? 20 : 26);
     const bool hasSsid = (netStatus_ != NetInfoLogic::NetStatus::NotConfigured);
     drawNetRow_("SSID", netSsidText_, hasSsid ? COL_WHITE : COL_GRAY, y);
     y += kRowH;
@@ -1669,7 +1688,7 @@ void DisplayRendererColor::drawNetworkView_() {
     // Barras a la derecha del texto de RSSI, con la base alineada al valor.
     const int16_t valueY   = y + 10;
     const int16_t charW    = NetInfoLogic::kFontCharW * kNetValueTextSize;
-    const int16_t barsX    = kSafeTextX + static_cast<int16_t>(strlen(netRssiText_)) * charW + 10;
+    const int16_t barsX    = safeInsetX_(y + 10) + static_cast<int16_t>(strlen(netRssiText_)) * charW + 10;
     drawRssiBars_(barsX, valueY + 15, netRssiBars_);
 
     canvas_.flush();
@@ -1678,14 +1697,18 @@ void DisplayRendererColor::drawNetworkView_() {
 // drawNetRow_ — etiqueta gris (size 1) en y, valor (size 2) en y+10.
 void DisplayRendererColor::drawNetRow_(const char* label, const char* value,
                                        uint16_t valueColor, int16_t y) {
+    // Inset conservador que cubre toda la altura de la fila (label + valor size 2).
+    const int16_t ia = safeInsetX_(y);
+    const int16_t ib = safeInsetX_(y + 26);
+    const int16_t ins = ia > ib ? ia : ib;
     canvas_.setTextColor(COL_GRAY);
     canvas_.setTextSize(1);
-    canvas_.setCursor(kSafeTextX, y);
+    canvas_.setCursor(ins, y);
     canvas_.print(label);
 
     canvas_.setTextColor(valueColor);
     canvas_.setTextSize(kNetValueTextSize);
-    canvas_.setCursor(kSafeTextX, y + 10);
+    canvas_.setCursor(ins, y + 10);
     canvas_.print(value);
 }
 

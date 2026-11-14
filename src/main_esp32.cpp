@@ -45,6 +45,17 @@
 
 #include "jd9853_panel.h"    // Arduino_JD9853, makeTftBus(), makeJD9853()
 
+// Polaridad del backlight. Por defecto active-HIGH (JD9853 / ESP32-S3 Zero).
+// La ESP32-S3-1.28inch-BOX tiene el BL (GPIO42) active-LOW: definir
+// TFT_BL_ACTIVE_LOW en el env invierte el sentido (LOW=encendido).
+#if defined(TFT_BL_ACTIVE_LOW)
+  #define BL_ON  LOW
+  #define BL_OFF HIGH
+#else
+  #define BL_ON  HIGH
+  #define BL_OFF LOW
+#endif
+
 #include "config.h"
 #include "secrets.h"         // WIFI_SSID, OTA_PASSWORD, WEB_AUTH_* (gitignored)
 #include "Logger.h"
@@ -91,9 +102,15 @@
 // Hardware — JD9853 240×296 IPS, canvas en PSRAM
 // =============================================================================
 static Arduino_DataBus* tftBus = makeTftBus();
+#if defined(PANEL_GC9A01)
+// ESP32-S3-1.28inch-BOX: panel redondo GC9A01 240×240.
+static Arduino_GFX*     tft    = makeGC9A01(tftBus);
+static Arduino_Canvas*  canvas = new Arduino_Canvas(SCREEN_W, SCREEN_H, tft);
+#else
 static Arduino_GFX*     tft    = makeJD9853(tftBus);
 // Canvas framebuffer (240×296 × 2 bytes RGB565 = ~138 KB en PSRAM).
 static Arduino_Canvas*  canvas = new Arduino_Canvas(240, 296, tft);
+#endif
 
 // =============================================================================
 // Singletons — orden de construcción importante.
@@ -229,7 +246,7 @@ static ScreenPowerLogic screenPower(SCREEN_TIMEOUT_MS);
 // "flash" del panel mientras entra en SLPIN) y luego tft->displayOff()
 // (SLPIN) para que el propio controlador reduzca consumo.
 static void sleepScreen() {
-    digitalWrite(TFT_BL, LOW);
+    digitalWrite(TFT_BL, BL_OFF);
     tft->displayOff();
     LOG_INFO("[screen] off");
 }
@@ -251,7 +268,7 @@ static void sleepScreen() {
 static void wakeScreen() {
     tft->displayOn();
     delay(120);
-    digitalWrite(TFT_BL, HIGH);
+    digitalWrite(TFT_BL, BL_ON);
     if (renderer) renderer->render();
     lastRenderMs = millis();
     LOG_INFO("[screen] on");
@@ -749,10 +766,19 @@ void setup() {
     LOG_WARN("=================================================");
 #endif
 
+#if defined(PANEL_POWER_EN)
+    // ── Power-enable del periférico (ESP32-S3-1.28inch-BOX: GPIO3) ─────────────
+    // Rail de alimentación de la pantalla/periféricos. Sin esto el panel no
+    // recibe corriente y no se ve nada, aunque tft->begin() devuelva OK.
+    pinMode(PANEL_POWER_EN, OUTPUT);
+    digitalWrite(PANEL_POWER_EN, HIGH);
+    delay(10);
+#endif
+
     // ── Backlight ─────────────────────────────────────────────────────────────
     // Activar antes del begin() del panel para que el usuario vea el splash.
     pinMode(TFT_BL, OUTPUT);
-    digitalWrite(TFT_BL, HIGH);
+    digitalWrite(TFT_BL, BL_ON);
 
     // ── Panel TFT ─────────────────────────────────────────────────────────────
     if (!tft->begin(27000000)) {
@@ -771,7 +797,12 @@ void setup() {
     // El panel físico tiene 320 líneas de GRAM, pero el canvas solo usa 296 con
     // row_offset=12 → las filas 0-11 y 308-319 nunca se escriben y muestran
     // basura aleatoria que asoma por las esquinas redondeadas del cristal.
+#if defined(PANEL_GC9A01)
+    // GC9A01: GRAM 240×240 1:1 con el canvas, sin filas muertas. Limpieza simple.
+    tft->fillScreen(0x0000);
+#else
     static_cast<Arduino_JD9853*>(tft)->clearNativePanel(0x0000);
+#endif
 
     // ── Canvas framebuffer en PSRAM ───────────────────────────────────────────
     if (!canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) {

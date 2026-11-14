@@ -153,3 +153,10 @@ inline Arduino_GFX* makeJD9853(Arduino_DataBus* bus) {
                                /*col_offset1=*/0, /*row_offset1=*/12,
                                /*col_offset2=*/0, /*row_offset2=*/12);
 }
+
+// ─── Panel GC9A01 (ESP32-S3-1.28inch-BOX, redondo 240×240) ────────────────────
+// Driver nativo de Arduino_GFX. Sin offsets (el GRAM del GC9A01 es 240×240 1:1).
+// IPS true: inversión de color activada (igual que TFT_INVERSION_ON en TFT_eSPI).
+inline Arduino_GFX* makeGC9A01(Arduino_DataBus* bus) {
+    return new Arduino_GC9A01(bus, TFT_RST, /*rotation=*/0, /*ips=*/true);
+}
