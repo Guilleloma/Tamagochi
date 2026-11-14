@@ -284,8 +284,16 @@ private:
     // ningún texto ni elemento quede oculto por la curvatura del panel.
 
     // Dimensiones visibles del panel (el GRAM nativo es 240×320 con row_offset=12).
-    static constexpr int16_t kScreenW = 240;
-    static constexpr int16_t kScreenH = 296;
+    // Overridable por build_flags (SCREEN_W/SCREEN_H) para otras placas, p.ej.
+    // la ESP32-S3-1.28inch-BOX con panel redondo GC9A01 240×240.
+#ifndef SCREEN_W
+#define SCREEN_W 240
+#endif
+#ifndef SCREEN_H
+#define SCREEN_H 296
+#endif
+    static constexpr int16_t kScreenW = SCREEN_W;
+    static constexpr int16_t kScreenH = SCREEN_H;
 
     // Margen desde el borde físico hasta el borde exterior de cualquier card.
     // 8 px da margen suficiente para la curvatura de esquina del cristal IPS.
@@ -300,8 +308,14 @@ private:
     // círculo recortado. Afinable en placa si el radio real difiere.
     static constexpr int16_t kCornerSafe = 28;
 
-    // Sangrado de texto dentro de la card: kEdgeInset + margen interior de 8 px.
-    static constexpr int16_t kSafeTextX = kEdgeInset + 8;
+    // Sangrado de texto dentro de la card: kEdgeInset + margen interior.
+    // En pantalla redonda (GC9A01 240×240) se usa más margen para que las filas
+    // altas/bajas no entren en la curva del círculo.
+#if defined(PANEL_GC9A01)
+    static constexpr int16_t kSafeTextX = kEdgeInset + 16;   // 24 px
+#else
+    static constexpr int16_t kSafeTextX = kEdgeInset + 8;    // 16 px
+#endif
 
     // ── Página de red (NetworkView) ──────────────────────────────────────────
     // Valores (SSID / IP / host / RSSI) a textSize 2 en el ancho seguro
@@ -333,6 +347,20 @@ private:
 
     // Altura de la card del HUD inferior (label de acción + cursor dots).
     static constexpr int16_t kHudBottomH = 60;
+
+    // ── Métricas compactas para pantalla redonda (GC9A01 240×240) ─────────────
+    // El layout original es para 240×296 (rectangular). En el círculo de 240 las
+    // vistas de texto (Stats/Red) se salen por arriba y por abajo, así que se
+    // compactan y se centran en la banda segura del círculo (~y=30..195).
+#if defined(PANEL_GC9A01)
+    static constexpr bool    kRound        = true;
+    static constexpr int16_t kStatsRowH    = 15;   // alto de fila de barra compacto
+    static constexpr int16_t kStatsLineInc = 13;   // separación entre líneas de texto
+#else
+    static constexpr bool    kRound        = false;
+    static constexpr int16_t kStatsRowH    = 20;
+    static constexpr int16_t kStatsLineInc = 16;
+#endif
 
     // Duración MÍNIMA de animación one-shot de acción (ms). La duración real es
     // MoodLogic::actionAnimDurationMs(): max(este mínimo, ciclo completo de la
@@ -414,6 +442,10 @@ private:
     // Título amarillo de la página + indicador "page/kStatsPageCount" a la
     // derecha + línea separadora. y = borde superior del título.
     void drawStatsTitle_(const char* title, uint8_t page, int16_t y);
+    // Inset horizontal mínimo (px desde el borde izq) para que una fila a altura
+    // y quede dentro del círculo en pantalla redonda. En 240×296 devuelve
+    // kSafeTextX constante; en redondo sigue la curva del cristal.
+    int16_t safeInsetX_(int16_t y) const;
     // Fila de la página de red: etiqueta gris (size 1) y valor (size 2) debajo.
     void drawNetRow_(const char* label, const char* value, uint16_t valueColor, int16_t y);
     // 4 barras de cobertura (0-4 rellenas) con la base en yBottom.

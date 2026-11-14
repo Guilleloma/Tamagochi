@@ -25,10 +25,20 @@
 //   - InputHandler debe instanciarse con activeLow=false, pullupActive=false.
 
 #if defined(ARDUINO_ARCH_ESP32)
-  // TTP223 en GPIO4 del ESP32-S3 Zero — active-HIGH, sin pull-up interno.
+  // Botón — overridable por build_flags para otras placas.
+  // ESP32-S3 Zero (original): TTP223 en GPIO4, active-HIGH, sin pull-up interno.
+  // ESP32-S3-1.28inch-BOX: GPIO4 lo usa el SCLK del TFT; se usa el botón BOOT
+  //   en GPIO0 (active-LOW, con pull-up). Definir PIN_BUTTON=0,
+  //   BUTTON_ACTIVE_LOW=true, BUTTON_PULLUP_ACTIVE=true en el env.
+  #ifndef PIN_BUTTON
   #define PIN_BUTTON           4
+  #endif
+  #ifndef BUTTON_ACTIVE_LOW
   #define BUTTON_ACTIVE_LOW    false
+  #endif
+  #ifndef BUTTON_PULLUP_ACTIVE
   #define BUTTON_PULLUP_ACTIVE false
+  #endif
 
   // ── Medidor de batería — ESP32-S3 Zero ──────────────────────────────────
   // El divisor de tensión (B+ → R1 100k → GPIO1 → R2 100k → GND) se soldará
